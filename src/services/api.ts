@@ -225,7 +225,7 @@ export type LoginResult = ShopSessionPayload | TwoFactorRequiredResponse;
 // ============================================================
 // ✅ آدرس مستقیم بک‌اند در Render
 // ============================================================
-const API_BASE = 'https://dokanyarshopi-backend-1.onrender.com';
+const API_BASE = 'https://dokanyarshopi-backend-full.onrender.com';
 // ============================================================
 
 export const getApiBaseUrl = (): string => API_BASE;
