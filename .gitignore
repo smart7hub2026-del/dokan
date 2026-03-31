@@ -7,3 +7,4 @@ server/backups/
 backups/
 server/data/database.json
 node_modules/ 
+node_modules/ 
