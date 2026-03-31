@@ -10,6 +10,7 @@ import { User, type Product } from '../data/mockData';
 import { useStore } from '../store/useStore';
 import { useApp } from '../context/AppContext';
 import { bookToProductForSale } from '../utils/bookInventory';
+import { formatDateByCalendar, formatWeekdayByCalendar, type CalendarMode } from '../utils/dateFormat';
 
 interface Props { currentUser: User; }
 
@@ -76,6 +77,7 @@ export default function ShopDashboard({ currentUser }: Props) {
   const products = useStore(s => s.products);
   const books = useStore(s => s.books);
   const shopSettings = useStore(s => s.shopSettings);
+  const calendarMode = (shopSettings.date_calendar || 'jalali') as CalendarMode;
   const invoices = useStore(s => s.invoices);
   const debts = useStore(s => s.debts);
   const expenses = useStore(s => s.expenses);
@@ -145,14 +147,10 @@ export default function ShopDashboard({ currentUser }: Props) {
       const ds = d.toISOString().slice(0, 10);
       const sales = invoices.filter(inv => inv.invoice_date === ds).reduce((s, x) => s + x.total, 0);
       const cost = expenses.filter(ex => ex.date === ds).reduce((s, x) => s + x.amount, 0);
-      out.push({
-        name: d.toLocaleDateString('fa-IR', { weekday: 'short' }),
-        sales,
-        cost,
-      });
+      out.push({ name: formatWeekdayByCalendar(d, calendarMode), sales, cost });
     }
     return out;
-  }, [invoices, expenses]);
+  }, [invoices, expenses, calendarMode]);
 
   const topSellingData = useMemo(() => {
     const cutoff = new Date();
@@ -213,9 +211,6 @@ export default function ShopDashboard({ currentUser }: Props) {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black text-white tracking-tight">{t('welcome_message')}، {currentUser.full_name}</h1>
-          <p className="text-slate-200 text-sm mt-1 font-medium flex items-center gap-2">
-            <Briefcase size={14} className="text-indigo-300" /> فقط از روی داده‌های همین دکان در سیستم — بدون پیش‌فرض نمونه
-          </p>
         </div>
         <div className="flex items-center gap-3">
           <div className="glass-dark rounded-xl px-4 py-2 flex items-center gap-2 border border-emerald-500/20 shadow-lg shadow-emerald-500/5">
@@ -393,7 +388,7 @@ export default function ShopDashboard({ currentUser }: Props) {
                   </div>
                   <div>
                     <p className="text-white text-sm font-black">{inv.customer_name}</p>
-                    <p className="text-slate-300 text-[10px] font-bold mt-0.5">{inv.invoice_number} • {inv.invoice_date}</p>
+                    <p className="text-slate-300 text-[10px] font-bold mt-0.5">{inv.invoice_number} • {formatDateByCalendar(inv.invoice_date, calendarMode)}</p>
                   </div>
                 </div>
                 <div className="text-left">

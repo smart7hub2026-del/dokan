@@ -126,7 +126,6 @@ export default function GlobalSearchModal({ onClose }: { onClose: () => void }) 
       { title: t('reports'), page: 'reports', icon: '📊' },
       { title: t('product_sales_ranking'), page: 'product-sales-ranking', icon: '📈' },
       { title: t('reorder_list_title'), page: 'reorder-list', icon: '📋' },
-      { title: t('image_search'), page: 'image-search', icon: '🖼️' },
     ].filter((p) => p.title.toLowerCase().includes(qq) || p.page.includes(qq));
     pages.forEach((p) => results.push({ ...p, type: 'page', subtitle: '' }));
   }
@@ -202,17 +201,11 @@ export default function GlobalSearchModal({ onClose }: { onClose: () => void }) 
         </div>
 
         <div className="px-3 py-2 border-b border-white/5 flex flex-wrap gap-2 flex-shrink-0">
-          {imgBtnOn && (
-            <button
-              type="button"
-              onClick={() => {
-                go('image-search');
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-500/15 border border-violet-500/30 text-violet-200 text-xs font-bold hover:bg-violet-500/25"
-            >
-              <ImageIcon size={14} /> تصویر
-            </button>
-          )}
+          {imgBtnOn ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-violet-500/10 border border-violet-500/25 text-violet-200 text-xs font-bold">
+              <ImageIcon size={14} /> جستجوی تصویری در صفحه فروش فعال است
+            </span>
+          ) : null}
           {barcodeBtnOn && (
             <>
               <input

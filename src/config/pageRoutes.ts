@@ -15,7 +15,6 @@ export const PAGE_TO_PATH: Record<string, string> = {
   settings: '/settings',
   products: '/products',
   warehouse: '/warehouse',
-  'image-search': '/image-search',
   customers: '/customers',
   sales: '/sales',
   pending: '/pending',

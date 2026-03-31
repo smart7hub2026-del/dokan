@@ -11,6 +11,8 @@ import {
   type ShopUserRow,
 } from '../services/api';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
+import PasswordStrength from './PasswordStrength';
+import { validatePasswordPolicy } from '../utils/passwordPolicy';
 
 const roleLabels: Record<string, string> = {
   admin: 'مدیر',
@@ -117,8 +119,9 @@ export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
 
   const savePassword = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!pwdRow || !authToken || pwd.length < 4) {
-      error('رمز', 'حداقل ۴ کاراکتر');
+    const pwdErr = validatePasswordPolicy(pwd);
+    if (!pwdRow || !authToken || pwdErr) {
+      error('رمز', pwdErr || 'رمز معتبر نیست');
       return;
     }
     try {
@@ -437,15 +440,16 @@ export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
               type={showPwd ? 'text' : 'password'}
               value={pwd}
               onChange={e => setPwd(e.target.value)}
-              placeholder="حداقل ۴ کاراکتر"
+              placeholder="حداقل ۸ + حرف بزرگ + عدد + کاراکتر ویژه"
               className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 pr-10"
-              minLength={4}
+              minLength={8}
               required
             />
             <button type="button" onClick={() => setShowPwd(!showPwd)} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
               {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
             </button>
           </div>
+          <PasswordStrength password={pwd} />
         </form>
       </Modal>
     </div>

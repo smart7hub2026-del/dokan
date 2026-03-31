@@ -4,6 +4,7 @@ import { Supplier } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import { useStore } from '../store/useStore';
 import FormModal from './ui/FormModal';
+import { useVoiceSearch } from '../hooks/useVoiceSearch';
 
 type PrintSize = 'A4' | 'A5' | '80mm' | '58mm';
 

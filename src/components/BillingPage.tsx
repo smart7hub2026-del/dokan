@@ -24,10 +24,9 @@ import {
 import FormModal from './ui/FormModal';
 
 const plans = [
-  { name: 'basic_monthly', label: 'ماهانه پایه', price: 14.9, currency: '$', color: 'teal', features: ['۴ کاربر', '۲۰۰۰ محصول', 'پشتیبانی استاندارد'] },
-  { name: 'basic_annual', label: 'سالانه پایه', price: 99, currency: '$', color: 'green', features: ['۴ کاربر', '۵۰۰۰ محصول', 'پشتیبانی اولویت‌دار', 'بکاپ روزانه'] },
-  { name: 'premium_monthly', label: 'ماهانه پرمیوم', price: 19.9, currency: '$', color: 'indigo', features: ['کاربر نامحدود', 'محصول نامحدود', 'پشتیبانی ۲۴/۷', 'گزارش پیشرفته'] },
-  { name: 'premium_annual', label: 'سالانه پرمیوم', price: 179, currency: '$', color: 'emerald', features: ['کاربر نامحدود', 'محصول نامحدود', 'پشتیبانی ۲۴/۷', 'گزارش پیشرفته', 'دامنه اختصاصی'] },
+  { name: 'basic_monthly', label: 'ماهانه پایه', price: 999, currency: 'افغانی', color: 'teal', features: ['۴ کاربر', '۲۰۰۰ محصول', 'پشتیبانی استاندارد'] },
+  { name: 'basic_annual', label: 'سالانه پایه', price: 6499, currency: 'افغانی', color: 'green', features: ['۴ کاربر', '۵۰۰۰ محصول', 'پشتیبانی اولویت‌دار', 'بکاپ روزانه'] },
+  { name: 'premium_annual', label: 'سالانه پرمیوم', price: 9999, currency: 'افغانی', color: 'emerald', features: ['کاربر نامحدود', 'محصول نامحدود', 'پشتیبانی ۲۴/۷', 'گزارش پیشرفته', 'دامنه اختصاصی'] },
 ];
 
 type ApiPayment = {
@@ -67,7 +66,7 @@ export default function BillingPage() {
   const [filterStatus, setFilterStatus] = useState<'all' | 'completed' | 'pending'>('all');
   const [newPayment, setNewPayment] = useState({
     shop_code: '',
-    amount: 800,
+    amount: 999,
     plan: 'basic_monthly',
     method: 'manual',
     note: '',
@@ -355,6 +354,9 @@ export default function BillingPage() {
                     <div className={`text-xs ${mutedClass} text-center`}>
                       {count} دکان — {planKey === 'basic' ? 'پایه' : 'پریمیوم'}
                     </div>
+                    {plan.name.includes('annual') ? (
+                      <div className="text-[11px] text-emerald-400 text-center mt-1 font-bold">سال‌های بعد ۳۰٪ تخفیف</div>
+                    ) : null}
                   </div>
                 </div>
               );

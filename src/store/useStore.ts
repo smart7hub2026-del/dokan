@@ -129,6 +129,8 @@ export interface PendingApproval {
 export interface ShopSettings {
   shop_name: string;
   seller_name: string;
+  /** نام نمایشی نقش مدیر در ورود (پیش‌فرض: admin) */
+  admin_role_name?: string;
   shop_address: string;
   shop_phone: string;
   logo_url: string;
@@ -147,6 +149,8 @@ export interface ShopSettings {
   show_product_image_on_sales: boolean;
   /** پیش‌فرض: در چاپ A4 / A5 / Letter بخش «عکس کالاها» در پایان فاکتور */
   print_invoice_with_product_images: boolean;
+  /** نمایش تاریخ در رابط (میلادی یا شمسی/هجری خورشیدی) */
+  date_calendar?: 'gregorian' | 'jalali';
   /** نوع کسب‌وکار (ثبت‌نام / تنظیمات) */
   business_type?: string;
   /** هم‌تراز با tenant در سرور — برای گزارش و ERP چندصنفی */
@@ -348,6 +352,7 @@ interface AppStore {
 export const emptyShopSettings: ShopSettings = {
   shop_name: '',
   seller_name: '',
+  admin_role_name: 'admin',
   shop_address: '',
   shop_phone: '',
   logo_url: '',
@@ -363,6 +368,7 @@ export const emptyShopSettings: ShopSettings = {
   invoice_copy_mode: 'single',
   show_product_image_on_sales: true,
   print_invoice_with_product_images: false,
+  date_calendar: 'jalali',
 };
 
 const defaultShopSettings: ShopSettings = { ...emptyShopSettings };

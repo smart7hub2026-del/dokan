@@ -10,6 +10,8 @@ import {
   type Tenant, type PendingRegistration, type AdminPaymentRequestRow, type ShopUserRow,
 } from '../services/api';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
+import PasswordStrength from './PasswordStrength';
+import { validatePasswordPolicy } from '../utils/passwordPolicy';
 
 interface NewTenantCredentials {
   shopCode: string;
@@ -240,6 +242,8 @@ export default function TenantsPage() {
           subscription_plan: form.subscription_plan as Tenant['subscription_plan'],
         };
         if (isSuperAdmin && adminRolePasswordReset.trim()) {
+          const pwdErr = validatePasswordPolicy(adminRolePasswordReset.trim());
+          if (pwdErr) throw new Error(`رمز مدیر نامعتبر است: ${pwdErr}`);
           payload.admin_role_password = adminRolePasswordReset.trim();
         }
         const res = await apiUpdateTenant(editItem.shop_code, payload, tok);
@@ -935,11 +939,14 @@ export default function TenantsPage() {
                         type="password"
                         value={adminRolePasswordReset}
                         onChange={(e) => setAdminRolePasswordReset(e.target.value)}
-                        placeholder="خالی بگذارید اگر تغییر نمی‌دهید — حداقل ۴ کاراکتر"
+                        placeholder="خالی بگذارید اگر تغییر نمی‌دهید — حداقل ۸ + حرف بزرگ + عدد + کاراکتر ویژه"
                         className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-amber-500 font-mono"
                         dir="ltr"
                         autoComplete="new-password"
                       />
+                      {adminRolePasswordReset.trim() ? (
+                        <PasswordStrength password={adminRolePasswordReset} />
+                      ) : null}
                       <p className="text-slate-500 text-[11px] leading-relaxed">
                         برای دکان‌هایی که از اینجا ساخته شده‌اند، رمز نقش مدیر تصادفی بوده و فقط یک‌بار بعد از ایجاد نشان داده می‌شود؛ <code className="text-slate-400">1234</code> فقط برای دکان‌های نمونهٔ توسعه است.
                       </p>
@@ -998,10 +1005,10 @@ export default function TenantsPage() {
                   <label className="text-slate-400 text-xs mb-1 block">پلن</label>
                   <select value={payForm.plan} onChange={(e) => setPayForm({ ...payForm, plan: e.target.value })}
                     className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500">
-                    <option value="basic_monthly">پایه ماهانه - ۱۰۰ ؋</option>
-                    <option value="basic_annual">پایه سالانه - ۱۰۰۰ ؋</option>
-                    <option value="premium_monthly">پریمیوم ماهانه - ۳۰۰ ؋</option>
-                    <option value="premium_annual">پریمیوم سالانه - ۳۰۰۰ ؋</option>
+                    <option value="basic_monthly">پایه ماهانه - ۹۹۹ ؋</option>
+                    <option value="basic_annual">پایه سالانه - ۶۴۹۹ ؋</option>
+                    <option value="premium_monthly">پریمیوم ماهانه - ۱۹۹۹ ؋</option>
+                    <option value="premium_annual">پریمیوم سالانه - ۹۹۹۹ ؋</option>
                   </select>
                 </div>
                 <div>

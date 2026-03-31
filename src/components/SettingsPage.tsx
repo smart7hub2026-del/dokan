@@ -4,16 +4,26 @@ import { useApp } from '../context/AppContext';
 import { useToast } from './Toast';
 import { User } from '../App';
 import { apiPatchMe } from '../services/api';
-import { EyeOff, Eye, UserCircle, ChevronLeft, Printer, WifiOff, MessageSquare, UserCog } from 'lucide-react';
+import { UserCircle, ChevronLeft, Printer, WifiOff, MessageSquare, UserCog, Smartphone } from 'lucide-react';
 import SecurityPage from './SecurityPage';
 import BackupPage from './BackupPage';
 import UsersPage from './UsersPage';
 import PrintSettingsPage from './PrintSettingsPage';
 import OfflinePage from './OfflinePage';
 import SupportPage from './SupportPage';
+import ActiveSessionsPage from './ActiveSessionsPage';
 import { useStore } from '../store/useStore';
 
-type SettingsTab = 'general' | 'profile' | 'security' | 'backup' | 'users' | 'print' | 'offline' | 'support';
+type SettingsTab =
+  | 'general'
+  | 'profile'
+  | 'security'
+  | 'sessions'
+  | 'backup'
+  | 'users'
+  | 'print'
+  | 'offline'
+  | 'support';
 
 export default function SettingsPage({
   currentUser,
@@ -25,13 +35,11 @@ export default function SettingsPage({
   const { t } = useApp();
   const { success, error } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [showPwd, setShowPwd] = useState(false);
-  const [currentPwd, setCurrentPwd] = useState('');
-  const [newPwd, setNewPwd] = useState('');
-  const [confirmPwd, setConfirmPwd] = useState('');
 
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const patchCurrentUser = useStore(s => s.patchCurrentUser);
+  const shopSettings = useStore(s => s.shopSettings);
+  const updateShopSettings = useStore(s => s.updateShopSettings);
   const [profileName, setProfileName] = useState(currentUser.full_name);
   const [savingProfile, setSavingProfile] = useState(false);
 
@@ -49,6 +57,7 @@ export default function SettingsPage({
       ...(currentUser.role === 'admin' ? (['users'] as const) : []),
       ...(shopSettingsTabs ? (['print', 'offline', 'support'] as const) : (['support'] as const)),
       'security',
+      'sessions',
       'backup',
     ];
     return new Set(ids);
@@ -68,13 +77,6 @@ export default function SettingsPage({
     },
     [setSearchParams]
   );
-
-  const handleChangePwd = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!currentPwd || newPwd.length < 4 || newPwd !== confirmPwd) return;
-    success('رمز عبور تغییر کرد', 'رمز عبور با موفقیت بروزرسانی شد');
-    setCurrentPwd(''); setNewPwd(''); setConfirmPwd('');
-  };
 
   const handleSaveProfile = async () => {
     if (currentUser.role === 'super_admin') return;
@@ -108,6 +110,7 @@ export default function SettingsPage({
         ]
       : [{ id: 'support' as const, label: t('support'), icon: <MessageSquare size={14} /> }]),
     { id: 'security', label: t('tab_security') },
+    { id: 'sessions', label: t('sessions'), icon: <Smartphone size={14} /> },
     { id: 'backup', label: t('tab_backup') },
   ];
 
@@ -155,28 +158,46 @@ export default function SettingsPage({
               </div>
             </div>
 
-            <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-4">
+            <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-3 max-w-xl">
               <h2 className="text-white font-semibold">تغییر رمز عبور</h2>
-              <form onSubmit={handleChangePwd} className="space-y-3 max-w-sm">
-                {[
-                  ['رمز فعلی', currentPwd, setCurrentPwd] as const,
-                  ['رمز جدید (حداقل ۴ کاراکتر)', newPwd, setNewPwd] as const,
-                  ['تکرار رمز جدید', confirmPwd, setConfirmPwd] as const
-                ].map(([label, val, setter]) => (
-                  <div key={label}>
-                    <label className="text-slate-400 text-xs block mb-1">{label}</label>
-                    <div className="relative">
-                      <input type={showPwd ? 'text' : 'password'} value={val} onChange={e => setter(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:border-emerald-500" />
-                      <button type="button" onClick={() => setShowPwd(!showPwd)} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
-                        {showPwd ? <EyeOff size={14} /> : <Eye size={14} />}
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                <button type="submit" className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-medium transition-colors">تغییر رمز</button>
-              </form>
+              <p className="text-slate-400 text-xs">
+                تغییر واقعی رمز از طریق API در تب «{t('tab_security')}» انجام می‌شود (حداقل ۸ کاراکتر، حرف بزرگ، عدد و کاراکتر ویژه).
+              </p>
+              <button
+                type="button"
+                onClick={() => goTab('security')}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-medium transition-colors"
+              >
+                برو به {t('tab_security')}
+              </button>
             </div>
+
+            {!isSuper && (
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-4">
+                <h2 className="text-white font-semibold">تنظیم تاریخ</h2>
+                <p className="text-slate-400 text-xs">انتخاب کنید تاریخ‌ها در پنل به میلادی نمایش داده شوند یا شمسی (حمل، ثور، جوزا...).</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { key: 'jalali', title: 'شمسی', sample: '۱۴۰۵/۰۲/۱۸ — حمل، ثور، جوزا' },
+                    { key: 'gregorian', title: 'میلادی', sample: '2026-05-08 — Apr, May, Jun' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => updateShopSettings({ date_calendar: opt.key as 'gregorian' | 'jalali' })}
+                      className={`rounded-xl border px-4 py-3 text-right transition-all ${
+                        (shopSettings.date_calendar || 'jalali') === opt.key
+                          ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300'
+                          : 'border-slate-700 bg-slate-900 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      <p className="font-bold text-sm">{opt.title}</p>
+                      <p className="text-xs text-slate-400 mt-1">{opt.sample}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {currentUser.role === 'super_admin' && (
               <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-4">
@@ -216,6 +237,16 @@ export default function SettingsPage({
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:border-emerald-500"
                     />
                   </div>
+                  {currentUser.role === 'admin' && (
+                    <div>
+                      <label className="text-slate-400 text-xs block mb-1">نام نقش مدیر (پیش‌فرض: admin)</label>
+                      <input
+                        value={shopSettings.admin_role_name || 'admin'}
+                        onChange={(e) => updateShopSettings({ admin_role_name: e.target.value || 'admin' })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:border-emerald-500"
+                      />
+                    </div>
+                  )}
                   <button
                     type="button"
                     disabled={savingProfile}
@@ -252,6 +283,11 @@ export default function SettingsPage({
         {activeTab === 'support' && <SupportPage />}
 
         {activeTab === 'security' && <SecurityPage twoFactorEnabled={currentUser.two_factor_enabled} />}
+        {activeTab === 'sessions' && (
+          <div className="max-w-5xl">
+            <ActiveSessionsPage embedded />
+          </div>
+        )}
         {activeTab === 'backup' && <BackupPage />}
       </div>
 

@@ -4,6 +4,7 @@ import { Download, FileText, TrendingUp, TrendingDown, DollarSign, Users, Filter
 import { useToast } from './Toast';
 import { useApp } from '../context/AppContext';
 import { useStore } from '../store/useStore';
+import { formatDateByCalendar, formatMonthLabelByCalendar, formatWeekdayByCalendar, type CalendarMode } from '../utils/dateFormat';
 
 const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
@@ -18,6 +19,7 @@ export default function ReportsPage() {
   const products = useStore(s => s.products);
   const debts = useStore(s => s.debts);
   const expenses = useStore(s => s.expenses);
+  const calendarMode = (useStore(s => s.shopSettings.date_calendar) || 'jalali') as CalendarMode;
 
   const [reportType, setReportType] = useState<'sales' | 'inventory' | 'debts' | 'customers'>('sales');
   const [dateFrom, setDateFrom] = useState(() => {
@@ -44,7 +46,7 @@ export default function ReportsPage() {
       const ds = d.toISOString().slice(0, 10);
       const sales = filteredInvoices.filter(inv => inv.invoice_date === ds).reduce((s, x) => s + x.total, 0);
       const cost = expenses.filter(ex => ex.date === ds).reduce((s, x) => s + x.amount, 0);
-      out.push({ name: d.toLocaleDateString('fa-IR', { weekday: 'short' }), sales, cost });
+      out.push({ name: formatWeekdayByCalendar(d, calendarMode), sales, cost });
     }
     return out;
   }, [filteredInvoices, expenses, dateTo]);
@@ -56,8 +58,8 @@ export default function ReportsPage() {
       byMonth.set(k, (byMonth.get(k) || 0) + inv.total);
     }
     const keys = [...byMonth.keys()].sort().slice(-8);
-    return keys.map(k => ({ name: k, sales: byMonth.get(k) || 0 }));
-  }, [invoices]);
+    return keys.map(k => ({ name: formatMonthLabelByCalendar(k, calendarMode), sales: byMonth.get(k) || 0 }));
+  }, [invoices, calendarMode]);
 
   const catData = useMemo(() => {
     const catTotals = new Map<string, number>();
@@ -225,7 +227,7 @@ export default function ReportsPage() {
               {filteredInvoices.slice(0, 20).map(inv => (
                 <div key={inv.id} className="flex justify-between bg-slate-800/40 rounded-xl px-3 py-2">
                   <div><p className="text-white text-xs font-bold">{inv.invoice_number}</p><p className="text-slate-400 text-xs">{inv.customer_name}</p></div>
-                  <div className="text-right"><p className="text-emerald-400 font-bold text-xs">{inv.total.toLocaleString()} ؋</p><p className="text-slate-500 text-xs">{inv.invoice_date}</p></div>
+                  <div className="text-right"><p className="text-emerald-400 font-bold text-xs">{inv.total.toLocaleString()} ؋</p><p className="text-slate-500 text-xs">{formatDateByCalendar(inv.invoice_date, calendarMode)}</p></div>
                 </div>
               ))}
             </div>
@@ -299,7 +301,7 @@ export default function ReportsPage() {
                       <td className="py-3 px-4 text-emerald-400 text-xs">{d.paid_amount.toLocaleString()} ؋</td>
                       <td className="py-3 px-4 text-rose-400 font-bold text-xs">{d.remaining_amount.toLocaleString()} ؋</td>
                       <td className="py-3 px-4"><span className={`text-xs px-2 py-0.5 rounded-full ${d.status === 'overdue' ? 'badge-red' : d.status === 'partial' ? 'badge-yellow' : 'badge-blue'}`}>{d.status === 'overdue' ? 'معوق' : d.status === 'partial' ? 'جزئی' : 'انتظار'}</span></td>
-                      <td className="py-3 px-4 text-slate-400 text-xs">{d.due_date}</td>
+                      <td className="py-3 px-4 text-slate-400 text-xs">{formatDateByCalendar(d.due_date, calendarMode)}</td>
                     </tr>
                   ))}
                 </tbody>

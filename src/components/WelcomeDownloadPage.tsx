@@ -21,7 +21,11 @@ export default function WelcomeDownloadPage({ onBack, onLogin, onRegister }: Pro
   const iosHref = origin ? `${origin}/` : '/';
 
   return (
-    <div className="min-h-screen font-vazir relative flex flex-col overflow-hidden" dir="rtl">
+    <div className="min-h-screen font-vazir relative flex flex-col overflow-hidden bg-slate-950" dir="rtl">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(16,185,129,0.22),transparent_45%),radial-gradient(circle_at_80%_10%,rgba(59,130,246,0.20),transparent_45%),linear-gradient(135deg,#020617,#0f172a,#020617)]" />
+        <div className="absolute inset-0 opacity-20 bg-[linear-gradient(to_right,rgba(148,163,184,.15)_1px,transparent_1px),linear-gradient(to_bottom,rgba(148,163,184,.15)_1px,transparent_1px)] bg-[size:28px_28px]" />
+      </div>
       <header className="relative z-20 border-b border-white/10 bg-black/30 backdrop-blur-md">
         <div className="max-w-4xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -54,44 +58,51 @@ export default function WelcomeDownloadPage({ onBack, onLogin, onRegister }: Pro
         </div>
       </header>
 
-      <main className="relative z-10 flex-1 flex items-center justify-center px-6 py-12 sm:py-16">
-        <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-14 md:gap-20">
+      <main className="relative z-10 flex-1 flex items-center justify-center px-4 py-8 sm:py-12">
+        <div className="w-full max-w-6xl">
+          <h2 className="text-center text-white font-black text-2xl sm:text-3xl mb-2">دانلود نسخه مناسب دستگاه شما</h2>
+          <p className="text-center text-slate-300 text-sm mb-8">هر سه مسیر کامل است: اندروید، iOS (نسخه وب‌اپ)، ویندوز</p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <a
             href={DOWNLOAD_URLS.apk}
             download="dokanyar.apk"
-            className="group flex flex-col items-center gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-8 sm:p-10 transition-all hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+            className="group min-h-[280px] flex flex-col items-center justify-center text-center gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-7 transition-all hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
             aria-label="دانلود اپ اندروید"
           >
             <div className="flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-900 shadow-lg ring-1 ring-white/20">
               <Smartphone size={44} className="text-white sm:w-[52px] sm:h-[52px]" strokeWidth={1.5} />
             </div>
-            <span className="text-[11px] font-bold text-slate-400 group-hover:text-emerald-200/90">اندروید · APK</span>
+            <span className="text-sm font-black text-emerald-200">Android APK</span>
+            <span className="text-xs text-slate-300">دانلود مستقیم فایل نصب</span>
           </a>
 
           <a
             href={iosHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="group flex flex-col items-center gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-8 sm:p-10 transition-all hover:border-slate-400/40 hover:bg-white/[0.09] hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+            className="group min-h-[280px] flex flex-col items-center justify-center text-center gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-7 transition-all hover:border-slate-400/40 hover:bg-white/[0.09] hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
             aria-label="باز کردن در مرورگر برای نصب وب‌اپ آیفون"
           >
             <div className="flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-600 to-slate-900 shadow-lg ring-1 ring-white/15">
               <Apple size={44} className="text-white sm:w-[52px] sm:h-[52px]" strokeWidth={1.5} />
             </div>
-            <span className="text-[11px] font-bold text-slate-400 group-hover:text-slate-200">آیفون · آیپد</span>
+            <span className="text-sm font-black text-slate-100">iPhone / iPad</span>
+            <span className="text-xs text-slate-300">باز شدن نسخه وب برای Add to Home Screen</span>
           </a>
 
           <a
             href={DOWNLOAD_URLS.windowsSetup}
             download="Dokanyar-Setup.exe"
-            className="group flex flex-col items-center gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-8 sm:p-10 transition-all hover:border-blue-500/40 hover:bg-blue-500/10 hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="group min-h-[280px] flex flex-col items-center justify-center text-center gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-7 transition-all hover:border-blue-500/40 hover:bg-blue-500/10 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             aria-label="دانلود نسخه ویندوز"
           >
             <div className="flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-950 shadow-lg ring-1 ring-white/20">
               <Monitor size={44} className="text-white sm:w-[52px] sm:h-[52px]" strokeWidth={1.5} />
             </div>
-            <span className="text-[11px] font-bold text-slate-400 group-hover:text-blue-200/90">ویندوز · PC</span>
+            <span className="text-sm font-black text-blue-100">Windows PC</span>
+            <span className="text-xs text-slate-300">دانلود فایل Setup ویندوز</span>
           </a>
+        </div>
         </div>
       </main>
     </div>

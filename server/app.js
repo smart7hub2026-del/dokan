@@ -20,6 +20,7 @@ import QRCode from 'qrcode';
 import nodemailer from 'nodemailer';
 import fsp from 'fs/promises';
 import crypto from 'crypto';
+import { z } from 'zod';
 import { loadDatabase, saveDatabase } from './storage.js';
 import { copyPlatformDatabase, resolvePlatformSqlitePath } from './backupPlatformDb.js';
 
@@ -68,6 +69,15 @@ const TOKEN_EXPIRES_IN = '2h';
 const DEMO_TOKEN_EXPIRES_IN = '7d';
 const DEMO_TRIAL_MS = 3 * 24 * 60 * 60 * 1000;
 const IS_PROD = process.env.NODE_ENV === 'production';
+const HESABPAY_WEBHOOK_SECRET = String(process.env.HESABPAY_WEBHOOK_SECRET || '').trim();
+/** پیش‌فرض: اختیاری — با REQUIRE_2FA_FOR_PRIVILEGED_ROLES=true می‌توان دوباره سخت‌گیر کرد */
+const REQUIRE_2FA_FOR_PRIVILEGED_ROLES =
+  process.env.NODE_ENV === 'test'
+    ? false
+    : String(process.env.REQUIRE_2FA_FOR_PRIVILEGED_ROLES || 'false') === 'true';
+const MIN_PASSWORD_LENGTH = Number(process.env.MIN_PASSWORD_LENGTH || (process.env.NODE_ENV === 'test' ? 4 : 8));
+const RECAPTCHA_SECRET_KEY = String(process.env.RECAPTCHA_SECRET_KEY || '').trim();
+const RECAPTCHA_REQUIRED_IN_PROD = String(process.env.RECAPTCHA_REQUIRED_IN_PROD || 'true') !== 'false';
 
 /** در production پیش‌فرض خاموش؛ با ALLOW_TRIAL_QUICK_SIGNUP=true فعال شود */
 const trialQuickSignupEnabled = () => {
@@ -102,6 +112,18 @@ if (!JWT_SECRET) {
   throw new Error('JWT_SECRET is required. Set it in environment variables.');
 }
 
+if (IS_PROD) {
+  if (JWT_SECRET.length < 32) {
+    throw new Error('JWT_SECRET must be at least 32 characters in production.');
+  }
+  if (!HESABPAY_WEBHOOK_SECRET) {
+    throw new Error('HESABPAY_WEBHOOK_SECRET is required in production.');
+  }
+  if (RECAPTCHA_REQUIRED_IN_PROD && !RECAPTCHA_SECRET_KEY) {
+    throw new Error('RECAPTCHA_SECRET_KEY is required in production when RECAPTCHA_REQUIRED_IN_PROD is enabled.');
+  }
+}
+
 const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((x) => x.trim())
@@ -110,6 +132,8 @@ const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '')
 const authAttemptStore = new Map();
 const lockoutStore = new Map();
 const reqRateStore = new Map();
+const totpAttemptStore = new Map();
+const endpointRateStore = new Map();
 
 // ── In-memory OTP store { email → { code, expiresAt, attempts } } ──────────
 const otpStore = new Map();
@@ -127,6 +151,72 @@ const generateCode = (prefix, length = 6) => {
     out += chars[Math.floor(Math.random() * chars.length)];
   }
   return `${prefix}${out}`;
+};
+
+const getTotpAttemptKey = (pendingToken, req) =>
+  `${String(pendingToken).slice(0, 48)}:${getClientIp(req)}`;
+
+const timingSafeEqualString = (a, b) => {
+  const aa = Buffer.from(String(a || ''), 'utf8');
+  const bb = Buffer.from(String(b || ''), 'utf8');
+  if (aa.length !== bb.length) return false;
+  return crypto.timingSafeEqual(aa, bb);
+};
+
+const normalizeGatewayStatus = (rawStatus) => {
+  const normalized = String(rawStatus || '').toLowerCase();
+  if (normalized === 'paid' || normalized === 'success') return 'paid_pending_admin';
+  if (normalized === 'failed') return 'failed';
+  if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled';
+  return 'gateway_pending';
+};
+
+const validateStrongPassword = (raw) => {
+  const value = String(raw || '');
+  if (value.length < MIN_PASSWORD_LENGTH) {
+    return `رمز باید حداقل ${MIN_PASSWORD_LENGTH} کاراکتر باشد`;
+  }
+  if (process.env.NODE_ENV === 'test') return null;
+  if (!/[A-Z]/.test(value)) {
+    return 'رمز باید حداقل یک حرف بزرگ (A-Z) داشته باشد';
+  }
+  if (!/\d/.test(value)) {
+    return 'رمز باید حداقل یک عدد داشته باشد';
+  }
+  if (!/[!@#$%^&*]/.test(value)) {
+    return 'رمز باید حداقل یک کاراکتر ویژه از !@#$%^&* داشته باشد';
+  }
+  return null;
+};
+
+const LEGAL_SIGN_PRIVATE_PEM = process.env.LEGAL_SIGN_PRIVATE_PEM || '';
+const LEGAL_SIGN_PUBLIC_PEM = process.env.LEGAL_SIGN_PUBLIC_PEM || '';
+let fallbackLegalKeyPair = null;
+const getLegalKeyPair = () => {
+  if (LEGAL_SIGN_PRIVATE_PEM && LEGAL_SIGN_PUBLIC_PEM) {
+    return { privateKey: LEGAL_SIGN_PRIVATE_PEM, publicKey: LEGAL_SIGN_PUBLIC_PEM };
+  }
+  if (!fallbackLegalKeyPair) {
+    fallbackLegalKeyPair = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  }
+  return {
+    privateKey: fallbackLegalKeyPair.privateKey.export({ type: 'pkcs1', format: 'pem' }),
+    publicKey: fallbackLegalKeyPair.publicKey.export({ type: 'pkcs1', format: 'pem' }),
+  };
+};
+
+const applyPaymentStatusTransition = (currentStatus, incomingStatus) => {
+  const current = String(currentStatus || 'manual_pending');
+  if (current === 'approved' || current === 'rejected') {
+    return { nextStatus: current, changed: false, reason: 'final_locked' };
+  }
+  if (current === 'paid_pending_admin' && incomingStatus !== 'paid_pending_admin') {
+    return { nextStatus: current, changed: false, reason: 'no_downgrade_after_paid' };
+  }
+  if (current === incomingStatus) {
+    return { nextStatus: current, changed: false, reason: 'duplicate_state' };
+  }
+  return { nextStatus: incomingStatus, changed: true, reason: 'applied' };
 };
 
 /** ادغام state دکان: فقط کلیدهای ارسال‌شده عوض می‌شوند؛ بقیه حفظ (چندفروشگاهی / درخواست ناقص) */
@@ -197,7 +287,9 @@ function initialDemoShopState(fullName, phone, businessType) {
       invoice_copy_mode: 'single',
       show_product_image_on_sales: true,
       print_invoice_with_product_images: false,
+      date_calendar: 'jalali',
       business_type: businessType,
+      admin_role_name: 'admin',
     },
   };
 }
@@ -223,6 +315,20 @@ const SHOP_STATE_ARRAY_KEYS = [
   'serialNumbers',
   'books',
 ];
+
+const backupRestoreSchema = z.object({
+  shopSettings: z.object({}).passthrough(),
+}).passthrough();
+
+const hasUnsafeObjectKeys = (value) => {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some((item) => hasUnsafeObjectKeys(item));
+  for (const [k, v] of Object.entries(value)) {
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') return true;
+    if (hasUnsafeObjectKeys(v)) return true;
+  }
+  return false;
+};
 
 
 /** دادهٔ عملیاتی خالی؛ ساختار آماده برای هر tenant با tenant_id و بدون نمونهٔ فروش */
@@ -251,6 +357,51 @@ const ensureShopState = (db, shopCode) => {
   if (!state.currencyRates || typeof state.currencyRates !== 'object') {
     state.currencyRates = { USD: 75, EUR: 82, IRT: 0.02 };
   }
+  state.branches = Array.isArray(state.branches) ? state.branches : [];
+  state.warehouses = Array.isArray(state.warehouses) ? state.warehouses : [];
+  state.stocks = Array.isArray(state.stocks) ? state.stocks : [];
+  state.stockMovements = Array.isArray(state.stockMovements) ? state.stockMovements : [];
+  state.notificationsV2 = Array.isArray(state.notificationsV2) ? state.notificationsV2 : [];
+  state.userNotificationChannels = Array.isArray(state.userNotificationChannels) ? state.userNotificationChannels : [];
+  state.signatureHistory = Array.isArray(state.signatureHistory) ? state.signatureHistory : [];
+  state.archives = state.archives && typeof state.archives === 'object' ? state.archives : {};
+
+  if (state.branches.length === 0) {
+    state.branches.push({
+      id: 1,
+      tenant_id: 1,
+      name: 'شعبه مرکزی',
+      code: 'MAIN',
+      is_active: true,
+      created_at: new Date().toISOString(),
+    });
+  }
+  if (state.warehouses.length === 0) {
+    state.warehouses.push({
+      id: 1,
+      tenant_id: 1,
+      branch_id: 1,
+      name: 'گدام مرکزی',
+      type: 'main',
+      address: '',
+      created_at: new Date().toISOString(),
+    });
+  }
+  // Migration: stock_warehouse scalar -> stocks rows
+  if (state.stocks.length === 0 && Array.isArray(state.products)) {
+    for (const p of state.products) {
+      const q = Number(p.stock_warehouse || 0);
+      if (q <= 0) continue;
+      state.stocks.push({
+        id: nextId(state.stocks),
+        warehouse_id: 1,
+        product_id: Number(p.id),
+        quantity: q,
+        reserved_quantity: 0,
+        created_at: new Date().toISOString(),
+      });
+    }
+  }
   return state;
 };
 
@@ -260,10 +411,11 @@ const ensureSystemStructures = (db) => {
 };
 
 const PLAN_PRICES_AFN = {
-  basic_monthly: 100,
-  basic_annual: 1000,
-  premium_monthly: 300,
-  premium_annual: 3000,
+  basic_monthly: 999,
+  basic_annual: 6499,
+  /** طرح ماهانهٔ پرمیوم در UI فعلی نمایش داده نمی‌شود؛ مبلغ برای سازگاری با کلید قدیمی */
+  premium_monthly: 1999,
+  premium_annual: 9999,
 };
 
 const ensurePaymentStructures = (db) => {
@@ -342,8 +494,6 @@ async function provisionShopFromPaymentRequest(db, payment) {
     business_type_code: businessType,
     business_metadata: {},
     admin_credential_record: {
-      shop_password_plain: plainShopPassword,
-      admin_role_password_plain: plainAdminRolePassword,
       recorded_at: new Date().toISOString(),
     },
     users: [
@@ -458,6 +608,52 @@ const requestRateLimiter = (req, res, next) => {
   }
   item.count += 1;
   reqRateStore.set(key, item);
+  return next();
+};
+
+const createEndpointRateLimiter = ({ windowMs, max, keyBuilder }) => (req, res, next) => {
+  const key = keyBuilder(req);
+  const now = Date.now();
+  const item = endpointRateStore.get(key);
+  if (!item || item.expiresAt < now) {
+    endpointRateStore.set(key, { count: 1, expiresAt: now + windowMs });
+    return next();
+  }
+  if (item.count >= max) {
+    return res.status(429).json({ message: 'تعداد تلاش بیش از حد مجاز است. کمی بعد دوباره تلاش کنید.' });
+  }
+  item.count += 1;
+  endpointRateStore.set(key, item);
+  return next();
+};
+
+const verifyRecaptchaToken = async (token, remoteIp) => {
+  if (!RECAPTCHA_SECRET_KEY) return false;
+  const body = new URLSearchParams();
+  body.set('secret', RECAPTCHA_SECRET_KEY);
+  body.set('response', String(token || ''));
+  if (remoteIp) body.set('remoteip', remoteIp);
+  const resp = await fetch('https://www.google.com/recaptcha/api/siteverify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString(),
+  });
+  if (!resp.ok) return false;
+  const data = await resp.json().catch(() => ({}));
+  return Boolean(data?.success);
+};
+
+const captchaGuard = ({ tokenField = 'captchaToken' } = {}) => async (req, res, next) => {
+  const shouldEnforce = IS_PROD ? RECAPTCHA_REQUIRED_IN_PROD : false;
+  if (!shouldEnforce) return next();
+  const token = req.body?.[tokenField];
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ message: 'کپچا الزامی است', code: 'CAPTCHA_REQUIRED' });
+  }
+  const ok = await verifyRecaptchaToken(token, getClientIp(req));
+  if (!ok) {
+    return res.status(400).json({ message: 'اعتبارسنجی کپچا ناموفق بود', code: 'CAPTCHA_INVALID' });
+  }
   return next();
 };
 
@@ -578,6 +774,45 @@ const buildPublicUser = (shop, user) => ({
   is_demo: Boolean(user.is_demo || shop.is_demo),
 });
 
+const ensureUserSessions = (db) => {
+  if (!Array.isArray(db.userSessions)) db.userSessions = [];
+  return db.userSessions;
+};
+
+const inferDeviceName = (explicitName, req) => {
+  const manual = String(explicitName || '').trim();
+  if (manual) return manual.slice(0, 80);
+  const ua = String(req.headers['user-agent'] || '').toLowerCase();
+  if (!ua) return 'Unknown device';
+  if (ua.includes('iphone')) return 'iPhone';
+  if (ua.includes('ipad')) return 'iPad';
+  if (ua.includes('android')) return 'Android';
+  if (ua.includes('windows')) return 'Windows';
+  if (ua.includes('macintosh') || ua.includes('mac os')) return 'Mac';
+  if (ua.includes('linux')) return 'Linux';
+  return 'Web browser';
+};
+
+const createUserSession = (db, payload) => {
+  const list = ensureUserSessions(db);
+  const now = new Date().toISOString();
+  const row = {
+    id: nextId(list),
+    user_id: Number(payload.userId),
+    shop_code: String(payload.shopCode || ''),
+    token_jti: String(payload.jti || ''),
+    ip_address: String(payload.ipAddress || ''),
+    user_agent: String(payload.userAgent || ''),
+    device_name: String(payload.deviceName || 'Unknown device'),
+    created_at: now,
+    last_activity_at: now,
+    is_active: true,
+  };
+  list.unshift(row);
+  if (list.length > 10000) db.userSessions = list.slice(0, 10000);
+  return row;
+};
+
 const sanitizeShopUser = (u) => ({
   id: u.id,
   username: u.username,
@@ -653,10 +888,25 @@ const authMiddleware = async (req, res, next) => {
     if (payload.scope === 'totp-pending') {
       return res.status(401).json({ message: 'احراز هویت دو مرحله‌ای ناقص است' });
     }
+    const db = await loadDatabase();
+    ensureUserSessions(db);
+    if (payload.jti && payload.shopCode) {
+      const activeSession = db.userSessions.find(
+        (s) =>
+          s.is_active &&
+          String(s.token_jti) === String(payload.jti) &&
+          Number(s.user_id) === Number(payload.sub) &&
+          String(s.shop_code) === String(payload.shopCode)
+      );
+      if (!activeSession) {
+        res.clearCookie(COOKIE_NAME, { path: '/' });
+        return res.status(401).json({ message: 'نشست شما پایان یافته است. دوباره وارد شوید.' });
+      }
+      req.sessionRecord = activeSession;
+    }
     req.auth = payload;
 
     if (payload.role !== 'super_admin' && payload.shopCode) {
-      const db = await loadDatabase();
       const shop = db.shops.find((s) => s.code === payload.shopCode);
       const path = req.path || '';
       const authOnly = path === '/api/auth/me' || path === '/api/auth/logout';
@@ -693,8 +943,26 @@ const authMiddleware = async (req, res, next) => {
   }
 };
 
+const requirePrivileged2FA = async (req, res, next) => {
+  if (!REQUIRE_2FA_FOR_PRIVILEGED_ROLES) return next();
+  if (!['admin', 'super_admin'].includes(String(req.auth?.role || ''))) return next();
+  const db = await loadDatabase();
+  const shop = db.shops.find((s) => s.code === req.auth.shopCode);
+  if (shop?.is_demo) return next();
+  const uid = Number(req.auth.sub);
+  const user = shop?.users.find((u) => Number(u.id) === uid);
+  if (!user) return res.status(401).json({ message: 'کاربر یافت نشد' });
+  if (!(user.two_factor_enabled && user.totp_secret)) {
+    return res.status(403).json({
+      message: 'برای نقش مدیر/ابرادمین، فعال‌سازی 2FA الزامی است.',
+      code: 'TWO_FACTOR_SETUP_REQUIRED',
+    });
+  }
+  return next();
+};
+
 const handleLogin = async (req, res) => {
-  const { shopCode, shopPassword, role, rolePassword } = req.body ?? {};
+  const { shopCode, shopPassword, role, rolePassword, deviceName } = req.body ?? {};
   if (!shopCode || !shopPassword || !rolePassword) {
     return res.status(400).json({ message: 'ورودی‌ها ناقص است' });
   }
@@ -755,6 +1023,15 @@ const handleLogin = async (req, res) => {
   }
   clearAuthFailures(normalizedCode, req);
 
+  if (REQUIRE_2FA_FOR_PRIVILEGED_ROLES && ['super_admin', 'admin'].includes(String(user.role))) {
+    if (!shop.is_demo && !(user.two_factor_enabled && user.totp_secret)) {
+      return res.status(403).json({
+        message: 'برای نقش مدیر/ابرادمین، فعال‌سازی 2FA الزامی است.',
+        code: 'TWO_FACTOR_SETUP_REQUIRED',
+      });
+    }
+  }
+
   // If 2FA is enabled, issue a short-lived pending token instead of full session
   if (user.two_factor_enabled && user.totp_secret) {
     const pendingToken = jwt.sign(
@@ -768,6 +1045,7 @@ const handleLogin = async (req, res) => {
   const publicUser = buildPublicUser(shop, user);
   const shopConfig = ensureShopConfig(db, shop.code);
   const sessionMs = Number(shopConfig.session_timeout_minutes || 120) * 60_000;
+  const sessionJti = crypto.randomUUID();
   const token = jwt.sign(
     {
       sub: user.id,
@@ -776,10 +1054,20 @@ const handleLogin = async (req, res) => {
       tenantId: shop.tenantId,
       fullName: user.full_name,
       isDemo: Boolean(shop.is_demo),
+      jti: sessionJti,
     },
     JWT_SECRET,
     { expiresIn: TOKEN_EXPIRES_IN }
   );
+
+  createUserSession(db, {
+    userId: user.id,
+    shopCode: shop.code,
+    jti: sessionJti,
+    ipAddress: getClientIp(req),
+    userAgent: req.headers['user-agent'],
+    deviceName: inferDeviceName(deviceName, req),
+  });
 
   setSessionCookie(res, token, sessionMs);
   await appendLoginAudit(db, {
@@ -813,7 +1101,7 @@ const verifyGoogleIdToken = async (idToken) => {
 };
 
 const handleGoogleAuth = async (req, res) => {
-  const { email, fullName, idToken } = req.body ?? {};
+  const { email, fullName, idToken, deviceName } = req.body ?? {};
 
   let normalizedEmail;
   let normalizedName;
@@ -901,6 +1189,7 @@ const handleGoogleAuth = async (req, res) => {
   const publicUser = buildPublicUser(targetShop, targetUser);
   const shopConfig = ensureShopConfig(db, targetShop.code);
   const sessionMs = Number(shopConfig.session_timeout_minutes || 120) * 60_000;
+  const sessionJti = crypto.randomUUID();
   const token = jwt.sign(
     {
       sub: targetUser.id,
@@ -909,10 +1198,20 @@ const handleGoogleAuth = async (req, res) => {
       tenantId: targetShop.tenantId,
       fullName: targetUser.full_name,
       isDemo: Boolean(targetShop.is_demo),
+      jti: sessionJti,
     },
     JWT_SECRET,
     { expiresIn: TOKEN_EXPIRES_IN }
   );
+
+  createUserSession(db, {
+    userId: targetUser.id,
+    shopCode: targetShop.code,
+    jti: sessionJti,
+    ipAddress: getClientIp(req),
+    userAgent: req.headers['user-agent'],
+    deviceName: inferDeviceName(deviceName, req),
+  });
 
   setSessionCookie(res, token, sessionMs);
   await appendLoginAudit(db, {
@@ -941,7 +1240,7 @@ const handleDemoLogin = async (req, res) => {
     });
   }
 
-  const { name, familyName, phone, email, idToken, password, mode } = req.body ?? {};
+  const { name, familyName, phone, email, idToken, password, mode, deviceName } = req.body ?? {};
   const loginMode = String(mode || '').toLowerCase();
 
   // ── Legacy: OAuth-only demo (no password) — kept for backward compatibility ──
@@ -1042,6 +1341,7 @@ const handleDemoLogin = async (req, res) => {
       });
     }
     const publicUser = buildPublicUser(targetShop, targetUser);
+    const sessionJti = crypto.randomUUID();
     const token = jwt.sign(
       {
         sub: targetUser.id,
@@ -1050,10 +1350,19 @@ const handleDemoLogin = async (req, res) => {
         tenantId: targetShop.tenantId,
         fullName: targetUser.full_name,
         isDemo: true,
+        jti: sessionJti,
       },
       JWT_SECRET,
       { expiresIn: DEMO_TOKEN_EXPIRES_IN }
     );
+    createUserSession(db, {
+      userId: targetUser.id,
+      shopCode: targetShop.code,
+      jti: sessionJti,
+      ipAddress: getClientIp(req),
+      userAgent: req.headers['user-agent'],
+      deviceName: inferDeviceName(deviceName, req),
+    });
     const demoMs = 7 * 24 * 60 * 60 * 1000;
     setSessionCookie(res, token, demoMs);
     const trialEndsAt = targetShop.trial_ends_at || null;
@@ -1090,9 +1399,8 @@ const handleDemoLogin = async (req, res) => {
   if (!normalizedPhone) {
     return res.status(400).json({ message: 'شماره موبایل معتبر وارد کنید (حداقل ۹ رقم)' });
   }
-  if (!password || String(password).length < 6) {
-    return res.status(400).json({ message: 'رمز عبور باید حداقل ۶ کاراکتر باشد' });
-  }
+  const demoPwdErr = validateStrongPassword(password);
+  if (demoPwdErr) return res.status(400).json({ message: `رمز عبور نامعتبر است: ${demoPwdErr}` });
 
   const db = await loadDatabase();
 
@@ -1139,8 +1447,6 @@ const handleDemoLogin = async (req, res) => {
       business_type_code: businessType,
       business_metadata: {},
       admin_credential_record: {
-        shop_password_plain: plainShopPassword,
-        admin_role_password_plain: String(password),
         recorded_at: new Date().toISOString(),
       },
       users: [
@@ -1277,6 +1583,7 @@ const handleDemoLogin = async (req, res) => {
   }
 
   const publicUser = buildPublicUser(targetShop, targetUser);
+  const sessionJti = crypto.randomUUID();
   const token = jwt.sign(
     {
       sub: targetUser.id,
@@ -1285,10 +1592,19 @@ const handleDemoLogin = async (req, res) => {
       tenantId: targetShop.tenantId,
       fullName: targetUser.full_name,
       isDemo: true,
+      jti: sessionJti,
     },
     JWT_SECRET,
     { expiresIn: DEMO_TOKEN_EXPIRES_IN }
   );
+  createUserSession(db, {
+    userId: targetUser.id,
+    shopCode: targetShop.code,
+    jti: sessionJti,
+    ipAddress: getClientIp(req),
+    userAgent: req.headers['user-agent'],
+    deviceName: inferDeviceName(deviceName, req),
+  });
   const demoMs = 7 * 24 * 60 * 60 * 1000;
   setSessionCookie(res, token, demoMs);
   const trialEndsAt = targetShop.trial_ends_at || null;
@@ -1320,11 +1636,32 @@ app.get('/', (_req, res) => {
   res.json({ message: 'SmartHub API is running' });
 });
 
-app.post('/api/auth/login', authLockoutGuard, handleLogin);
-app.post('/api/login', authLockoutGuard, handleLogin);
+const loginEndpointLimiter = createEndpointRateLimiter({
+  windowMs: 10 * 60_000,
+  max: 30,
+  keyBuilder: (req) => `login:${getClientIp(req)}:${normalizeShopCode(req.body?.shopCode)}`,
+});
+const checkShopLimiter = createEndpointRateLimiter({
+  windowMs: 10 * 60_000,
+  max: 40,
+  keyBuilder: (req) => `checkshop:${getClientIp(req)}:${normalizeShopCode(req.body?.shopCode)}`,
+});
+const demoAuthLimiter = createEndpointRateLimiter({
+  windowMs: 30 * 60_000,
+  max: 25,
+  keyBuilder: (req) => `demo:${getClientIp(req)}:${String(req.body?.mode || '')}`,
+});
+const registerLimiter = createEndpointRateLimiter({
+  windowMs: 30 * 60_000,
+  max: 15,
+  keyBuilder: (req) => `register:${getClientIp(req)}:${normalizeShopCode(req.body?.shopCode)}`,
+});
+
+app.post('/api/auth/login', loginEndpointLimiter, authLockoutGuard, captchaGuard(), handleLogin);
+app.post('/api/login', loginEndpointLimiter, authLockoutGuard, captchaGuard(), handleLogin);
 
 // ─── Step-1 login: verify shop credentials, return available roles ──────────
-app.post('/api/auth/check-shop', authLockoutGuard, async (req, res) => {
+app.post('/api/auth/check-shop', checkShopLimiter, authLockoutGuard, async (req, res) => {
   const { shopCode, shopPassword } = req.body ?? {};
   if (!shopCode || !shopPassword) {
     return res.status(400).json({ message: 'کد فروشگاه و رمز عبور الزامی است' });
@@ -1360,10 +1697,21 @@ app.post('/api/auth/check-shop', authLockoutGuard, async (req, res) => {
   const rolesPayload = (shop.users || [])
     .filter((u) => u.status === 'active')
     .map((u) => ({ role: u.role, full_name: u.full_name, status: 'active' }));
-  return res.json({ ok: true, shopName: shop.name, roles: rolesPayload, is_demo_shop: Boolean(shop.is_demo) });
+  db.stateByShop = db.stateByShop || {};
+  const shopState = ensureShopState(db, normalizedCode);
+  shopState.shopSettings = shopState.shopSettings && typeof shopState.shopSettings === 'object' ? shopState.shopSettings : {};
+  const adminRoleNameRaw = String(shopState.shopSettings.admin_role_name || '').trim();
+  const admin_role_name = adminRoleNameRaw || 'admin';
+  return res.json({
+    ok: true,
+    shopName: shop.name,
+    roles: rolesPayload,
+    is_demo_shop: Boolean(shop.is_demo),
+    admin_role_name,
+  });
 });
 app.post('/api/auth/google', handleGoogleAuth);
-app.post('/api/auth/demo-login', handleDemoLogin);
+app.post('/api/auth/demo-login', demoAuthLimiter, captchaGuard(), handleDemoLogin);
 
 // ─── OTP: Send 6-digit code to email ─────────────────────────────────────────
 app.post('/api/auth/otp/send', async (req, res) => {
@@ -1452,7 +1800,15 @@ app.post('/api/auth/otp/verify', (req, res) => {
   return res.json({ ok: true, message: 'ایمیل تأیید شد' });
 });
 
-app.post('/api/auth/logout', (_req, res) => {
+app.post('/api/auth/logout', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  ensureUserSessions(db);
+  if (req.auth?.jti) {
+    db.userSessions = db.userSessions.map((s) =>
+      String(s.token_jti) === String(req.auth.jti) ? { ...s, is_active: false } : s
+    );
+    await saveDatabase(db);
+  }
   res.clearCookie(COOKIE_NAME, { path: '/' });
   return res.json({ ok: true });
 });
@@ -1464,6 +1820,13 @@ app.post('/api/auth/2fa/verify-login', async (req, res) => {
   const { pendingToken, code } = req.body ?? {};
   if (!pendingToken || !code) {
     return res.status(400).json({ message: 'pendingToken و code الزامی است' });
+  }
+  const attemptKey = getTotpAttemptKey(pendingToken, req);
+  const now = Date.now();
+  const lock = totpAttemptStore.get(attemptKey);
+  if (lock && lock.until && lock.until > now) {
+    const mins = Math.max(1, Math.ceil((lock.until - now) / 60_000));
+    return res.status(429).json({ message: `تلاش بیش‌ازحد 2FA. ${mins} دقیقه دیگر دوباره امتحان کنید.` });
   }
   let pending;
   try {
@@ -1491,12 +1854,20 @@ app.post('/api/auth/2fa/verify-login', async (req, res) => {
 
   const isValid = totpAuth.verify({ token: String(code).replace(/\s/g, ''), secret: user.totp_secret });
   if (!isValid) {
+    const attempts = (lock?.attempts || 0) + 1;
+    if (attempts >= 5) {
+      totpAttemptStore.set(attemptKey, { attempts, until: now + 10 * 60_000 });
+      return res.status(429).json({ message: 'تعداد تلاش 2FA بیش‌ازحد شد. ۱۰ دقیقه بعد دوباره تلاش کنید.' });
+    }
+    totpAttemptStore.set(attemptKey, { attempts, until: 0 });
     return res.status(401).json({ message: 'کد Google Authenticator نادرست است' });
   }
+  totpAttemptStore.delete(attemptKey);
 
   const publicUser = buildPublicUser(shop, user);
   const shopConfig = ensureShopConfig(db, shop.code);
   const sessionMs = Number(shopConfig.session_timeout_minutes || 120) * 60_000;
+  const sessionJti = crypto.randomUUID();
   const token = jwt.sign(
     {
       sub: user.id,
@@ -1505,10 +1876,19 @@ app.post('/api/auth/2fa/verify-login', async (req, res) => {
       tenantId: shop.tenantId,
       fullName: user.full_name,
       isDemo: Boolean(shop.is_demo),
+      jti: sessionJti,
     },
     JWT_SECRET,
     { expiresIn: TOKEN_EXPIRES_IN }
   );
+  createUserSession(db, {
+    userId: user.id,
+    shopCode: shop.code,
+    jti: sessionJti,
+    ipAddress: getClientIp(req),
+    userAgent: req.headers['user-agent'],
+    deviceName: inferDeviceName(req.body?.deviceName, req),
+  });
 
   setSessionCookie(res, token, sessionMs);
   await appendLoginAudit(db, {
@@ -1617,7 +1997,12 @@ const shopToTenant = (shop, db) => {
   const salesToday = invoices
     .filter((i) => String(i.invoice_date || '').slice(0, 10) === today && String(i.status || '') === 'completed')
     .reduce((s, i) => s + Number(i.total || 0), 0);
-  const rec = shop.admin_credential_record && typeof shop.admin_credential_record === 'object' ? shop.admin_credential_record : null;
+  const rec =
+    shop.admin_credential_record && typeof shop.admin_credential_record === 'object'
+      ? {
+          recorded_at: shop.admin_credential_record.recorded_at || null,
+        }
+      : null;
   return {
     id: shop.tenantId || shop.code,
     shop_name: shop.name,
@@ -1644,7 +2029,7 @@ const shopToTenant = (shop, db) => {
     users_count: Array.isArray(shop.users) ? shop.users.length : 0,
     products_count: productsCount,
     sales_today: salesToday,
-    /** فقط برای پنل ابرادمین — رمز ذخیره‌شده هنگام ایجاد/تأیید/بازنشانی */
+    /** فقط متادیتا برای پنل ابرادمین — بدون ذخیره/نمایش رمز */
     credential_record: shop.code === 'SUPERADMIN' ? null : rec,
   };
 };
@@ -1675,6 +2060,10 @@ app.post('/api/master/tenants', authMiddleware, async (req, res) => {
   const tenantId = nextId(db.shops.map((s) => ({ id: s.tenantId })));
   const userId = nextId(db.shops.flatMap((s) => s.users || []));
   const pass = String(shop_password || generateCode('P', 12));
+  if (shop_password != null && String(shop_password).trim()) {
+    const passErr = validateStrongPassword(pass);
+    if (passErr) return res.status(400).json({ message: `رمز فروشگاه نامعتبر است: ${passErr}` });
+  }
   const rolePass = generateCode('R', 12);
 
   const shop = {
@@ -1704,8 +2093,6 @@ app.post('/api/master/tenants', authMiddleware, async (req, res) => {
   };
 
   shop.admin_credential_record = {
-    shop_password_plain: pass,
-    admin_role_password_plain: rolePass,
     recorded_at: new Date().toISOString(),
   };
 
@@ -1758,8 +2145,9 @@ app.put('/api/master/tenants/:code', authMiddleware, async (req, res) => {
       return res.status(403).json({ message: 'فقط ابرادمین می‌تواند رمز نقش مدیر را بازنشانی کند' });
     }
     const raw = String(arp).trim();
-    if (raw.length < 4) {
-      return res.status(400).json({ message: 'رمز نقش مدیر باید حداقل ۴ کاراکتر باشد' });
+    const passErr = validateStrongPassword(raw);
+    if (passErr) {
+      return res.status(400).json({ message: `رمز نقش مدیر نامعتبر است: ${passErr}` });
     }
     const adminForPwd = shop.users.find((u) => u.role === 'admin');
     if (!adminForPwd) {
@@ -1768,7 +2156,6 @@ app.put('/api/master/tenants/:code', authMiddleware, async (req, res) => {
     adminForPwd.passwordHash = await bcrypt.hash(raw, 10);
     shop.admin_credential_record = {
       ...(shop.admin_credential_record && typeof shop.admin_credential_record === 'object' ? shop.admin_credential_record : {}),
-      admin_role_password_plain: raw,
       recorded_at: new Date().toISOString(),
     };
   }
@@ -1947,13 +2334,14 @@ app.post('/api/payments/hesabpay/init', async (req, res) => {
 });
 
 app.post('/api/payments/hesabpay/webhook', async (req, res) => {
-  const webhookSecret = process.env.HESABPAY_WEBHOOK_SECRET || '';
   const providedSecret = req.headers['x-hesabpay-webhook-secret'];
-  if (webhookSecret && providedSecret !== webhookSecret) {
+  if (!HESABPAY_WEBHOOK_SECRET || !timingSafeEqualString(providedSecret, HESABPAY_WEBHOOK_SECRET)) {
     return res.status(401).json({ message: 'Webhook secret معتبر نیست' });
   }
 
-  const { paymentId, gatewayTransactionId, status } = req.body ?? {};
+  const { paymentId, gatewayTransactionId, status, eventId } = req.body ?? {};
+  const eventIdHeader = req.headers['x-hesabpay-event-id'];
+  const incomingEventId = String(eventId || eventIdHeader || '').trim();
   const db = await loadDatabase();
   ensurePaymentStructures(db);
 
@@ -1963,23 +2351,30 @@ app.post('/api/payments/hesabpay/webhook', async (req, res) => {
   );
   if (!payment) return res.status(404).json({ message: 'پرداخت هدف یافت نشد' });
 
-  const normalized = String(status || '').toLowerCase();
-  if (normalized === 'paid' || normalized === 'success') {
-    payment.pay_status = 'paid_pending_admin';
-  } else if (normalized === 'failed') {
-    payment.pay_status = 'failed';
-  } else if (normalized === 'cancelled' || normalized === 'canceled') {
-    payment.pay_status = 'cancelled';
-  } else {
-    payment.pay_status = 'gateway_pending';
+  if (incomingEventId) {
+    payment.webhook_event_ids = Array.isArray(payment.webhook_event_ids) ? payment.webhook_event_ids : [];
+    if (payment.webhook_event_ids.includes(incomingEventId)) {
+      return res.json({ ok: true, paymentId: payment.id, status: payment.pay_status, deduplicated: true });
+    }
+    payment.webhook_event_ids.unshift(incomingEventId);
+    if (payment.webhook_event_ids.length > 100) {
+      payment.webhook_event_ids = payment.webhook_event_ids.slice(0, 100);
+    }
   }
+  const nextGatewayStatus = normalizeGatewayStatus(status);
+  const transition = applyPaymentStatusTransition(payment.pay_status, nextGatewayStatus);
+  payment.pay_status = transition.nextStatus;
   payment.updated_at = new Date().toISOString();
-  appendPaymentEvent(db, payment.id, 'hesabpay_webhook', { status: normalized || 'unknown' });
+  appendPaymentEvent(db, payment.id, 'hesabpay_webhook', {
+    status: String(status || 'unknown').toLowerCase(),
+    event_id: incomingEventId || null,
+    transition: transition.reason,
+  });
   await saveDatabase(db);
   return res.json({ ok: true, paymentId: payment.id, status: payment.pay_status });
 });
 
-app.post('/api/register', async (req, res) => {
+app.post('/api/register', registerLimiter, captchaGuard(), async (req, res) => {
   const { shopCode, shopName, shopPassword, ownerName, ownerUsername, rolePassword } = req.body ?? {};
   if (!shopCode || !shopName || !shopPassword || !ownerName) {
     return res.status(400).json({ message: 'اطلاعات ثبت‌نام ناقص است' });
@@ -1987,12 +2382,10 @@ app.post('/api/register', async (req, res) => {
   if (!/^[A-Za-z0-9_-]{4,20}$/.test(String(shopCode))) {
     return res.status(400).json({ message: 'کد فروشگاه باید ۴ تا ۲۰ کاراکتر و فقط شامل حروف/اعداد باشد' });
   }
-  if (String(shopPassword).length < 8) {
-    return res.status(400).json({ message: 'رمز فروشگاه باید حداقل ۸ کاراکتر باشد' });
-  }
-  if (String(rolePassword || '1234').length < 4) {
-    return res.status(400).json({ message: 'رمز نقش باید حداقل ۴ کاراکتر باشد' });
-  }
+  const shopPassErr = validateStrongPassword(shopPassword);
+  if (shopPassErr) return res.status(400).json({ message: `رمز فروشگاه نامعتبر است: ${shopPassErr}` });
+  const rolePassErr = validateStrongPassword(rolePassword || '');
+  if (rolePassErr) return res.status(400).json({ message: `رمز نقش نامعتبر است: ${rolePassErr}` });
 
   const db = await loadDatabase();
   const normalizedCode = String(shopCode).trim().toUpperCase();
@@ -2002,7 +2395,7 @@ app.post('/api/register', async (req, res) => {
   }
 
   const tenantId = nextId(db.shops.map((shop) => ({ id: shop.tenantId })));
-  const adminRolePassword = String(rolePassword || '1234');
+  const adminRolePassword = String(rolePassword);
   const ownerEmail = String(req.body.email || '').trim();
   const shop = {
     code: normalizedCode,
@@ -2071,6 +2464,7 @@ app.post('/api/register', async (req, res) => {
 
 app.get('/api/auth/me', authMiddleware, async (req, res) => {
   const db = await loadDatabase();
+  ensureUserSessions(db);
   const shop = db.shops.find((s) => s.code === req.auth.shopCode);
   if (!shop) {
     return res.status(404).json({ message: 'فروشگاه یافت نشد' });
@@ -2081,12 +2475,82 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
     return res.status(404).json({ message: 'کاربر یافت نشد' });
   }
   const shopConfig = ensureShopConfig(db, shop.code);
+  if (req.auth?.jti) {
+    const idx = db.userSessions.findIndex(
+      (s) =>
+        s.is_active &&
+        String(s.token_jti) === String(req.auth.jti) &&
+        Number(s.user_id) === Number(req.auth.sub) &&
+        String(s.shop_code) === String(req.auth.shopCode)
+    );
+    if (idx >= 0) {
+      db.userSessions[idx].last_activity_at = new Date().toISOString();
+      await saveDatabase(db);
+    }
+  }
   return res.json({
     user: buildPublicUser(shop, user),
     shop: { code: shop.code, name: shop.name, tenant_id: shop.tenantId },
     shop_meta: buildShopMeta(shop),
     sessionTimeoutMinutes: Number(shopConfig.session_timeout_minutes || 120),
   });
+});
+
+app.get('/api/user/sessions', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  ensureUserSessions(db);
+  const mine = db.userSessions
+    .filter(
+      (s) =>
+        s.is_active &&
+        Number(s.user_id) === Number(req.auth.sub) &&
+        String(s.shop_code) === String(req.auth.shopCode)
+    )
+    .sort((a, b) => String(b.last_activity_at || '').localeCompare(String(a.last_activity_at || '')));
+  return res.json({
+    sessions: mine.map((s) => ({
+      id: s.id,
+      device_name: s.device_name,
+      ip_address: s.ip_address,
+      user_agent: s.user_agent,
+      created_at: s.created_at,
+      last_activity_at: s.last_activity_at,
+      is_current: req.auth?.jti ? String(s.token_jti) === String(req.auth.jti) : false,
+    })),
+  });
+});
+
+app.delete('/api/user/sessions/:id', authMiddleware, async (req, res) => {
+  const sid = Number(req.params.id);
+  if (!sid) return res.status(400).json({ message: 'شناسه نشست نامعتبر است' });
+  const db = await loadDatabase();
+  ensureUserSessions(db);
+  const idx = db.userSessions.findIndex(
+    (s) =>
+      Number(s.id) === sid &&
+      Number(s.user_id) === Number(req.auth.sub) &&
+      String(s.shop_code) === String(req.auth.shopCode)
+  );
+  if (idx < 0) return res.status(404).json({ message: 'نشست یافت نشد' });
+  const wasCurrent = req.auth?.jti && String(db.userSessions[idx].token_jti) === String(req.auth.jti);
+  db.userSessions[idx].is_active = false;
+  db.userSessions[idx].last_activity_at = new Date().toISOString();
+  await saveDatabase(db);
+  if (wasCurrent) res.clearCookie(COOKIE_NAME, { path: '/' });
+  return res.json({ ok: true });
+});
+
+app.delete('/api/user/sessions', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  ensureUserSessions(db);
+  db.userSessions = db.userSessions.map((s) =>
+    Number(s.user_id) === Number(req.auth.sub) && String(s.shop_code) === String(req.auth.shopCode)
+      ? { ...s, is_active: false, last_activity_at: new Date().toISOString() }
+      : s
+  );
+  await saveDatabase(db);
+  res.clearCookie(COOKIE_NAME, { path: '/' });
+  return res.json({ ok: true });
 });
 
 app.patch('/api/auth/me', authMiddleware, async (req, res) => {
@@ -2163,15 +2627,14 @@ app.put('/api/shop/users/:id', authMiddleware, async (req, res) => {
   return res.json({ ok: true, user: sanitizeShopUser(user) });
 });
 
-app.post('/api/shop/users/:id/set-password', authMiddleware, async (req, res) => {
+app.post('/api/shop/users/:id/set-password', authMiddleware, requirePrivileged2FA, async (req, res) => {
   if (req.auth.role !== 'admin') {
     return res.status(403).json({ message: 'فقط مدیر فروشگاه' });
   }
   const userId = Number(req.params.id);
   const password = req.body?.password;
-  if (!password || String(password).length < 4) {
-    return res.status(400).json({ message: 'رمز باید حداقل ۴ کاراکتر باشد' });
-  }
+  const passErr = validateStrongPassword(password);
+  if (passErr) return res.status(400).json({ message: `رمز نامعتبر است: ${passErr}` });
   const db = await loadDatabase();
   const shop = db.shops.find((s) => s.code === req.auth.shopCode);
   if (!shop) return res.status(404).json({ message: 'فروشگاه یافت نشد' });
@@ -2497,11 +2960,11 @@ app.get('/api/master/login-audit', authMiddleware, async (req, res) => {
   return res.json({ entries: db.loginAuditLog.slice(0, limit) });
 });
 
-app.post('/api/auth/change-password', authMiddleware, async (req, res) => {
+app.post('/api/auth/change-password', authMiddleware, requirePrivileged2FA, async (req, res) => {
   const { currentPassword, newPassword } = req.body ?? {};
-  if (!currentPassword || !newPassword || String(newPassword).length < 4) {
-    return res.status(400).json({ message: 'رمز جدید باید حداقل ۴ کاراکتر باشد' });
-  }
+  if (!currentPassword || !newPassword) return res.status(400).json({ message: 'رمز فعلی و رمز جدید الزامی است' });
+  const passErr = validateStrongPassword(newPassword);
+  if (passErr) return res.status(400).json({ message: `رمز جدید نامعتبر است: ${passErr}` });
 
   const db = await loadDatabase();
   const shop = db.shops.find((s) => s.code === req.auth.shopCode);
@@ -2628,6 +3091,18 @@ app.post('/api/settings/backup/restore', authMiddleware, async (req, res) => {
   if (!restoreData || typeof restoreData !== 'object') {
     return res.status(400).json({ message: 'فایل یا داده بازیابی نامعتبر است' });
   }
+  const payloadSize = Buffer.byteLength(JSON.stringify(restoreData), 'utf8');
+  if (payloadSize > 10 * 1024 * 1024) {
+    return res.status(413).json({ message: 'حجم بکاپ بسیار بزرگ است (حداکثر ۱۰MB)' });
+  }
+  const parsed = backupRestoreSchema.safeParse(restoreData);
+  if (!parsed.success) {
+    return res.status(400).json({ message: 'ساختار بکاپ نامعتبر است' });
+  }
+  restoreData = parsed.data;
+  if (hasUnsafeObjectKeys(restoreData)) {
+    return res.status(400).json({ message: 'کلیدهای ناامن در بکاپ شناسایی شد' });
+  }
   const meta = req.body?.meta && typeof req.body.meta === 'object' ? req.body.meta : null;
   if (meta?.checksum && typeof meta.checksum === 'string') {
     const verifyStr = JSON.stringify(restoreData);
@@ -2639,6 +3114,10 @@ app.post('/api/settings/backup/restore', authMiddleware, async (req, res) => {
 
   const db = await loadDatabase();
   const targetShop = resolveCrossShopTarget(req, db, req.body?.shopCode);
+  const targetShopRecord = db.shops.find((s) => s.code === targetShop);
+  if (targetShopRecord?.is_demo) {
+    return res.status(403).json({ message: 'در حساب رایگان/آزمایشی بازیابی فایل JSON غیرفعال است.' });
+  }
   if (!db.shops.some((s) => s.code === targetShop)) {
     return res.status(404).json({ message: 'فروشگاه هدف یافت نشد' });
   }
@@ -2738,6 +3217,220 @@ app.put('/api/state', authMiddleware, async (req, res) => {
   db.stateByShop[targetShop] = mergeShopStatePayload(prev, incoming);
   await saveDatabase(db);
   return res.json({ ok: true, updatedAt: new Date().toISOString() });
+});
+
+app.get('/api/branches', authMiddleware, async (req, res) => {
+  if (req.auth.role === 'super_admin') return res.status(403).json({ message: 'برای دکان معتبر است' });
+  const db = await loadDatabase();
+  const state = ensureShopState(db, req.auth.shopCode);
+  return res.json({ branches: state.branches });
+});
+
+app.post('/api/branches', authMiddleware, async (req, res) => {
+  if (!['admin', 'super_admin'].includes(String(req.auth.role))) return res.status(403).json({ message: 'عدم دسترسی' });
+  const db = await loadDatabase();
+  const state = ensureShopState(db, req.auth.shopCode);
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ message: 'نام شعبه الزامی است' });
+  const code = String(req.body?.code || name).trim().toUpperCase().slice(0, 16);
+  const branch = {
+    id: nextId(state.branches),
+    tenant_id: Number(req.auth.tenantId || 1),
+    name,
+    code,
+    is_active: true,
+    created_at: new Date().toISOString(),
+  };
+  state.branches.push(branch);
+  state.warehouses.push({
+    id: nextId(state.warehouses),
+    tenant_id: Number(req.auth.tenantId || 1),
+    branch_id: branch.id,
+    name: `گدام ${name}`,
+    type: 'warehouse',
+    address: String(req.body?.address || ''),
+    created_at: new Date().toISOString(),
+  });
+  await saveDatabase(db);
+  return res.status(201).json({ branch });
+});
+
+app.get('/api/branches/:id/inventory', authMiddleware, async (req, res) => {
+  const branchId = Number(req.params.id);
+  if (!branchId) return res.status(400).json({ message: 'شناسه شعبه نامعتبر است' });
+  const db = await loadDatabase();
+  const state = ensureShopState(db, req.auth.shopCode);
+  const warehouseIds = state.warehouses.filter((w) => Number(w.branch_id) === branchId).map((w) => Number(w.id));
+  const rows = state.stocks
+    .filter((s) => warehouseIds.includes(Number(s.warehouse_id)))
+    .map((s) => {
+      const p = state.products.find((x) => Number(x.id) === Number(s.product_id));
+      return {
+        product_id: s.product_id,
+        product_name: p?.name || '—',
+        quantity: Number(s.quantity || 0),
+        reserved_quantity: Number(s.reserved_quantity || 0),
+        warehouse_id: s.warehouse_id,
+      };
+    });
+  return res.json({ branch_id: branchId, inventory: rows });
+});
+
+app.post('/api/transfers', authMiddleware, async (req, res) => {
+  if (!['admin', 'stock_keeper'].includes(String(req.auth.role))) return res.status(403).json({ message: 'عدم دسترسی' });
+  const db = await loadDatabase();
+  const state = ensureShopState(db, req.auth.shopCode);
+  const fromWarehouseId = Number(req.body?.from_warehouse_id);
+  const toWarehouseId = Number(req.body?.to_warehouse_id);
+  const productId = Number(req.body?.product_id);
+  const quantity = Number(req.body?.quantity || 0);
+  const reason = String(req.body?.reason || 'manual_transfer');
+  if (!fromWarehouseId || !toWarehouseId || !productId || quantity <= 0) {
+    return res.status(400).json({ message: 'ورودی انتقال نامعتبر است' });
+  }
+  const from = state.stocks.find((s) => Number(s.warehouse_id) === fromWarehouseId && Number(s.product_id) === productId);
+  if (!from || Number(from.quantity || 0) < quantity) {
+    return res.status(400).json({ message: 'موجودی مبدا کافی نیست' });
+  }
+  from.quantity = Number(from.quantity || 0) - quantity;
+  let to = state.stocks.find((s) => Number(s.warehouse_id) === toWarehouseId && Number(s.product_id) === productId);
+  if (!to) {
+    to = {
+      id: nextId(state.stocks),
+      warehouse_id: toWarehouseId,
+      product_id: productId,
+      quantity: 0,
+      reserved_quantity: 0,
+      created_at: new Date().toISOString(),
+    };
+    state.stocks.push(to);
+  }
+  to.quantity = Number(to.quantity || 0) + quantity;
+  state.stockMovements.unshift({
+    id: nextId(state.stockMovements),
+    from_warehouse_id: fromWarehouseId,
+    to_warehouse_id: toWarehouseId,
+    product_id: productId,
+    quantity,
+    reason,
+    created_by: Number(req.auth.sub),
+    created_at: new Date().toISOString(),
+  });
+  await saveDatabase(db);
+  return res.json({ ok: true });
+});
+
+app.post('/api/legal/sign', authMiddleware, async (req, res) => {
+  const content = String(req.body?.content || '');
+  if (!content) return res.status(400).json({ message: 'متن سند الزامی است' });
+  const { privateKey } = getLegalKeyPair();
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(content);
+  signer.end();
+  const signature = signer.sign(privateKey, 'base64');
+  const db = await loadDatabase();
+  const state = ensureShopState(db, req.auth.shopCode);
+  const row = {
+    id: nextId(state.signatureHistory),
+    signer_id: Number(req.auth.sub),
+    signer_name: req.auth.fullName || 'user',
+    timestamp: new Date().toISOString(),
+    signature,
+    digest_alg: 'SHA256',
+    document_content: content,
+  };
+  state.signatureHistory.unshift(row);
+  await saveDatabase(db);
+  return res.json({ ok: true, signature_id: row.id, signature, signed_at: row.timestamp });
+});
+
+app.post('/api/legal/verify', authMiddleware, async (req, res) => {
+  const content = String(req.body?.content || '');
+  const signature = String(req.body?.signature || '');
+  if (!content || !signature) return res.status(400).json({ message: 'content/signature لازم است' });
+  const { publicKey } = getLegalKeyPair();
+  const verifier = crypto.createVerify('RSA-SHA256');
+  verifier.update(content);
+  verifier.end();
+  const valid = verifier.verify(publicKey, signature, 'base64');
+  return res.json({ valid });
+});
+
+app.get('/api/legal/pdf/:signatureId', authMiddleware, async (req, res) => {
+  const sid = Number(req.params.signatureId);
+  const db = await loadDatabase();
+  const state = ensureShopState(db, req.auth.shopCode);
+  const rec = state.signatureHistory.find((s) => Number(s.id) === sid);
+  if (!rec) return res.status(404).json({ message: 'رکورد امضا یافت نشد' });
+  const visible = String(req.query.visible || '1') !== '0';
+  const body = [
+    '%PDF-1.1',
+    '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+    '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj',
+    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources << >> >> endobj',
+    `4 0 obj << /Length 120 >> stream\nBT /F1 12 Tf 50 790 Td (${visible ? `Signed by ${rec.signer_name} at ${rec.timestamp}` : 'Digitally signed document'}) Tj ET\nendstream endobj`,
+    'xref 0 5',
+    '0000000000 65535 f ',
+    '0000000010 00000 n ',
+    '0000000060 00000 n ',
+    '0000000117 00000 n ',
+    '0000000240 00000 n ',
+    'trailer << /Root 1 0 R /Size 5 >>',
+    'startxref',
+    '360',
+    '%%EOF',
+  ].join('\n');
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="signed-${sid}.pdf"`);
+  return res.send(Buffer.from(body));
+});
+
+app.post('/api/notifications/send', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const state = ensureShopState(db, req.auth.shopCode);
+  const row = {
+    id: nextId(state.notificationsV2),
+    user_id: Number(req.body?.user_id || req.auth.sub),
+    type: String(req.body?.type || 'in_app'),
+    title: String(req.body?.title || 'اعلان'),
+    body: String(req.body?.body || ''),
+    data: req.body?.data && typeof req.body.data === 'object' ? req.body.data : {},
+    status: 'pending',
+    retry_count: 0,
+    created_at: new Date().toISOString(),
+    sent_at: null,
+  };
+  state.notificationsV2.unshift(row);
+  row.status = 'sent';
+  row.sent_at = new Date().toISOString();
+  await saveDatabase(db);
+  return res.status(201).json({ notification: row });
+});
+
+app.get('/api/notifications', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const state = ensureShopState(db, req.auth.shopCode);
+  return res.json({ notifications: state.notificationsV2.slice(0, 200) });
+});
+
+app.post('/api/system/retention/run', authMiddleware, async (req, res) => {
+  if (req.auth.role !== 'super_admin') return res.status(403).json({ message: 'فقط ابرادمین' });
+  const db = await loadDatabase();
+  let moved = 0;
+  ensureUserSessions(db);
+  db.archivedUserSessions = Array.isArray(db.archivedUserSessions) ? db.archivedUserSessions : [];
+  const sixMonthsAgo = Date.now() - 180 * 24 * 60 * 60 * 1000;
+  const keep = [];
+  for (const s of db.userSessions) {
+    const ts = new Date(s.last_activity_at || s.created_at || 0).getTime();
+    if (!s.is_active && ts > 0 && ts < sixMonthsAgo) {
+      db.archivedUserSessions.push({ ...s, archived_at: new Date().toISOString() });
+      moved += 1;
+    } else keep.push(s);
+  }
+  db.userSessions = keep;
+  await saveDatabase(db);
+  return res.json({ ok: true, moved });
 });
 
 app.post('/api/sales/invoices', authMiddleware, async (req, res) => {
@@ -2930,9 +3623,9 @@ app.get('/api/admin/payments', authMiddleware, async (req, res) => {
   return res.json({ payments });
 });
 
-app.post('/api/admin/payments/verify', authMiddleware, async (req, res) => {
-  if (!['super_admin', 'admin'].includes(req.auth.role)) {
-    return res.status(403).json({ message: 'فقط ادمین اجازه تایید دارد' });
+app.post('/api/admin/payments/verify', authMiddleware, requirePrivileged2FA, async (req, res) => {
+  if (req.auth.role !== 'super_admin') {
+    return res.status(403).json({ message: 'فقط ابرادمین اجازه تایید/رد پرداخت دارد' });
   }
   const { paymentId, decision, note } = req.body ?? {};
   if (!paymentId || !decision) {
@@ -2946,10 +3639,6 @@ app.post('/api/admin/payments/verify', authMiddleware, async (req, res) => {
   ensurePaymentStructures(db);
   const payment = db.paymentRequests.find((p) => Number(p.id) === Number(paymentId));
   if (!payment) return res.status(404).json({ message: 'پرداخت یافت نشد' });
-  if (req.auth.role !== 'super_admin' && payment.shop_code !== req.auth.shopCode) {
-    return res.status(403).json({ message: 'اجازه دسترسی به این پرداخت را ندارید' });
-  }
-
   if (payment.pay_status === 'approved' || payment.pay_status === 'rejected') {
     return res.status(400).json({ message: 'این پرداخت قبلاً تأیید یا رد شده است' });
   }
@@ -2996,12 +3685,6 @@ app.post('/api/admin/payments/verify', authMiddleware, async (req, res) => {
             </div>`,
           });
         }
-        payment.plain_credentials = {
-          shopCode: prov.shopCode,
-          shopPassword: prov.shopPassword,
-          adminRolePassword: prov.adminRolePassword,
-          issued_at: new Date().toISOString(),
-        };
       } catch (e) {
         return res.status(500).json({ message: e.message || 'خطا در ایجاد فروشگاه' });
       }

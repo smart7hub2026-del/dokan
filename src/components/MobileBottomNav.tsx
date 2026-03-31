@@ -3,7 +3,6 @@ import {
   ShoppingCart,
   Package,
   Users,
-  Menu,
   Building2,
   BarChart3,
   Wallet,
@@ -77,13 +76,11 @@ export default function MobileBottomNav({
   role,
   activePage,
   onNavigate,
-  onOpenMenu,
   onOpenSearch,
 }: {
   role: Role;
   activePage: string;
   onNavigate: (page: string) => void;
-  onOpenMenu: () => void;
   onOpenSearch: () => void;
 }) {
   const { t, isDark } = useApp();
@@ -167,16 +164,6 @@ export default function MobileBottomNav({
         >
           <Search size={20} strokeWidth={ICON} className="shrink-0" />
           <span className="text-[9px] font-bold truncate">{t('search')}</span>
-        </button>
-        <button
-          type="button"
-          onClick={onOpenMenu}
-          className={`flex flex-col items-center justify-center gap-0.5 min-w-0 py-1.5 px-1 rounded-xl flex-1 max-w-[3.5rem] transition-all ${
-            isDark ? 'text-slate-500 hover:text-white hover:bg-white/5' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
-          }`}
-        >
-          <Menu size={20} strokeWidth={ICON} className="shrink-0" />
-          <span className="text-[9px] font-bold truncate">منو</span>
         </button>
       </div>
     </nav>

@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Search, ShoppingCart, Trash2, X, Check, Package, User, CreditCard, Banknote, Printer, ChevronDown, ChevronUp, Mic, MicOff, Send } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Search, ShoppingCart, Trash2, X, Check, Package, User, CreditCard, Banknote, Printer, ChevronDown, ChevronUp, Mic, MicOff, Send, ScanLine, ImageIcon } from 'lucide-react';
 import { Invoice, InvoiceItem, Product, type CurrencyCode } from '../data/mockData';
 import { useToast } from './Toast';
 import { useApp } from '../context/AppContext';
@@ -8,6 +8,8 @@ import { apiCreateSaleInvoice } from '../services/api';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
 import { buildProductImagesPrintSection } from '../utils/invoicePrintProductImages';
 import { bookToProductForSale } from '../utils/bookInventory';
+import { decodeBarcodeFromImageFile } from '../utils/barcodeDecode';
+import VisualProductSearchPanel from './VisualProductSearchPanel';
 import FormModal from './ui/FormModal';
 
 interface CartItem extends InvoiceItem {
@@ -234,6 +236,8 @@ export default function SalesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showNotifyUserModal, setShowNotifyUserModal] = useState(false);
   const [notifyTargetUserId, setNotifyTargetUserId] = useState<number | ''>('');
+  const [showVisualSearch, setShowVisualSearch] = useState(false);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
 
   const recipientUsers = useMemo(() => {
     const tid = storeCurrentUser?.tenant_id;
@@ -246,6 +250,16 @@ export default function SalesPage() {
   }, [storeUsers, storeCurrentUser]);
 
   const canSendInvoiceNotify = storeCurrentUser?.role === 'admin' && recipientUsers.length > 0;
+
+  const onPickBarcode = async (file: File) => {
+    const code = await decodeBarcodeFromImageFile(file);
+    if (code) {
+      setProductSearch(code);
+      success('بارکد خوانده شد', code);
+      return;
+    }
+    warning('بارکد پیدا نشد', 'از تصویر واضح‌تر یا نور بهتر استفاده کنید');
+  };
 
   useEffect(() => {
     if (!showPrintSizeModal) return;
@@ -517,6 +531,34 @@ export default function SalesPage() {
               <input value={productSearch} onChange={e => setProductSearch(e.target.value)}
                 placeholder="جستجوی محصول (نام، بارکد، کد)..."
                 className={`w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-2.5 pr-10 text-white placeholder-slate-500 text-sm focus:border-indigo-500 outline-none ${supportedProduct ? 'pl-10' : ''}`} />
+              <input
+                ref={barcodeInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void onPickBarcode(file);
+                  e.target.value = '';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => barcodeInputRef.current?.click()}
+                className={`absolute ${supportedProduct ? 'left-11' : 'left-2'} p-1.5 rounded-lg transition-all text-slate-400 hover:text-sky-400 hover:bg-sky-500/10`}
+                title="اسکن بارکد از دوربین موبایل"
+              >
+                <ScanLine size={16} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowVisualSearch((v) => !v)}
+                className={`absolute ${supportedProduct ? 'left-20' : 'left-11'} p-1.5 rounded-lg transition-all ${showVisualSearch ? 'bg-violet-500/20 text-violet-300' : 'text-slate-400 hover:text-violet-300 hover:bg-violet-500/10'}`}
+                title="جستجوی تصویری در فروش"
+              >
+                <ImageIcon size={16} />
+              </button>
               {supportedProduct && (
                 <button
                   type="button"
@@ -529,6 +571,11 @@ export default function SalesPage() {
               )}
             </div>
           </div>
+          {showVisualSearch && (
+            <div className="glass rounded-2xl p-4 border border-violet-500/20">
+              <VisualProductSearchPanel variant="embedded" onSelectProduct={addToCart} />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-[480px] overflow-y-auto pl-1">
             {filteredProducts.map(p => {

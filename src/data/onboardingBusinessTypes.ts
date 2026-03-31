@@ -41,7 +41,7 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
   {
     id: 'pharmacy',
     lucideIcon: 'Pill',
-    isActive: true,
+    isActive: false,
     titleFa: 'داروخانه',
     titleEn: 'Pharmacy',
     accent: 'from-cyan-600/90 to-blue-950/90',
@@ -49,7 +49,7 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
   {
     id: 'mobile_accessories',
     lucideIcon: 'Smartphone',
-    isActive: true,
+    isActive: false,
     titleFa: 'موبایل و لوازم جانبی',
     titleEn: 'Mobile & accessories',
     accent: 'from-violet-600/90 to-indigo-950/90',
@@ -57,7 +57,7 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
   {
     id: 'restaurant',
     lucideIcon: 'UtensilsCrossed',
-    isActive: true,
+    isActive: false,
     titleFa: 'رستوران و فست‌فود',
     titleEn: 'Restaurant & fast food',
     accent: 'from-orange-600/90 to-red-950/90',
@@ -65,7 +65,7 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
   {
     id: 'gold_jewelry',
     lucideIcon: 'Gem',
-    isActive: true,
+    isActive: false,
     titleFa: 'زرگری و طلا',
     titleEn: 'Gold & jewelry',
     accent: 'from-amber-500/90 to-yellow-950/90',
@@ -73,7 +73,7 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
   {
     id: 'clothing',
     lucideIcon: 'Shirt',
-    isActive: true,
+    isActive: false,
     titleFa: 'پوشاک',
     titleEn: 'Clothing',
     accent: 'from-rose-600/90 to-fuchsia-950/90',
@@ -81,7 +81,7 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
   {
     id: 'home_appliances',
     lucideIcon: 'Refrigerator',
-    isActive: true,
+    isActive: false,
     titleFa: 'لوازم خانگی',
     titleEn: 'Home appliances',
     accent: 'from-sky-600/90 to-blue-950/90',
@@ -89,7 +89,7 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
   {
     id: 'hardware_building',
     lucideIcon: 'BrickWall',
-    isActive: true,
+    isActive: false,
     titleFa: 'آهن‌فروشی و مصالح ساختمانی',
     titleEn: 'Hardware & building materials',
     accent: 'from-stone-600/90 to-neutral-950/90',
@@ -97,7 +97,7 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
   {
     id: 'auto_parts',
     lucideIcon: 'Car',
-    isActive: true,
+    isActive: false,
     titleFa: 'لوازم موتر و لوازم یدکی',
     titleEn: 'Auto parts',
     accent: 'from-slate-700/90 to-slate-950/90',
@@ -105,7 +105,7 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
   {
     id: 'bakery',
     lucideIcon: 'Croissant',
-    isActive: true,
+    isActive: false,
     titleFa: 'نانوایی و شیرینی',
     titleEn: 'Bakery & confectionery',
     accent: 'from-amber-500/90 to-orange-900/90',

@@ -301,4 +301,61 @@ describe('API auth and state', () => {
     expect(res.status).toBe(200);
     expect(res.body.shop.code).toBe('SHOP001');
   });
+
+  it('lists user sessions and revoking one invalidates its JWT', async () => {
+    const a = await request(app).post('/api/auth/login').send({
+      shopCode: 'SHOP001',
+      shopPassword: 'shop123',
+      role: 'admin',
+      rolePassword: '1234',
+      deviceName: 'Device A',
+    });
+    expect(a.status).toBe(200);
+    const tokenA = a.body.token as string;
+
+    const b = await request(app).post('/api/auth/login').send({
+      shopCode: 'SHOP001',
+      shopPassword: 'shop123',
+      role: 'admin',
+      rolePassword: '1234',
+      deviceName: 'Device B',
+    });
+    expect(b.status).toBe(200);
+    const tokenB = b.body.token as string;
+
+    const listB = await request(app).get('/api/user/sessions').set('Authorization', `Bearer ${tokenB}`);
+    expect(listB.status).toBe(200);
+    expect(listB.body.sessions.length).toBe(2);
+    const current = listB.body.sessions.find((s: { is_current?: boolean }) => s.is_current);
+    expect(current.device_name).toBe('Device B');
+    const other = listB.body.sessions.find((s: { is_current?: boolean }) => !s.is_current);
+    expect(other.device_name).toBe('Device A');
+
+    const del = await request(app)
+      .delete(`/api/user/sessions/${other.id}`)
+      .set('Authorization', `Bearer ${tokenB}`);
+    expect(del.status).toBe(200);
+
+    const blocked = await request(app).get('/api/state').set('Authorization', `Bearer ${tokenA}`);
+    expect(blocked.status).toBe(401);
+    const okStill = await request(app).get('/api/state').set('Authorization', `Bearer ${tokenB}`);
+    expect(okStill.status).toBe(200);
+  });
+
+  it('logout all sessions invalidates current JWT', async () => {
+    const login = await request(app).post('/api/auth/login').send({
+      shopCode: 'SHOP001',
+      shopPassword: 'shop123',
+      role: 'admin',
+      rolePassword: '1234',
+    });
+    expect(login.status).toBe(200);
+    const token = login.body.token as string;
+
+    const out = await request(app).delete('/api/user/sessions').set('Authorization', `Bearer ${token}`);
+    expect(out.status).toBe(200);
+
+    const blocked = await request(app).get('/api/state').set('Authorization', `Bearer ${token}`);
+    expect(blocked.status).toBe(401);
+  });
 });

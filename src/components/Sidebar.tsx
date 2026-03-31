@@ -3,7 +3,7 @@ import {
   Megaphone, FileText, Building2, LogOut,
   BarChart3, Package, Bell, DollarSign,
   UserCheck, CreditCard, ChevronLeft, Shield, BookOpen, Truck,
-  Tags, ScanSearch, ClipboardList, Warehouse,
+  Tags, ClipboardList, Warehouse,
 } from 'lucide-react';
 
 import { useApp } from '../context/AppContext';
@@ -42,7 +42,6 @@ const adminLinks = [
   { id: 'invoices', icon: FileText, labelKey: 'invoices' },
   { id: 'products', icon: Package, labelKey: 'products' },
   { id: 'warehouse', icon: Warehouse, labelKey: 'warehouse_page' },
-  { id: 'image-search', icon: ScanSearch, labelKey: 'image_search' },
   { id: 'customers', icon: Users, labelKey: 'customers' },
   { id: 'suppliers', icon: Truck, labelKey: 'suppliers' },
   { id: 'debts', icon: CreditCard, labelKey: 'debts' },
@@ -62,7 +61,6 @@ const sellerLinks = [
   { id: 'sales', icon: ShoppingCart, labelKey: 'sales_pos' },
   { id: 'invoices', icon: FileText, labelKey: 'invoices' },
   { id: 'products', icon: Package, labelKey: 'products' },
-  { id: 'image-search', icon: ScanSearch, labelKey: 'image_search' },
   { id: 'customers', icon: Users, labelKey: 'customers' },
   { id: 'debts', icon: CreditCard, labelKey: 'debts' },
   { id: 'notifications', icon: Bell, labelKey: 'notifications' },
@@ -85,7 +83,6 @@ const stockLinks = [
   { id: 'products', icon: Package, labelKey: 'inventory_management' },
   { id: 'warehouse', icon: Warehouse, labelKey: 'warehouse_page' },
   { id: 'reorder-list', icon: ClipboardList, labelKey: 'reorder_list_title' },
-  { id: 'image-search', icon: ScanSearch, labelKey: 'image_search' },
   { id: 'suppliers', icon: Truck, labelKey: 'suppliers' },
   { id: 'invoices', icon: FileText, labelKey: 'purchase_invoices' },
   { id: 'reports', icon: FileText, labelKey: 'inventory_reports' },

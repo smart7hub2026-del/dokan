@@ -7,8 +7,11 @@ import {
   apiGetSubscriptionPayments,
   apiMasterPlatformBackup,
   apiMasterLoginAudit,
+  apiGetAdminPayments,
+  apiVerifyAdminPayment,
   type Tenant,
 } from '../services/api';
+import { formatDateByCalendar, formatDateTimeByCalendar, formatMonthLabelByCalendar, type CalendarMode } from '../utils/dateFormat';
 
 const StatCard = ({ icon: Icon, label, value, sub, color, subColor }: { icon: React.ElementType; label: string; value: string; sub?: string; color: string; subColor?: string }) => (
   <div className="stat-card glass rounded-2xl p-5 card-hover">
@@ -41,6 +44,7 @@ type SubPayment = { amount?: number; created_at?: string; shop_code?: string };
 
 export default function SuperAdminDashboard() {
   const authToken = useStore(s => s.authToken);
+  const calendarMode = (useStore(s => s.shopSettings.date_calendar) || 'jalali') as CalendarMode;
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [payments, setPayments] = useState<SubPayment[]>([]);
   const [loadError, setLoadError] = useState('');
@@ -48,6 +52,8 @@ export default function SuperAdminDashboard() {
   const [auditRows, setAuditRows] = useState<Record<string, unknown>[]>([]);
   const [auditError, setAuditError] = useState('');
   const [opsBusy, setOpsBusy] = useState(false);
+  const [adminPayments, setAdminPayments] = useState<Record<string, unknown>[]>([]);
+  const [payOpsBusy, setPayOpsBusy] = useState(false);
 
   useEffect(() => {
     const tok = authToken || undefined;
@@ -59,9 +65,11 @@ export default function SuperAdminDashboard() {
           apiGetTenants(tok),
           apiGetSubscriptionPayments(undefined, tok),
         ]);
+        const ap = await apiGetAdminPayments(tok);
         if (canceled) return;
         setTenants(tr.tenants || []);
         setPayments((pr.payments as SubPayment[]) || []);
+        setAdminPayments((ap.payments as Record<string, unknown>[]) || []);
         setLoadError('');
       } catch (e) {
         if (!canceled) setLoadError(e instanceof Error ? e.message : 'خطا در دریافت داده');
@@ -107,6 +115,23 @@ export default function SuperAdminDashboard() {
   const totalUsers = tenants.reduce((s, t) => s + Number(t.users_count || 0), 0);
   const premiumTenants = tenants.filter(t => t.subscription_plan === 'premium').length;
   const salesToday = tenants.reduce((s, t) => s + Number(t.sales_today || 0), 0);
+  const pendingPaymentQueue = adminPayments.filter((p) => {
+    const st = String(p.pay_status || '');
+    return !['approved', 'rejected'].includes(st);
+  });
+
+  const handleVerifyPayment = useCallback(async (id: number, decision: 'approve' | 'reject') => {
+    if (!authToken) return;
+    setPayOpsBusy(true);
+    try {
+      const res = await apiVerifyAdminPayment(id, decision, '', authToken);
+      setAdminPayments((prev) => prev.map((p) => (Number(p.id) === id ? (res.payment as Record<string, unknown>) : p)));
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'خطا در تایید پرداخت');
+    } finally {
+      setPayOpsBusy(false);
+    }
+  }, [authToken]);
 
   const chartData = useMemo(() => {
     const byMonth = new Map<string, { sales: number; tenants: number }>();
@@ -122,15 +147,15 @@ export default function SuperAdminDashboard() {
       const now = new Date();
       return Array.from({ length: 6 }, (_, i) => {
         const d = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-        return { name: d.toISOString().slice(0, 7), sales: 0, tenants: 0 };
+        return { name: formatMonthLabelByCalendar(d.toISOString().slice(0, 7), calendarMode), sales: 0, tenants: 0 };
       });
     }
     return keys.map((k) => ({
-      name: k,
+      name: formatMonthLabelByCalendar(k, calendarMode),
       sales: byMonth.get(k)!.sales,
       tenants: Math.max(1, Math.round(byMonth.get(k)!.sales / 50000)),
     }));
-  }, [payments]);
+  }, [payments, calendarMode]);
 
   return (
     <div className="space-y-6 fade-in">
@@ -213,7 +238,7 @@ export default function SuperAdminDashboard() {
                       {t.subscription_plan === 'premium' ? 'پریمیوم' : 'پایه'}
                     </span>
                   </td>
-                  <td className="py-3 px-3 text-slate-400 text-xs">{t.subscription_end}</td>
+                  <td className="py-3 px-3 text-slate-400 text-xs">{formatDateByCalendar(t.subscription_end, calendarMode)}</td>
                   <td className="py-3 px-3 text-emerald-400 font-medium">{Number(t.sales_today || 0).toLocaleString()} ؋</td>
                   <td className="py-3 px-3">
                     <span className={`text-xs px-2 py-1 rounded-full ${
@@ -228,6 +253,47 @@ export default function SuperAdminDashboard() {
           </table>
           {tenants.length === 0 && !loadError && (
             <p className="text-slate-500 text-sm text-center py-8">دکانی ثبت نشده یا توکن نامعتبر است.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="glass rounded-2xl p-5 border border-indigo-500/20">
+        <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+          <CreditCard size={18} className="text-indigo-300" /> صف تایید پرداخت فروشگاه‌ها (واقعی)
+        </h3>
+        <div className="space-y-2">
+          {pendingPaymentQueue.slice(0, 8).map((p) => (
+            <div key={String(p.id)} className="rounded-xl border border-white/10 bg-white/5 p-3 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-white text-sm font-bold truncate">
+                  {String(p.owner_name || 'کاربر')} — {String(p.plan || '')}
+                </p>
+                <p className="text-slate-400 text-xs">
+                  {Number(p.amount_afn || 0).toLocaleString()} ؋ | {String(p.pay_method || '')} | وضعیت: {String(p.pay_status || '')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  disabled={payOpsBusy}
+                  onClick={() => void handleVerifyPayment(Number(p.id), 'approve')}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600/80 hover:bg-emerald-500 text-white text-xs font-bold disabled:opacity-60"
+                >
+                  تایید
+                </button>
+                <button
+                  type="button"
+                  disabled={payOpsBusy}
+                  onClick={() => void handleVerifyPayment(Number(p.id), 'reject')}
+                  className="px-3 py-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-500 text-white text-xs font-bold disabled:opacity-60"
+                >
+                  رد
+                </button>
+              </div>
+            </div>
+          ))}
+          {pendingPaymentQueue.length === 0 && (
+            <p className="text-slate-400 text-sm text-center py-4">در حال حاضر درخواست پرداختی در صف تایید وجود ندارد.</p>
           )}
         </div>
       </div>
@@ -276,7 +342,7 @@ export default function SuperAdminDashboard() {
               <tbody className="divide-y divide-white/5 text-slate-300">
                 {auditRows.map((row) => (
                   <tr key={String(row.id ?? row.created_at)}>
-                    <td className="py-1.5 px-2 whitespace-nowrap">{String(row.created_at || '').slice(0, 19)}</td>
+                    <td className="py-1.5 px-2 whitespace-nowrap">{formatDateTimeByCalendar(String(row.created_at || ''), calendarMode)}</td>
                     <td className="py-1.5 px-2 font-mono">{String(row.shop_code || '')}</td>
                     <td className="py-1.5 px-2">{String(row.role || '')}</td>
                     <td className="py-1.5 px-2">{String(row.method || '')}</td>

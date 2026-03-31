@@ -8,6 +8,7 @@ import { PurchaseInvoice, useStore, type ShopSettings } from '../store/useStore'
 import { buildProductImagesPrintSection } from '../utils/invoicePrintProductImages';
 import type { Product, User } from '../data/mockData';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
+import { formatDateByCalendar, type CalendarMode } from '../utils/dateFormat';
 
 function normalizeInvoicePaperSize(s: string): InvoicePaperSize {
   return (INVOICE_PAPER_SIZES as readonly string[]).includes(s) ? (s as InvoicePaperSize) : '80mm';
@@ -321,6 +322,7 @@ export default function InvoicesPage() {
   const storeUsers = useStore(s => s.users);
   const addPurchaseListShare = useStore(s => s.addPurchaseListShare);
   const storeSettings = useStore(s => s.shopSettings);
+  const calendarMode = (storeSettings.date_calendar || 'jalali') as CalendarMode;
   const updateShopSettings = useStore(s => s.updateShopSettings);
 
   const invoices = storeInvoices;
@@ -703,7 +705,7 @@ export default function InvoicesPage() {
                         : <span className="text-emerald-400 text-xs">تسویه ✓</span>
                       }
                     </td>
-                    <td className="py-3 px-4 text-slate-400 text-xs">{inv.invoice_date}</td>
+                    <td className="py-3 px-4 text-slate-400 text-xs">{formatDateByCalendar(inv.invoice_date, calendarMode)}</td>
                     <td className="py-3 px-4">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[inv.status]}`}>{statusLabels[inv.status]}</span>
                     </td>
@@ -776,7 +778,7 @@ export default function InvoicesPage() {
                         : <span className="text-emerald-400 text-xs">تسویه ✓</span>
                       }
                     </td>
-                    <td className="py-3 px-4 text-slate-400 text-xs">{inv.invoice_date}</td>
+                    <td className="py-3 px-4 text-slate-400 text-xs">{formatDateByCalendar(inv.invoice_date, calendarMode)}</td>
                     <td className="py-3 px-4">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${inv.status === 'completed' ? 'badge-green' : 'badge-yellow'}`}>
                         {inv.status === 'completed' ? 'تکمیل' : 'در انتظار'}
@@ -840,7 +842,7 @@ export default function InvoicesPage() {
             </div>
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                {[['مشتری', viewInvoice.customer_name], ['موبایل', viewInvoice.customer_phone || '—'], ['فروشنده', viewInvoice.seller_name], ['تاریخ', viewInvoice.invoice_date], ['نوع پرداخت', viewInvoice.payment_method === 'cash' ? 'نقدی' : 'نسیه'], ['تاریخ سررسید', viewInvoice.due_date || '—']].map(([k, v]) => (
+                {[['مشتری', viewInvoice.customer_name], ['موبایل', viewInvoice.customer_phone || '—'], ['فروشنده', viewInvoice.seller_name], ['تاریخ', formatDateByCalendar(viewInvoice.invoice_date, calendarMode)], ['نوع پرداخت', viewInvoice.payment_method === 'cash' ? 'نقدی' : 'نسیه'], ['تاریخ سررسید', viewInvoice.due_date ? formatDateByCalendar(viewInvoice.due_date, calendarMode) : '—']].map(([k, v]) => (
                   <div key={k}><p className="text-slate-400 text-xs">{k}</p><p className="text-white text-sm font-medium">{v}</p></div>
                 ))}
               </div>

@@ -3,6 +3,8 @@ import { Shield, Smartphone, Key, Eye, EyeOff, CheckCircle, AlertTriangle, QrCod
 import { useStore } from '../store/useStore';
 import { apiTwoFactorSetup, apiTwoFactorEnable, apiTwoFactorDisable } from '../services/api';
 import { SECURITY_GAPS_CATALOG, countGapsByLevel } from '../data/securityGapsCatalog';
+import PasswordStrength from './PasswordStrength';
+import { validatePasswordPolicy } from '../utils/passwordPolicy';
 
 interface SecurityPageProps {
   twoFactorEnabled?: boolean;
@@ -112,11 +114,20 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
   }, [is2FAEnabled]);
 
   const catalogCounts = useMemo(() => countGapsByLevel(SECURITY_GAPS_CATALOG), []);
+  const seriousGaps = useMemo(
+    () =>
+      SECURITY_GAPS_CATALOG.map((cat) => ({
+        ...cat,
+        items: cat.items.filter((item) => item.level === 'high'),
+      })).filter((cat) => cat.items.length > 0),
+    []
+  );
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (pwForm.new !== pwForm.confirm) { setPwError('رمزها یکسان نیستند'); return; }
-    if (pwForm.new.length < 4) { setPwError('رمز جدید باید حداقل ۴ کاراکتر باشد'); return; }
+    const pwErr = validatePasswordPolicy(pwForm.new);
+    if (pwErr) { setPwError(pwErr); return; }
     setPwError('');
     setPwLoading(true);
     try {
@@ -353,11 +364,8 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
               )}
             </div>
           ))}
+          <PasswordStrength password={pwForm.new} />
           <div className="pt-1">
-            <div className="text-xs text-slate-500 space-y-1 mb-3">
-              <p>• حداقل ۸ کاراکتر</p>
-              <p>• ترکیب حروف بزرگ، کوچک، عدد و علائم</p>
-            </div>
             <button
               type="submit"
               disabled={!pwForm.current || !pwForm.new || pwForm.new !== pwForm.confirm || pwLoading}
@@ -405,31 +413,21 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
           <div>
             <h2 className="text-white font-semibold flex items-center gap-2 text-lg">
               <ClipboardList size={20} className="text-violet-400 shrink-0" />
-              فهرست جامع کمبودها و محدودیت‌ها
+              یادآوری کمبودات جدی باقی‌مانده
             </h2>
             <p className="text-slate-400 text-sm mt-2 leading-relaxed max-w-3xl">
-              این بخش شفاف‌سازی است: همهٔ جنبه‌هایی که در معماری فعلی (وب‌اپ + API) معمولاً کامل نیستند یا به تنظیمات سرور و فرآیند شما وابسته‌اند.
-              هدف فریب یا ترساندن نیست؛ هدف این است بدانید کجا باید سخت‌گیری کنید.
+              فقط موارد بحرانی نمایش داده می‌شوند؛ مواردی که قبلاً حل شده‌اند از این لیست حذف شده‌اند.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 text-xs font-bold shrink-0">
             <span className="px-2.5 py-1 rounded-lg bg-rose-500/15 text-rose-200 border border-rose-500/25">
               بحرانی: {catalogCounts.high}
             </span>
-            <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-200 border border-amber-500/25">
-              مهم: {catalogCounts.medium}
-            </span>
-            <span className="px-2.5 py-1 rounded-lg bg-slate-700/50 text-slate-300 border border-white/10">
-              آگاهی: {catalogCounts.info}
-            </span>
-            <span className="px-2.5 py-1 rounded-lg bg-violet-500/15 text-violet-200 border border-violet-500/30">
-              جمع: {catalogCounts.total}
-            </span>
           </div>
         </div>
 
         <div className="max-h-[min(70vh,720px)] overflow-y-auto pr-1 space-y-4 scroll-smooth">
-          {SECURITY_GAPS_CATALOG.map((cat) => (
+          {seriousGaps.map((cat) => (
             <div
               key={cat.title}
               className="rounded-xl border border-white/10 bg-slate-900/40 p-4 space-y-3"
@@ -444,16 +442,10 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
                 {cat.items.map((item, idx) => (
                   <li
                     key={`${cat.title}-${idx}`}
-                    className={`rounded-lg px-3 py-2 border leading-relaxed ${
-                      item.level === 'high'
-                        ? 'bg-rose-500/10 border-rose-500/20 text-rose-100'
-                        : item.level === 'medium'
-                          ? 'bg-amber-500/10 border-amber-500/15 text-amber-100'
-                          : 'bg-slate-800/30 border-white/5 text-slate-300'
-                    }`}
+                    className="rounded-lg px-3 py-2 border leading-relaxed bg-rose-500/10 border-rose-500/20 text-rose-100"
                   >
                     <span className="text-[10px] font-black uppercase tracking-wider opacity-70 me-2">
-                      {item.level === 'high' ? '[بحرانی]' : item.level === 'medium' ? '[مهم]' : '[آگاهی]'}
+                      [بحرانی]
                     </span>
                     {item.text}
                   </li>

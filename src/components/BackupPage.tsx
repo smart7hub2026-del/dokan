@@ -16,6 +16,7 @@ export default function BackupPage() {
   const storeState = useStore(s => s);
   const tok = authToken || undefined;
   const isSuperAdmin = currentUser?.role === 'super_admin';
+  const isDemo = useStore(s => s.isDemo);
 
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -288,18 +289,27 @@ export default function BackupPage() {
         {/* Restore */}
         <div className="glass rounded-2xl p-6 space-y-5">
           <h3 className="font-bold text-lg flex items-center gap-2"><Upload size={18} className="text-amber-400" /> بازیابی از بکاپ</h3>
+          {isDemo && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-bold">
+              در حالت استفاده رایگان/آزمایشی، بازیابی فایل JSON غیرفعال است.
+            </div>
+          )}
           <p className="text-slate-400 text-sm">
             فقط JSON کامل (همان دکمهٔ JSON). هنگام تأیید بازیابی، <span className="text-amber-200 font-bold">رمز فروشگاه</span> (همان رمز ورود به دکان) الزامی است — ابرادمین می‌تواند با گزینٔ پشتیبانی از آن صرف‌نظر کند.
           </p>
 
           <div
-            onClick={() => fileRef.current?.click()}
-            className="border-2 border-dashed border-slate-600/50 hover:border-indigo-500/50 rounded-2xl p-8 text-center cursor-pointer transition-all hover:bg-indigo-500/5 group">
+            onClick={() => { if (!isDemo) fileRef.current?.click(); }}
+            className={`border-2 border-dashed rounded-2xl p-8 text-center transition-all group ${
+              isDemo
+                ? 'border-slate-700/60 opacity-60 cursor-not-allowed'
+                : 'border-slate-600/50 hover:border-indigo-500/50 cursor-pointer hover:bg-indigo-500/5'
+            }`}>
             <Upload size={28} className="mx-auto mb-3 text-slate-500 group-hover:text-indigo-400 transition-colors" />
             <p className="font-bold text-sm">فایل JSON بکاپ را اینجا بکشید یا کلیک کنید</p>
             <p className="text-slate-400 text-xs mt-1">فقط فایل‌های .json پشتیبانی می‌شوند</p>
           </div>
-          <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={handleFileSelect} />
+          <input ref={fileRef} type="file" accept=".json" className="hidden" onChange={handleFileSelect} disabled={isDemo} />
 
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2 text-xs text-amber-300">
             <AlertCircle size={14} className="mt-0.5 shrink-0" />

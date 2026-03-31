@@ -20,7 +20,6 @@ import ReportsPage from './components/ReportsPage';
 import RemindersPage from './components/RemindersPage';
 import NotificationsPage from './components/NotificationsPage';
 import BusinessTypesPage from './components/BusinessTypesPage';
-import ImageSearchPage from './components/ImageSearchPage';
 import SettingsPage from './components/SettingsPage';
 import AdminNotificationsPage from './components/AdminNotificationsPage';
 import BillingPage from './components/BillingPage';
@@ -229,11 +228,13 @@ function AppContent() {
     shopCode: string,
     shopPassword: string,
     role: string,
-    rolePassword: string
+    rolePassword: string,
+    captchaToken?: string,
+    deviceName?: string
   ): Promise<{ ok: boolean; message?: string; code?: string; twoFactorRequired?: boolean; pendingToken?: string }> => {
     try {
       const normalizedRole = role.trim() === 'stock' ? 'stock_keeper' : role.trim();
-      const res: LoginResult = await apiLogin({ shopCode, shopPassword, role: normalizedRole, rolePassword });
+      const res: LoginResult = await apiLogin({ shopCode, shopPassword, role: normalizedRole, rolePassword, captchaToken, deviceName });
 
       if ('twoFactorRequired' in res && res.twoFactorRequired) {
         return { ok: false, twoFactorRequired: true, pendingToken: res.pendingToken };
@@ -284,9 +285,9 @@ function AppContent() {
     }
   };
 
-  const handleGoogleLogin = async (email: string, fullName: string): Promise<{ ok: boolean; message?: string; code?: string }> => {
+  const handleGoogleLogin = async (email: string, fullName: string, deviceName?: string): Promise<{ ok: boolean; message?: string; code?: string }> => {
     try {
-      const res = await apiGoogleLogin({ email, fullName });
+      const res = await apiGoogleLogin({ email, fullName, deviceName });
       setAuthToken(res.token);
       const meta = res.shop_meta;
       const isDemoUser = Boolean(res.user?.is_demo || meta?.is_demo);
@@ -315,6 +316,8 @@ function AppContent() {
     email?: string;
     idToken?: string;
     businessType?: string;
+    captchaToken?: string;
+    deviceName?: string;
   }): Promise<
     | { ok: true }
     | {
@@ -529,6 +532,7 @@ function AppContent() {
             <Route path="/business-types" element={<BusinessTypesPage />} />
             <Route path="/support" element={<Navigate to="/settings?section=support" replace />} />
             <Route path="/settings" element={<SettingsPage currentUser={currentUser} authToken={authToken || ''} />} />
+            <Route path="/settings/sessions" element={<Navigate to="/settings?section=sessions" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </>
         ) : (
@@ -538,7 +542,6 @@ function AppContent() {
             {['admin', 'stock_keeper'].includes(currentUser.role) && (
               <Route path="/warehouse" element={<WarehousePage />} />
             )}
-            <Route path="/image-search" element={<ImageSearchPage />} />
             <Route path="/print-settings" element={<Navigate to="/settings?section=print" replace />} />
             <Route path="/offline" element={<Navigate to="/settings?section=offline" replace />} />
             <Route path="/support" element={<Navigate to="/settings?section=support" replace />} />
@@ -564,6 +567,7 @@ function AppContent() {
             )}
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/settings" element={<SettingsPage currentUser={currentUser} authToken={authToken || ''} />} />
+            <Route path="/settings/sessions" element={<Navigate to="/settings?section=sessions" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </>
         )}
@@ -736,7 +740,6 @@ function AppContent() {
           role={currentUser.role}
           activePage={activePage}
           onNavigate={(p) => goToPage(p)}
-          onOpenMenu={() => setMobileMenuOpen(true)}
           onOpenSearch={() => setShowGlobalSearch(true)}
         />
       )}

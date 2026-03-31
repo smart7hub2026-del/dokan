@@ -2,7 +2,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -13,6 +13,11 @@ const API_PORT = process.env.PORT || '4000';
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss(), viteSingleFile()],
+  test: {
+    // bcrypt + SQLite in server tests can exceed Vitest's 5s default on Windows CI/dev machines
+    testTimeout: 180_000,
+    hookTimeout: 180_000,
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),

@@ -3,6 +3,8 @@ export interface LoginRequest {
   shopPassword: string;
   role: string;
   rolePassword: string;
+  captchaToken?: string;
+  deviceName?: string;
 }
 
 export interface ShopRole {
@@ -12,7 +14,14 @@ export interface ShopRole {
 }
 
 export const apiCheckShop = (shopCode: string, shopPassword: string) =>
-  request<{ ok: boolean; shopName: string; roles: ShopRole[]; is_demo_shop?: boolean }>('/api/auth/check-shop', {
+  request<{
+    ok: boolean;
+    shopName: string;
+    roles: ShopRole[];
+    is_demo_shop?: boolean;
+    /** برچسب نقش مدیر از تنظیمات دکان (پیش‌فرض admin) */
+    admin_role_name?: string;
+  }>('/api/auth/check-shop', {
     method: 'POST',
     body: JSON.stringify({ shopCode, shopPassword }),
   });
@@ -342,17 +351,38 @@ export const apiDemoLogin = (payload: {
   email?: string;
   idToken?: string;
   businessType?: string;
+  captchaToken?: string;
+  deviceName?: string;
 }) =>
   request<DemoLoginApiResult>('/api/auth/demo-login', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
 
-export const apiGoogleLogin = (payload: { email: string; fullName: string }) =>
+export const apiGoogleLogin = (payload: { email: string; fullName: string; deviceName?: string }) =>
   request<ShopSessionPayload>('/api/auth/google', {
     method: 'POST',
     body: JSON.stringify(payload),
   });
+
+export interface UserSessionRow {
+  id: number;
+  device_name: string;
+  ip_address: string;
+  user_agent: string;
+  created_at: string;
+  last_activity_at: string;
+  is_current: boolean;
+}
+
+export const apiGetUserSessions = (token?: string) =>
+  request<{ sessions: UserSessionRow[] }>('/api/user/sessions', { token });
+
+export const apiDeleteUserSession = (id: number, token?: string) =>
+  request<{ ok: boolean }>(`/api/user/sessions/${id}`, { method: 'DELETE', token });
+
+export const apiDeleteAllUserSessions = (token?: string) =>
+  request<{ ok: boolean }>('/api/user/sessions', { method: 'DELETE', token });
 
 export interface AuthMeShopMeta {
   is_demo: boolean;

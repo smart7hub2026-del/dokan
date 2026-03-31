@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   ChevronRight, ChevronLeft, Check, Phone, Mail,
   Globe, ArrowRight, X, Eye, EyeOff,
@@ -25,6 +25,8 @@ import {
   type OnboardingBusinessTypeId,
   type OnboardingLucideIconName,
 } from '../data/onboardingBusinessTypes';
+import ReCAPTCHA from 'react-google-recaptcha';
+import { validatePasswordPolicy } from '../utils/passwordPolicy';
 
 const ONBOARDING_LUCIDE: Record<OnboardingLucideIconName, LucideIcon> = {
   ShoppingCart,
@@ -40,8 +42,8 @@ const ONBOARDING_LUCIDE: Record<OnboardingLucideIconName, LucideIcon> = {
 };
 
 interface WelcomePageProps {
-  onLogin: (shopCode: string, shopPassword: string, role: string, rolePassword: string) => boolean | Promise<{ ok: boolean; message?: string; code?: string; twoFactorRequired?: boolean; pendingToken?: string }>;
-  onGoogleLogin: (email: string, fullName: string) => Promise<{ ok: boolean; message?: string; code?: string }>;
+  onLogin: (shopCode: string, shopPassword: string, role: string, rolePassword: string, captchaToken?: string, deviceName?: string) => boolean | Promise<{ ok: boolean; message?: string; code?: string; twoFactorRequired?: boolean; pendingToken?: string }>;
+  onGoogleLogin: (email: string, fullName: string, deviceName?: string) => Promise<{ ok: boolean; message?: string; code?: string }>;
   onDemoLogin: (payload: {
     mode?: 'register' | 'login';
     phone?: string;
@@ -51,6 +53,8 @@ interface WelcomePageProps {
     email?: string;
     idToken?: string;
     businessType?: string;
+    captchaToken?: string;
+    deviceName?: string;
   }) => Promise<
     | { ok: true }
     | {
@@ -72,6 +76,7 @@ type ViewType = 'landing' | 'download' | 'login' | 'register' | 'info' | 'paymen
 type AuthScene = 'landing' | 'info' | 'creator' | 'login' | 'register' | 'payment-pending' | 'demo-limit';
 
 const REMEMBER_SHOP_CODE_KEY = 'dokanyar_remember_shop_code';
+const RECAPTCHA_SITE_KEY = String(import.meta.env.VITE_RECAPTCHA_SITE_KEY || '').trim();
 
 const PAYMENT_INFO: Record<string, { image: string; description: string; steps: string[] }> = {
   bank_transfer: {
@@ -242,8 +247,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
       setDemoError('شماره موبایل را درست وارد کنید (حداقل ۹ رقم)');
       return false;
     }
-    if (demoPassword.length < 6) {
-      setDemoError('رمز عبور حداقل ۶ کاراکتر باشد');
+    const demoPassErr = validatePasswordPolicy(demoPassword);
+    if (demoPassErr) {
+      setDemoError(demoPassErr);
       return false;
     }
     if (!demoName.trim() || !demoFamily.trim()) {
@@ -273,6 +279,10 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
       setDemoRegPhase('form');
       return;
     }
+    if (RECAPTCHA_SITE_KEY && !demoCaptchaToken) {
+      setDemoError('لطفاً کپچا را تکمیل کنید');
+      return;
+    }
     const phone = demoPhone.replace(/\D/g, '');
     setIsDemoLoading(true);
     try {
@@ -283,6 +293,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         name: demoName.trim(),
         familyName: demoFamily.trim(),
         businessType: demoBusinessType,
+        captchaToken: demoCaptchaToken || undefined,
+        deviceName: deviceNameInput || undefined,
         ...(demoOptionalEmail.trim() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(demoOptionalEmail.trim())
           ? { email: demoOptionalEmail.trim().toLowerCase() }
           : {}),
@@ -323,16 +335,32 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   const [shopCodeInput, setShopCodeInput] = useState('');
   const [shopPassInput, setShopPassInput] = useState('');
   const [rolePassInput, setRolePassInput] = useState('');
+  const [loginCaptchaToken, setLoginCaptchaToken] = useState('');
+  const [demoCaptchaToken, setDemoCaptchaToken] = useState('');
+  const loginCaptchaRef = useRef<ReCAPTCHA | null>(null);
+  const demoCaptchaRef = useRef<ReCAPTCHA | null>(null);
   const [shopRolesResult, setShopRolesResult] = useState<ShopRole[]>([]);
+  /** عنوان نقش مدیر از تنظیمات دکان — بعد از check-shop پر می‌شود */
+  const [adminRoleTitleFromShop, setAdminRoleTitleFromShop] = useState('admin');
   const [shopNameResult, setShopNameResult] = useState('');
   const [isCheckingShop, setIsCheckingShop] = useState(false);
   const [checkShopError, setCheckShopError] = useState('');
   const [showRolePassInput, setShowRolePassInput] = useState(false);
+  const [deviceNameInput, setDeviceNameInput] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    const ua = String(window.navigator.userAgent || '').toLowerCase();
+    if (ua.includes('iphone')) return 'My iPhone';
+    if (ua.includes('android')) return 'My Android';
+    if (ua.includes('windows')) return 'Office Laptop';
+    if (ua.includes('mac')) return 'My Mac';
+    return '';
+  });
   const [rememberShopCode, setRememberShopCode] = useState(false);
   const [showForgotModal, setShowForgotModal] = useState(false);
 
   useEffect(() => {
     if (view !== 'login') return;
+    setAdminRoleTitleFromShop('admin');
     try {
       const c = localStorage.getItem(REMEMBER_SHOP_CODE_KEY);
       if (c) {
@@ -355,6 +383,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
       const res = await apiCheckShop(shopCodeInput.trim(), shopPassInput.trim());
       setShopNameResult(res.shopName);
       setShopRolesResult(res.roles);
+      setAdminRoleTitleFromShop(String(res.admin_role_name || 'admin').trim() || 'admin');
 
       const normalizedCode = shopCodeInput.trim().toUpperCase();
       try {
@@ -369,7 +398,11 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         setSelectedRole(autoRole);
         setIsLoggingIn(true);
         try {
-          const result = await onLogin(normalizedCode, shopPassInput.trim(), autoRole, shopPassInput.trim());
+          if (RECAPTCHA_SITE_KEY && !loginCaptchaToken) {
+            setLoginError('لطفاً کپچا را تکمیل کنید');
+            return;
+          }
+          const result = await onLogin(normalizedCode, shopPassInput.trim(), autoRole, shopPassInput.trim(), loginCaptchaToken || undefined, deviceNameInput || undefined);
           if (typeof result === 'boolean') {
             if (!result) setLoginError('رمز عبور نادرست است');
           } else if (result && !result.ok) {
@@ -420,7 +453,11 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
     setLoginError('');
     setIsLoggingIn(true);
     try {
-      const result = await onLogin(shopCodeInput.trim(), shopPassInput.trim(), selectedRole, rolePassInput);
+      if (RECAPTCHA_SITE_KEY && !loginCaptchaToken) {
+        setLoginError('لطفاً کپچا را تکمیل کنید');
+        return;
+      }
+      const result = await onLogin(shopCodeInput.trim(), shopPassInput.trim(), selectedRole, rolePassInput, loginCaptchaToken || undefined, deviceNameInput || undefined);
       if (typeof result === 'boolean') {
         if (!result) setLoginError('رمز نقش اشتباه است');
       } else if (result && !result.ok) {
@@ -523,7 +560,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
       return;
     }
     setGoogleLoading(true);
-    const res = await onGoogleLogin(googleEmail.trim(), googleName.trim());
+    const res = await onGoogleLogin(googleEmail.trim(), googleName.trim(), deviceNameInput || undefined);
     if (!res.ok) {
       if (res.code === 'SHOP_SUSPENDED') {
         setSuspendedGate({ open: true, message: res.message });
@@ -547,7 +584,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
       setPaymentError('مشخصات فروشگاه ناقص است؛ مراحل قبل را تکمیل کنید.');
       return;
     }
-    if (regData.password.length < 6 || regData.password !== regData.password2) {
+    if (validatePasswordPolicy(regData.password) || regData.password !== regData.password2) {
       setRegisterStep(2);
       setPaymentError('رمز عبور و تکرار آن را در مرحلهٔ مشخصات بررسی کنید.');
       return;
@@ -673,7 +710,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
     },
     {
       id: 'basic_monthly', name: 'ماهانه پایه', nameEn: 'Basic Monthly',
-      price: '$14.9', period: 'ماهانه',
+      price: '۹۹۹ افغانی', period: 'ماهانه',
       color: 'blue', badge: 'اقتصادی',
       features: [
         '۴ کاربر (مدیر + ۳ نقش مجزا)',
@@ -686,7 +723,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
     },
     {
       id: 'basic_annual', name: 'سالانه پایه', nameEn: 'Basic Annual',
-      price: '$99', period: 'سالانه',
+      price: '۶۴۹۹ افغانی', period: 'سالانه',
       color: 'indigo', badge: 'به صرفه ترین',
       features: [
         'تمام امکانات طرح پایه ماهانه',
@@ -699,7 +736,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
     },
     {
       id: 'premium_annual', name: 'سالانه پرمیوم', nameEn: 'Premium Annual',
-      price: '$179', period: 'سالانه',
+      price: '۹۹۹۹ افغانی', period: 'سالانه',
       color: 'emerald', badge: 'پیشنهادی دکان یار',
       features: [
         'کاربران نامحدود (بدون محدودیت)',
@@ -934,7 +971,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                 <div className="space-y-5">
                   <div>
                     <h3 className="text-white text-lg font-black mb-0.5">نوع کسب‌وکار</h3>
-                    <p className="text-slate-500 text-[11px]">همه فعال برای نمایش؛ دمو با دیتابیس فقط روی «سوپرمارکت».</p>
+                    <p className="text-slate-500 text-[11px]">فعلاً فقط «سوپرمارکیت» فعال است؛ سایر صنوف بزودی فعال می‌شوند.</p>
                   </div>
                   {demoError && (
                     <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm font-bold flex items-center gap-2 flex-row-reverse text-right">
@@ -951,13 +988,17 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                           key={bt.id}
                           type="button"
                           onClick={() => {
+                            if (!bt.isActive) return;
                             setDemoError('');
                             setDemoBusinessType(bt.id);
                           }}
+                          disabled={!bt.isActive}
                           className={`group relative overflow-hidden rounded-2xl border p-3 sm:p-3.5 text-right transition-all duration-300 ${
                             sel
                               ? 'border-indigo-400/80 bg-gradient-to-br from-indigo-600/30 via-slate-900/55 to-violet-900/45 shadow-lg shadow-indigo-900/25 ring-1 ring-indigo-400/35 hover:-translate-y-0.5'
-                              : 'border-white/10 bg-white/[0.05] hover:border-indigo-400/40 hover:bg-white/[0.08] hover:-translate-y-0.5 hover:shadow-md'
+                              : bt.isActive
+                                ? 'border-white/10 bg-white/[0.05] hover:border-indigo-400/40 hover:bg-white/[0.08] hover:-translate-y-0.5 hover:shadow-md'
+                                : 'border-white/10 bg-white/[0.03] opacity-60 cursor-not-allowed'
                           }`}
                         >
                           {sel ? (
@@ -965,7 +1006,11 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                               ✓
                             </span>
                           ) : null}
-                          {!demoDb ? (
+                          {!bt.isActive ? (
+                            <span className="absolute top-1.5 left-1.5 rounded-md bg-slate-900/90 px-1.5 py-0.5 text-[7px] font-black text-slate-200/90 ring-1 ring-slate-500/40">
+                              بزودی
+                            </span>
+                          ) : !demoDb ? (
                             <span className="absolute top-1.5 left-1.5 rounded-md bg-amber-950/90 px-1.5 py-0.5 text-[7px] font-black text-amber-200/90 ring-1 ring-amber-500/30">
                               طرح کامل
                             </span>
@@ -995,6 +1040,17 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     >
                       بازگشت به فرم
                     </button>
+                    {RECAPTCHA_SITE_KEY ? (
+                      <div className="flex w-full sm:w-auto justify-center">
+                        <ReCAPTCHA
+                          ref={demoCaptchaRef}
+                          sitekey={RECAPTCHA_SITE_KEY}
+                          theme="dark"
+                          onChange={(token) => setDemoCaptchaToken(token || '')}
+                          onExpired={() => setDemoCaptchaToken('')}
+                        />
+                      </div>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => void handleDemoRegisterApi()}
@@ -1043,7 +1099,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                   </div>
 
                   <div>
-                    <label className="text-xs font-bold text-slate-300 block mb-1">رمز عبور (حداقل ۶ کاراکتر) — همان «رمز نقش مدیر» در ورود</label>
+                    <label className="text-xs font-bold text-slate-300 block mb-1">رمز عبور قوی (حداقل ۸ کاراکتر + حرف بزرگ + عدد + کاراکتر ویژه) — همان «رمز نقش مدیر» در ورود</label>
                     <div className="relative">
                       <input type={showDemoPwd ? 'text' : 'password'} value={demoPassword} onChange={e => setDemoPassword(e.target.value)}
                         className="w-full px-4 py-3 pl-12 rounded-xl bg-white/5 border-2 border-white/10 text-white text-sm outline-none focus:border-indigo-400 text-left" dir="ltr" autoComplete="new-password" />
@@ -1123,13 +1179,15 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3 rounded-xl border border-indigo-500/20 bg-black/20 shadow-sm">
                   <p className="text-indigo-400 font-black">پایه</p>
-                  <p className="text-white text-xl font-black mt-1">$99</p>
+                  <p className="text-white text-xl font-black mt-1">۶۴۹۹ افغانی</p>
                   <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">سالانه</p>
+                  <p className="text-[10px] text-emerald-300 mt-1 font-bold">سال‌های بعد ۳۰٪ تخفیف</p>
                 </div>
                 <div className="p-3 rounded-xl border border-blue-500/20 bg-black/20 shadow-sm">
                   <p className="text-blue-400 font-black">پریمیوم</p>
-                  <p className="text-white text-xl font-black mt-1">$179</p>
+                  <p className="text-white text-xl font-black mt-1">۹۹۹۹ افغانی</p>
                   <p className="text-[10px] text-slate-400 mt-1 uppercase font-bold">سالانه</p>
+                  <p className="text-[10px] text-emerald-300 mt-1 font-bold">سال‌های بعد ۳۰٪ تخفیف</p>
                 </div>
               </div>
             </div>
@@ -1561,11 +1619,17 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   // LOGIN PAGE
   if (view === 'login') {
     const roleLabels: Record<string, string> = {
-      admin: 'مدیر دکان', seller: 'فروشنده', stock_keeper: 'انباردار', accountant: 'حسابدار',
-      super_admin: 'سوپرادمین',
+      admin: adminRoleTitleFromShop.trim() || 'admin',
+      seller: 'فروشنده',
+      stock_keeper: 'انباردار',
+      accountant: 'حسابدار',
+      super_admin: 'مدیر پلتفرم (سازنده)',
     };
-    const roleIcons: Record<string, string> = {
-      admin: '🏪', seller: '🛒', stock_keeper: '📦', accountant: '💼', super_admin: '👑',
+    const roleAdminPin = (name: string) => {
+      const s = String(name || 'admin');
+      let h = 0;
+      for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) % 10000;
+      return String(h).padStart(4, '0');
     };
     const supportWaDigits = String(creatorConfig.social?.phone || '0795074175').replace(/\D/g, '');
     const supportWhatsAppUrl = `https://wa.me/${supportWaDigits || '93795074175'}`;
@@ -1724,8 +1788,11 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                                 ? 'border-indigo-500 bg-indigo-500/20 text-white scale-[1.02] shadow-lg shadow-indigo-500/20'
                                 : 'border-white/10 bg-white/5 text-slate-300 hover:border-white/30 hover:bg-white/10'
                           }`}>
-                          <div className="text-2xl mb-1">{roleIcons[r.role] || '👤'}</div>
-                          <p className="font-bold text-xs">{roleLabels[r.role] || r.full_name}</p>
+                          <p className="font-bold text-xs">
+                            {r.role === 'admin'
+                              ? `${r.full_name || roleLabels[r.role] || 'مدیر'} · ${roleAdminPin(r.full_name || 'admin')}`
+                              : (roleLabels[r.role] || r.full_name)}
+                          </p>
                           {inactive && (
                             <p className="text-[10px] text-rose-300 mt-1.5 font-bold">غیرفعال — مدیر از «کاربران» فعال کند</p>
                           )}
@@ -1750,6 +1817,27 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                       </button>
                     </div>
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-slate-200 block">نام دستگاه (اختیاری)</label>
+                    <input
+                      type="text"
+                      value={deviceNameInput}
+                      onChange={(e) => setDeviceNameInput(e.target.value)}
+                      placeholder="مثال: Office Laptop"
+                      className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-indigo-400"
+                    />
+                  </div>
+                  {RECAPTCHA_SITE_KEY ? (
+                    <div className="flex justify-center py-1">
+                      <ReCAPTCHA
+                        ref={loginCaptchaRef}
+                        sitekey={RECAPTCHA_SITE_KEY}
+                        theme="dark"
+                        onChange={(token) => setLoginCaptchaToken(token || '')}
+                        onExpired={() => setLoginCaptchaToken('')}
+                      />
+                    </div>
+                  ) : null}
 
                   <button type="button" onClick={handleRoleLogin}
                     disabled={
@@ -2014,7 +2102,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     {formErrors.email && <p className="text-xs text-rose-400 mt-1.5">{formErrors.email}</p>}
                   </div>
                   <div>
-                    <label className="text-sm font-bold block mb-2 text-slate-200">رمز مدیر / ورود (حداقل ۶ کاراکتر) *</label>
+                    <label className="text-sm font-bold block mb-2 text-slate-200">رمز مدیر / ورود (حداقل ۸ کاراکتر و قوی) *</label>
                     <div className="relative">
                       <input
                         type={showRegisterPwd ? 'text' : 'password'}
@@ -2062,7 +2150,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                       const phoneDigits = regData.phone.replace(/\D/g, '');
                       if (phoneDigits.length < 9) errors.phone = 'شماره موبایل معتبر وارد کنید';
                       if (regData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(regData.email.trim())) errors.email = 'فرمت ایمیل نادرست است';
-                      if (regData.password.length < 6) errors.password = 'رمز حداقل ۶ کاراکتر';
+                      const passErr = validatePasswordPolicy(regData.password);
+                      if (passErr) errors.password = passErr;
                       if (regData.password !== regData.password2) errors.password2 = 'تکرار رمز با رمز اول یکسان نیست';
                       if (Object.keys(errors).length > 0) {
                         setFormErrors(errors);
@@ -2102,16 +2191,25 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                         key={bt.id}
                         type="button"
                         onClick={() => {
+                          if (!bt.isActive) return;
                           setRegData({ ...regData, businessType: bt.id });
                         }}
+                        disabled={!bt.isActive}
                         className={`group relative overflow-hidden rounded-2xl border p-3 text-right transition-all duration-300 ${
                           sel
                             ? 'border-indigo-400/80 bg-gradient-to-br from-indigo-600/30 via-slate-900/55 to-violet-900/45 shadow-lg ring-1 ring-indigo-400/35'
-                            : 'border-white/10 bg-white/[0.05] hover:border-indigo-400/40 hover:bg-white/[0.08]'
+                            : bt.isActive
+                              ? 'border-white/10 bg-white/[0.05] hover:border-indigo-400/40 hover:bg-white/[0.08]'
+                              : 'border-white/10 bg-white/[0.03] opacity-60 cursor-not-allowed'
                         }`}
                       >
                         {sel ? (
                           <span className="absolute top-1.5 left-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white text-[10px] font-black shadow-md">✓</span>
+                        ) : null}
+                        {!bt.isActive ? (
+                          <span className="absolute top-1.5 left-1.5 rounded-md bg-slate-900/90 px-1.5 py-0.5 text-[7px] font-black text-slate-200/90 ring-1 ring-slate-500/40">
+                            بزودی
+                          </span>
                         ) : null}
                         <div className={`mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${bt.accent} shadow-md ring-1 ring-white/10`}>
                           <IconComp size={20} className="text-white drop-shadow-md" strokeWidth={1.75} />
@@ -2154,6 +2252,28 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
               const info = PAYMENT_INFO[regData.payMethod];
               return (
                 <div className="animate-fadeIn space-y-6">
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                    <p className="text-[11px] font-black text-slate-400 mb-3">مراحل تکمیل ثبت‌نام</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {[
+                        { title: '۱) ثبت اطلاعات', state: 'done' },
+                        { title: '۲) انتخاب نوع کسب‌وکار', state: 'done' },
+                        { title: '۳) پرداخت و تایید ادمین', state: 'active' },
+                      ].map((step) => (
+                        <div
+                          key={step.title}
+                          className={`rounded-xl px-3 py-2 text-xs font-bold ${
+                            step.state === 'done'
+                              ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                              : 'bg-indigo-500/15 text-indigo-200 border border-indigo-500/30'
+                          }`}
+                        >
+                          {step.title}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="flex flex-wrap items-start gap-4 justify-between">
                     <div className="flex items-start gap-3">
                       <button type="button" onClick={() => setRegisterStep(3)} className="p-1.5 rounded-lg text-slate-400 hover:bg-white/10 transition-colors shrink-0 mt-1">
@@ -2310,7 +2430,12 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     </div>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                  <div className="sticky bottom-2 z-10 rounded-2xl border border-white/10 bg-slate-950/85 backdrop-blur p-3">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <p className="text-xs text-slate-400">مرحله نهایی: ارسال درخواست پرداخت برای تایید ادمین</p>
+                      <p className="text-sm font-black text-white">{selectedPlan.price}</p>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-3">
                     <button
                       type="button"
                       onClick={() => setRegisterStep(3)}
@@ -2318,7 +2443,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     >
                       <ChevronRight size={18} /> بازگشت
                     </button>
-                    <button
+                      <button
                       type="button"
                       onClick={() => void handleSubmitPayment()}
                       disabled={isSubmittingPayment}
@@ -2328,10 +2453,11 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                         <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                       ) : (
                         <>
-                          <Check size={18} strokeWidth={2.5} /> ثبت درخواست و ادامهٔ پرداخت
+                          <Check size={18} strokeWidth={2.5} /> تایید و ارسال درخواست پرداخت
                         </>
                       )}
-                    </button>
+                      </button>
+                    </div>
                   </div>
                 </div>
               );

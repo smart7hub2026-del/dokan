@@ -11,6 +11,7 @@ process.env.DATABASE_URL =
 
 const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
+let writeQueue = Promise.resolve();
 
 const PLATFORM_STATE_ID = 1;
 const USE_DEV_DEFAULTS = process.env.NODE_ENV !== 'production';
@@ -89,7 +90,7 @@ const seedDatabase = () => {
 const seededDatabase = seedDatabase();
 
 /** نسخهٔ کاتالوگ — با تغییر فهرست صنوف این عدد را زیاد کنید تا دیتابیس‌های موجود همگام شوند */
-const BUSINESS_TYPES_CATALOG_VERSION = 10;
+const BUSINESS_TYPES_CATALOG_VERSION = 11;
 
 /** ده صنف اولویت‌دار افغانستان؛ metadata برای توسعهٔ ماژول‌های اختصاصی هر tenant */
 const DEFAULT_BUSINESS_TYPES = [
@@ -111,7 +112,7 @@ const DEFAULT_BUSINESS_TYPES = [
     name: 'داروخانه',
     code: 'pharmacy',
     icon: '💊',
-    is_active: true,
+    is_active: false,
     features: ['expiry', 'batch', 'prescription', 'stock'],
     metadata: {
       specialty_fa: 'انقضا با هشدار، نسخه پزشکی، واحد دوز (قرص/بسته)، هشدار کمبود موجودی',
@@ -123,7 +124,7 @@ const DEFAULT_BUSINESS_TYPES = [
     name: 'موبایل و لوازم جانبی',
     code: 'mobile_accessories',
     icon: '📱',
-    is_active: true,
+    is_active: false,
     features: ['serial', 'warranty', 'imei', 'barcode'],
     metadata: {
       specialty_fa: 'IMEI/سریال، گارانتی، لوازم جانبی، برند و مدل',
@@ -135,7 +136,7 @@ const DEFAULT_BUSINESS_TYPES = [
     name: 'رستوران و فست‌فود',
     code: 'restaurant',
     icon: '🍽️',
-    is_active: true,
+    is_active: false,
     features: ['table', 'recipe', 'wholesale'],
     metadata: {
       specialty_fa: 'منو (غذا و نوشیدنی)، سفارش آنلاین، میز و سالن، پیک و تحویل',
@@ -147,7 +148,7 @@ const DEFAULT_BUSINESS_TYPES = [
     name: 'زرگری و طلا',
     code: 'gold_jewelry',
     icon: '💍',
-    is_active: true,
+    is_active: false,
     features: ['karat', 'weight', 'serial'],
     metadata: {
       specialty_fa: 'عیار ۱۸/۲۱/۲۴، وزن گرم و مثقال، اجرت ساخت، قیمت روز (API)',
@@ -159,7 +160,7 @@ const DEFAULT_BUSINESS_TYPES = [
     name: 'پوشاک',
     code: 'clothing',
     icon: '👔',
-    is_active: true,
+    is_active: false,
     features: ['size', 'color', 'brand', 'barcode'],
     metadata: {
       specialty_fa: 'سایز و رنگ، فصل، برند، تخفیف collection',
@@ -171,7 +172,7 @@ const DEFAULT_BUSINESS_TYPES = [
     name: 'لوازم خانگی',
     code: 'home_appliances',
     icon: '🏠',
-    is_active: true,
+    is_active: false,
     features: ['serial', 'warranty', 'barcode'],
     metadata: {
       specialty_fa: 'سریال و گارانتی، مدل و برند، خدمات پس از فروش',
@@ -183,7 +184,7 @@ const DEFAULT_BUSINESS_TYPES = [
     name: 'آهن‌فروشی و مصالح ساختمانی',
     code: 'hardware_building',
     icon: '🧱',
-    is_active: true,
+    is_active: false,
     features: ['weight', 'wholesale', 'stock'],
     metadata: {
       specialty_fa: 'واحد کیلو/تن/متر، شماره بارنامه، قرارداد پروژه',
@@ -195,7 +196,7 @@ const DEFAULT_BUSINESS_TYPES = [
     name: 'لوازم موتر و لوازم یدکی',
     code: 'auto_parts',
     icon: '🚗',
-    is_active: true,
+    is_active: false,
     features: ['serial', 'brand', 'barcode'],
     metadata: {
       specialty_fa: 'سازگاری با مدل موتر، شماره فنی (OEM)، انبار چند شعبه',
@@ -207,7 +208,7 @@ const DEFAULT_BUSINESS_TYPES = [
     name: 'نانوایی و شیرینی',
     code: 'bakery',
     icon: '🥐',
-    is_active: true,
+    is_active: false,
     features: ['expiry', 'batch', 'recipe'],
     metadata: {
       specialty_fa: 'دسته نان و شیرینی، تولید روزانه، پیش‌سفارش، تاریخ تولید',
@@ -328,6 +329,27 @@ export const loadDatabase = async () => {
     db.paymentRequests = [];
     changed = true;
   }
+  for (const shop of Array.isArray(db.shops) ? db.shops : []) {
+    if (!shop || typeof shop !== 'object') continue;
+    const rec = shop.admin_credential_record;
+    if (rec && typeof rec === 'object') {
+      if ('shop_password_plain' in rec) {
+        delete rec.shop_password_plain;
+        changed = true;
+      }
+      if ('admin_role_password_plain' in rec) {
+        delete rec.admin_role_password_plain;
+        changed = true;
+      }
+    }
+  }
+  for (const payment of Array.isArray(db.paymentRequests) ? db.paymentRequests : []) {
+    if (!payment || typeof payment !== 'object') continue;
+    if ('plain_credentials' in payment) {
+      delete payment.plain_credentials;
+      changed = true;
+    }
+  }
   if (!Array.isArray(db.paymentEvents)) {
     db.paymentEvents = [];
     changed = true;
@@ -346,10 +368,15 @@ export const loadDatabase = async () => {
 };
 
 export const saveDatabase = async (db) => {
-  await prisma.platformState.update({
-    where: { id: PLATFORM_STATE_ID },
-    data: { state: db },
-  });
+  const nextWrite = writeQueue.then(() =>
+    prisma.platformState.update({
+      where: { id: PLATFORM_STATE_ID },
+      data: { state: db },
+    })
+  );
+  // Keep queue alive even if one write fails.
+  writeQueue = nextWrite.catch(() => {});
+  await nextWrite;
 };
 
 export const resetDatabase = async () => {
