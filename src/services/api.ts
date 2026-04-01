@@ -328,11 +328,17 @@ const request = async <T>(
         msg.toLowerCase().includes('fetch') ||
         msg.toLowerCase().includes('network') ||
         msg.toLowerCase().includes('failed to load');
-      const err = new Error(
-        looksLikeNetwork
-          ? 'سرور در دسترس نیست (Failed to fetch). اگر با موبایل وارد شده‌اید: آدرس را با IP کامپیوتر باز کنید (مثلاً http://192.168.1.5:5173) و در .env مقدار VITE_API_BASE_URL را خالی بگذارید؛ سپس سرور dev را دوباره اجرا کنید. مطمئن شوید backend روی همان PC روی پورت ۴۰۰۰ اجرا است.'
-          : msg
-      ) as Error & { cause?: unknown };
+      let netHint = msg;
+      if (looksLikeNetwork) {
+        if (!API_BASE) {
+          netHint =
+            'سرور در دسترس نیست. روی Vercel در Settings → Environment Variables مقدار VITE_API_BASE_URL را بگذارید (مثلاً https://dokanyar-6.onrender.com بدون / آخر) و دوباره Deploy کنید.';
+        } else {
+          netHint =
+            `سرور در دسترس نیست (Failed to fetch). آدرس API: ${API_BASE} — در Render مقدار ALLOWED_ORIGINS را دقیقاً آدرس همین سایت بگذارید؛ چند ثانیه بعد از باز شدن بک‌اند دوباره امتحان کنید. تست سلامت: ${API_BASE}/api/health`;
+        }
+      }
+      const err = new Error(looksLikeNetwork ? netHint : msg) as Error & { cause?: unknown };
       err.cause = e;
       throw err;
     }
