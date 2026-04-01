@@ -2,8 +2,8 @@ import { createContext, useContext, useState, useEffect, useMemo, ReactNode, use
 import { LangCode, CurrencyCode, translations, mockCurrencies, Currency } from '../data/mockData';
 import { useStore } from '../store/useStore';
 
-/** روشن (سفید) | آبی تاریک مایل به سرمه‌ای — تم مشکی خالص حذف شده */
-export type Theme = 'light' | 'deep_blue';
+/** روشن (سفید) | تیره کلاسیک | آبی تاریک | تیرهٔ Tigers */
+export type Theme = 'light' | 'dark' | 'deep_blue' | 'tigers_dark';
 
 interface AppContextType {
   language: LangCode;
@@ -58,8 +58,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
     const raw = localStorage.getItem('crm_theme');
     if (raw === 'light') return 'light';
+    if (raw === 'dark') return 'dark';
     if (raw === 'deep_blue') return 'deep_blue';
-    if (raw === 'dark') return 'deep_blue';
+    if (raw === 'tigers_dark') return 'tigers_dark';
     return 'light';
   });
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -84,7 +85,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.body.classList.toggle('light-theme', theme === 'light');
+    document.body.classList.toggle('dark-theme', theme === 'dark');
     document.body.classList.toggle('deep-blue-theme', theme === 'deep_blue');
+    document.body.classList.toggle('tigers-theme', theme === 'tigers_dark');
   }, [theme]);
 
   // Apply direction on mount
@@ -149,7 +152,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const isRTL = language !== 'english';
-  const isDark = theme === 'deep_blue';
+  const isDark = theme !== 'light';
 
   return (
     <AppContext.Provider value={{

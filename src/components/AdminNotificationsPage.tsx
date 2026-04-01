@@ -20,7 +20,9 @@ export default function AdminNotificationsPage() {
     try {
       const res = await apiGetBroadcasts(authToken);
       setBroadcasts(res.broadcasts || []);
-    } catch {} finally { setLoading(false); }
+    } catch {
+      void 0;
+    } finally { setLoading(false); }
   };
 
   useEffect(() => { void load(); }, []);
@@ -57,7 +59,9 @@ export default function AdminNotificationsPage() {
     try {
       await apiDeleteBroadcast(id, authToken);
       setBroadcasts(prev => prev.filter(b => b.id !== id));
-    } catch {}
+    } catch {
+      void 0;
+    }
   };
 
   return (

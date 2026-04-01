@@ -34,10 +34,11 @@ import ProductSalesRankingPage from './components/ProductSalesRankingPage';
 import ReorderListPage from './components/ReorderListPage';
 import GlobalSearchModal from './components/GlobalSearchModal';
 import MobileBottomNav from './components/MobileBottomNav';
+import BrandLogo from './components/BrandLogo';
 import ShopGateModal from './components/ShopGateModal';
 import { mockNotifications } from './data/mockData';
 import { isNotificationVisibleToUser } from './utils/notificationVisibility';
-import { Bell, Menu, Settings, Search, Wifi, WifiOff, X } from 'lucide-react';
+import { Bell, Menu, Settings, Search, Wifi, WifiOff, X, Sun, Moon } from 'lucide-react';
 import {
   apiLoadState, apiLogin, apiMe, apiSaveState, apiGoogleLogin, apiDemoLogin,
   apiLogout, apiVerifyTwoFactor, apiGetPendingRegistrations,
@@ -131,7 +132,7 @@ function NotifDropdown({ notifications, onClose, onGo, onMarkAllRead, pendingReg
 function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { isOnline, theme, isDark, t } = useApp();
+  const { isOnline, theme, isDark, t, setTheme } = useApp();
   const storeLogin = useStore(s => s.login);
   const storeLogout = useStore(s => s.logout);
   const demoTrialBlocked = useStore(s => s.demoTrialBlocked);
@@ -183,7 +184,6 @@ function AppContent() {
       .finally(() => { if (mounted) setIsCheckingSession(false); });
     return () => { mounted = false; };
   // Only run once on mount
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -575,19 +575,23 @@ function AppContent() {
     );
   };
 
-  const bgClass = theme === 'light' ? 'bg-white' : 'bg-[#0a1628]';
+  const isLightTheme = theme === 'light';
+  const isTigersTheme = theme === 'tigers_dark';
+  const bgClass = isLightTheme ? 'bg-white' : isTigersTheme ? 'bg-[#08090d]' : 'bg-[#0B1F3A]';
 
-  const shellHeader =
-    theme === 'light'
-      ? 'bg-white border-b border-slate-200 shadow-sm'
-      : 'border-b border-sky-900/50 bg-[#0c2139]/95 backdrop-blur-md';
-  const shellHeaderTitle = theme === 'light' ? 'text-slate-900' : 'text-slate-100';
-  const shellHeaderSub = theme === 'light' ? 'text-slate-500' : 'text-slate-400';
-  const shellControl =
-    theme === 'light'
-      ? 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-      : 'glass text-sky-100/90 hover:text-white border border-sky-800/40';
-  const shellMainCol = theme === 'light' ? 'bg-white' : 'bg-[#0a1628]';
+  const shellHeader = isLightTheme
+    ? 'bg-white border-b border-slate-200 shadow-sm'
+    : isTigersTheme
+      ? 'border-b border-red-900/50 bg-[#0b0b0f]/95 backdrop-blur-md'
+      : 'border-b border-[#16345F] bg-[#0B1F3A]/95 backdrop-blur-md';
+  const shellHeaderTitle = isLightTheme ? 'text-slate-900' : 'text-slate-100';
+  const shellHeaderSub = isLightTheme ? 'text-slate-500' : isTigersTheme ? 'text-red-200/70' : 'text-[#C9D6E2]';
+  const shellControl = isLightTheme
+    ? 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+    : isTigersTheme
+      ? 'glass text-red-100/90 hover:text-white border border-red-900/40'
+      : 'bg-[#112A4D]/80 border border-[#1C3A63] text-[#C9D6E2] hover:bg-[#16345F] hover:text-[#56CCF2]';
+  const shellMainCol = isLightTheme ? 'bg-white' : isTigersTheme ? 'bg-[#08090d]' : 'bg-[#0B1F3A]';
 
   const getRoleLabel = (role: string) => {
     const labels: Record<string, string> = {
@@ -624,9 +628,13 @@ function AppContent() {
               <button type="button" onClick={() => setMobileMenuOpen(true)} className={`md:hidden p-2 rounded-xl ${shellControl}`}>
                 <Menu size={20} strokeWidth={1.75} />
               </button>
-              <div className="flex flex-col">
-                <div className={`font-extrabold text-lg sm:text-2xl tracking-tight ${shellHeaderTitle}`}>{t('app_name')}</div>
-                <div className={`hidden sm:block text-[10px] font-bold uppercase tracking-widest ${shellHeaderSub}`}>{t('header_brand_line')}</div>
+              <div className="flex items-center gap-2 sm:gap-3">
+                <BrandLogo size={36} className="hidden sm:block" />
+                <BrandLogo size={30} className="sm:hidden" />
+                <div className="flex flex-col min-w-0">
+                  <div className={`font-extrabold text-lg sm:text-2xl tracking-tight truncate ${shellHeaderTitle}`}>{t('app_name')}</div>
+                  <div className={`hidden sm:block text-[10px] font-bold uppercase tracking-widest ${shellHeaderSub}`}>{t('header_brand_line')}</div>
+                </div>
               </div>
             <button
               type="button"
@@ -658,6 +666,20 @@ function AppContent() {
               {isOnline ? <Wifi size={12} strokeWidth={1.75} /> : <WifiOff size={12} strokeWidth={1.75} />}
               <span>{isOnline ? t('online') : t('offline')}</span>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+              className={`p-2 rounded-xl transition-colors ${shellControl}`}
+              title={theme === 'light' ? t('theme_dark') : t('theme_light')}
+              aria-label={theme === 'light' ? t('theme_dark') : t('theme_light')}
+            >
+              {theme === 'light' ? (
+                <Moon size={17} strokeWidth={1.75} className="text-indigo-400" />
+              ) : (
+                <Sun size={17} strokeWidth={1.75} className="text-amber-300" />
+              )}
+            </button>
 
             <div className="relative" onClick={e => e.stopPropagation()}>
               <button
@@ -726,7 +748,7 @@ function AppContent() {
           </div>
         )}
 
-        <main className="mobile-shell-main flex-1 overflow-y-auto p-3 sm:p-5 pb-[4.5rem] md:pb-5">
+        <main className="mobile-shell-main flex-1 overflow-y-auto p-3 sm:p-5 pb-[5.25rem] md:pb-5">
           <div className="max-w-7xl mx-auto pb-6 md:pb-6">
             {renderPage()}
           </div>
@@ -740,7 +762,6 @@ function AppContent() {
           role={currentUser.role}
           activePage={activePage}
           onNavigate={(p) => goToPage(p)}
-          onOpenSearch={() => setShowGlobalSearch(true)}
         />
       )}
     </div>

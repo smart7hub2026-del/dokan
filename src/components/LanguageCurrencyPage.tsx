@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Globe, DollarSign, Save, RefreshCw, Moon, Sun, Monitor, Check, Sparkles, Languages, ArrowLeftRight } from 'lucide-react';
+import { Globe, DollarSign, Save, RefreshCw, Moon, Sun, Monitor, Check, Sparkles, Languages, ArrowLeftRight, Flame } from 'lucide-react';
 import { mockLanguages, CurrencyCode, LangCode } from '../data/mockData';
 import { useApp, Theme } from '../context/AppContext';
 import { useToast } from './Toast';
@@ -48,9 +48,11 @@ export default function LanguageCurrencyPage() {
     setConverterTo(tmp);
   };
 
-  const themeOptions: { value: Theme; label: string; icon: React.ElementType; desc: string }[] = [
-    { value: 'light', label: 'روشن', icon: Sun, desc: 'پس‌زمینه روشن؛ مناسب فضای اداری و نور روز' },
-    { value: 'deep_blue', label: 'آبی تاریک', icon: Moon, desc: 'سرمه‌ای مایل به آبی با متن روشن (Vazirmatn)؛ کنتراست آرام برای چشم' },
+  const themeOptions: { value: Theme; label: string; icon: React.ElementType; desc: string; swatch: string }[] = [
+    { value: 'light', label: 'روشن', icon: Sun, desc: 'پس‌زمینه روشن؛ مناسب فضای اداری و نور روز', swatch: 'from-sky-300 to-indigo-300' },
+    { value: 'dark', label: 'تاریک', icon: Moon, desc: 'تم تاریک کلاسیک با کنتراست نرم برای استفاده شبانه', swatch: 'from-slate-700 to-slate-900' },
+    { value: 'deep_blue', label: 'آبی تاریک', icon: Monitor, desc: 'سرمه‌ای مایل به آبی با متن روشن (Vazirmatn)؛ کنتراست آرام برای چشم', swatch: 'from-blue-700 to-indigo-950' },
+    { value: 'tigers_dark', label: 'Tigers Dark', icon: Flame, desc: 'مشکی عمیق با اکسانت قرمز، خطوط عمودی و حس قدرتمند', swatch: 'from-red-700 to-black' },
   ];
 
   return (
@@ -87,7 +89,7 @@ export default function LanguageCurrencyPage() {
             <p className="text-slate-500 text-sm mt-0.5">رنگ‌بندی کلی پنل — بلافاصله اعمال می‌شود</p>
           </div>
         </div>
-        <div className="grid sm:grid-cols-2 gap-4">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {themeOptions.map(opt => {
             const Icon = opt.icon;
             const isSelected = theme === opt.value;
@@ -110,6 +112,7 @@ export default function LanguageCurrencyPage() {
                 <div className="flex-1 min-w-0">
                   <p className={`font-semibold ${isSelected ? 'text-emerald-300' : 'text-white'}`}>{opt.label}</p>
                   <p className="text-slate-500 text-xs mt-1 leading-relaxed">{opt.desc}</p>
+                  <div className={`mt-2 h-2.5 w-24 rounded-full bg-gradient-to-r ${opt.swatch}`} />
                 </div>
                 {isSelected && (
                   <div className="absolute top-3 left-3 sm:left-auto sm:right-3">

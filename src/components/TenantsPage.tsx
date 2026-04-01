@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Plus, Search, Eye, Power, X, Phone, User, Calendar, Edit2, Trash2, CreditCard, RefreshCw, AlertTriangle, CheckCircle, Clock, ThumbsUp, ThumbsDown, Trash, Mic, MicOff } from 'lucide-react';
+import { Plus, Search, Eye, Power, X, Phone, User, Calendar, Edit2, Trash2, CreditCard, RefreshCw, AlertTriangle, CheckCircle, Clock, ThumbsUp, ThumbsDown, Trash, Mic, MicOff, Database, Download } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useApp } from '../context/AppContext';
 import {
@@ -7,6 +7,7 @@ import {
   apiSetTenantStatus, apiGetSubscriptionPayments, apiCreateSubscriptionPayment,
   apiGetPendingRegistrations, apiApproveRegistration, apiRejectRegistration, apiResetAllData,
   apiGetAdminPayments, apiVerifyAdminPayment, apiGetMasterShopUsers,
+  apiMasterPlatformBackup, apiExportShopBackupJson,
   type Tenant, type PendingRegistration, type AdminPaymentRequestRow, type ShopUserRow,
 } from '../services/api';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
@@ -39,7 +40,7 @@ export default function TenantsPage() {
   const [showPayModal, setShowPayModal] = useState(false);
   const [viewTenant, setViewTenant] = useState<Tenant | null>(null);
   const [editItem, setEditItem] = useState<Tenant | null>(null);
-  const [activeTab, setActiveTab] = useState<'tenants' | 'payments' | 'pending' | 'paidqueue' | 'regpay'>('tenants');
+  const [activeTab, setActiveTab] = useState<'tenants' | 'payments' | 'pending' | 'paidqueue' | 'regpay' | 'bulkbackup'>('tenants');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [newCreds, setNewCreds] = useState<NewTenantCredentials | null>(null);
@@ -61,6 +62,10 @@ export default function TenantsPage() {
   } | null>(null);
   const [detailUsers, setDetailUsers] = useState<ShopUserRow[]>([]);
   const [detailUsersLoading, setDetailUsersLoading] = useState(false);
+
+  const [backupSelectedCodes, setBackupSelectedCodes] = useState<string[]>([]);
+  const [bulkBackupBusy, setBulkBackupBusy] = useState(false);
+  const [bulkBackupMsg, setBulkBackupMsg] = useState('');
 
   const [form, setForm] = useState({
     shop_name: '', shop_code: '', owner_name: '', owner_phone: '',
@@ -89,7 +94,9 @@ export default function TenantsPage() {
     try {
       const res = await apiGetSubscriptionPayments(undefined, tok);
       setPayments(res.payments);
-    } catch {}
+    } catch {
+      void 0;
+    }
   }, [tok]);
 
   const loadPendingRegs = useCallback(async () => {
@@ -97,8 +104,9 @@ export default function TenantsPage() {
     try {
       const res = await apiGetPendingRegistrations(tok);
       setPendingRegs(res.registrations);
-    } catch {}
-    finally { setPendingLoading(false); }
+    } catch {
+      void 0;
+    } finally { setPendingLoading(false); }
   }, [tok]);
 
   const loadAdminPayments = useCallback(async () => {
@@ -317,6 +325,58 @@ export default function TenantsPage() {
     }
   };
 
+  const toggleBackupCode = (code: string) => {
+    setBackupSelectedCodes((prev) =>
+      prev.includes(code) ? prev.filter((c) => c !== code) : [...prev, code]
+    );
+  };
+
+  const downloadJsonBlob = (filename: string, data: unknown) => {
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const runPlatformBackup = async () => {
+    if (!tok) return;
+    setBulkBackupBusy(true);
+    setBulkBackupMsg('');
+    try {
+      const r = await apiMasterPlatformBackup(tok);
+      setBulkBackupMsg(`کپی SQLite پلتفرم روی سرور انجام شد: ${r.path}`);
+    } catch (e) {
+      setBulkBackupMsg(e instanceof Error ? e.message : 'خطا در بکاپ پلتفرم');
+    } finally {
+      setBulkBackupBusy(false);
+    }
+  };
+
+  const runSelectedShopBackups = async () => {
+    if (!tok || backupSelectedCodes.length === 0) return;
+    setBulkBackupBusy(true);
+    setBulkBackupMsg('');
+    let ok = 0;
+    try {
+      for (let i = 0; i < backupSelectedCodes.length; i += 1) {
+        const code = backupSelectedCodes[i];
+        const payload = await apiExportShopBackupJson(code, tok);
+        const safe = code.replace(/[^a-zA-Z0-9_-]/g, '_');
+        downloadJsonBlob(`dokanyar_shop_${safe}_${Date.now()}_${i}.json`, payload);
+        ok += 1;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      setBulkBackupMsg(`${ok} فایل JSON برای فروشگاه‌های انتخاب‌شده دانلود شد.`);
+    } catch (e) {
+      setBulkBackupMsg(e instanceof Error ? e.message : 'خطا در بکاپ یکی از فروشگاه‌ها');
+    } finally {
+      setBulkBackupBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-6 fade-in">
       <div className="flex items-center justify-between">
@@ -361,9 +421,15 @@ export default function TenantsPage() {
           ['tenants', '🏪 دکان‌ها'],
           ['payments', '💳 پرداخت‌ها'],
           ['pending', '⏳ انتظار تأیید'],
-          ...(isSuperAdmin ? ([['paidqueue', '💰 پرداخت شده — صدور کد'], ['regpay', '🧾 همهٔ پرداخت‌های ثبت‌نام']] as [string, string][]) : []),
+          ...(isSuperAdmin
+            ? ([
+                ['paidqueue', '🆕 درخواست‌های اکانت جدید'],
+                ['regpay', '🧾 همهٔ پرداخت‌های ثبت‌نام'],
+                ['bulkbackup', '💾 بکاپ دسته‌جمعی'],
+              ] as [string, string][])
+            : []),
         ] as [string, string][]).map(([tab, label]) => (
-          <button key={tab} onClick={() => setActiveTab(tab as 'tenants' | 'payments' | 'pending' | 'paidqueue' | 'regpay')}
+          <button key={tab} onClick={() => setActiveTab(tab as 'tenants' | 'payments' | 'pending' | 'paidqueue' | 'regpay' | 'bulkbackup')}
             className={`relative px-4 py-2 rounded-xl text-sm font-medium transition-all ${activeTab === tab ? 'bg-indigo-600 text-white' : 'glass text-slate-400 hover:text-white'}`}>
             {label}
             {tab === 'pending' && pendingRegs.length > 0 && (
@@ -593,8 +659,9 @@ export default function TenantsPage() {
       {activeTab === 'paidqueue' && isSuperAdmin && (
         <div className="space-y-4">
           <p className="text-slate-400 text-sm leading-relaxed">
-            اینجا فقط درخواست‌هایی هستند که <span className="text-emerald-300 font-semibold">پول پرداخت کرده‌اند</span> و هنوز برایشان{' '}
-            <span className="text-white font-semibold">کد فروشگاه صادر نشده</span>. با «تأیید» فروشگاه ساخته می‌شود و کد فروشگاه، رمز فروشگاه و رمز نقش مدیر در پنجرهٔ سبز نمایش داده می‌شود — همان را به مشتری بدهید.
+            <span className="text-white font-semibold">درخواست‌های اکانت جدید (نسخهٔ پولی):</span> فقط درخواست‌هایی که{' '}
+            <span className="text-emerald-300 font-semibold">پرداخت را انجام داده‌اند</span> و هنوز{' '}
+            <span className="text-white font-semibold">کد فروشگاه صادر نشده</span>. با «تأیید و صدور کد» فروشگاه ساخته می‌شود؛ کد دکان، رمز فروشگاه و رمز نقش مدیر در پنجرهٔ سبز نمایش داده می‌شود.
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
             <input
@@ -676,7 +743,7 @@ export default function TenantsPage() {
       {activeTab === 'regpay' && isSuperAdmin && (
         <div className="space-y-4">
           <p className="text-slate-400 text-sm">
-            همهٔ درخواست‌های پرداخت ثبت‌نام. صف اختصاصی پرداخت‌شده‌ها در تب «پرداخت شده — صدور کد» است.
+            همهٔ درخواست‌های پرداخت ثبت‌نام. صف «پرداخت شده و بدون کد فروشگاه» در تب «درخواست‌های اکانت جدید» است.
           </p>
           <div className="flex flex-col sm:flex-row gap-3">
             <input
@@ -763,6 +830,96 @@ export default function TenantsPage() {
                   </tbody>
                 </table>
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'bulkbackup' && isSuperAdmin && (
+        <div className="space-y-4">
+          <p className="text-slate-400 text-sm leading-relaxed">
+            <span className="text-white font-semibold">بکاپ دسته‌جمعی:</span> یک بار کپی فایل SQLite کل پلتفرم روی سرور، یا انتخاب تا{' '}
+            <span className="text-amber-200 font-semibold">۱۰۰ فروشگاه</span> و دانلود پشت‌سرهم فایل JSON هر کدام (مناسب آرشیو یا مهاجرت تکی).
+          </p>
+          {bulkBackupMsg && (
+            <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/25 text-indigo-100 text-sm whitespace-pre-wrap">
+              {bulkBackupMsg}
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!tok || bulkBackupBusy}
+              onClick={() => void runPlatformBackup()}
+              className="inline-flex items-center gap-2 glass px-4 py-2.5 rounded-xl text-sm text-slate-200 hover:text-white border border-white/10 disabled:opacity-50"
+            >
+              <Database size={16} /> بکاپ یکجای پایگاه روی سرور
+            </button>
+            <button
+              type="button"
+              disabled={bulkBackupBusy}
+              onClick={() => {
+                const codes = filtered
+                  .map((t) => t.shop_code)
+                  .filter((c): c is string => Boolean(c && String(c).trim()))
+                  .slice(0, 100);
+                setBackupSelectedCodes(codes);
+              }}
+              className="inline-flex items-center gap-2 glass px-4 py-2.5 rounded-xl text-sm text-slate-200 hover:text-white border border-white/10 disabled:opacity-50"
+            >
+              انتخاب تا ۱۰۰ از فهرست فعلی
+            </button>
+            <button
+              type="button"
+              disabled={bulkBackupBusy}
+              onClick={() => setBackupSelectedCodes([])}
+              className="inline-flex items-center gap-2 glass px-4 py-2.5 rounded-xl text-sm text-slate-400 hover:text-white border border-white/10"
+            >
+              پاک کردن انتخاب
+            </button>
+            <button
+              type="button"
+              disabled={!tok || bulkBackupBusy || backupSelectedCodes.length === 0}
+              onClick={() => void runSelectedShopBackups()}
+              className="inline-flex items-center gap-2 btn-primary text-white px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
+            >
+              <Download size={16} /> دانلود JSON ({backupSelectedCodes.length})
+            </button>
+          </div>
+          <div className="glass rounded-2xl overflow-hidden max-h-[min(52dvh,480px)] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-slate-800/95 border-b border-white/10 z-10">
+                <tr>
+                  <th className="text-right py-2 px-3 w-10"> </th>
+                  <th className="text-right py-2 px-3 text-slate-400">کد</th>
+                  <th className="text-right py-2 px-3 text-slate-400">نام فروشگاه</th>
+                  <th className="text-right py-2 px-3 text-slate-400">کاربران</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {filtered.map((t) => {
+                  const code = String(t.shop_code || '').trim();
+                  if (!code) return null;
+                  return (
+                    <tr key={code} className="table-row-hover">
+                      <td className="py-2 px-3">
+                        <input
+                          type="checkbox"
+                          checked={backupSelectedCodes.includes(code)}
+                          onChange={() => toggleBackupCode(code)}
+                          className="rounded border-slate-500"
+                        />
+                      </td>
+                      <td className="py-2 px-3 font-mono text-indigo-300">{code}</td>
+                      <td className="py-2 px-3 text-white">{t.shop_name}</td>
+                      <td className="py-2 px-3 text-slate-400">{t.users_count}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {filtered.length === 0 && (
+              <p className="p-8 text-center text-slate-500 text-sm">فروشگاهی در این فیلتر نیست.</p>
             )}
           </div>
         </div>
@@ -1054,7 +1211,12 @@ export default function TenantsPage() {
               <div className="grid grid-cols-2 gap-4 mb-4">
                 <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl p-3 text-center">
                   <p className="text-2xl font-bold text-white">{viewTenant.users_count}</p>
-                  <p className="text-indigo-200 text-xs">کاربران</p>
+                  <p className="text-indigo-200 text-xs">کاربران (ثبت‌شده)</p>
+                  {!detailUsersLoading && detailUsers.length > 0 && (
+                    <p className="text-indigo-100/80 text-[10px] mt-1 font-semibold">
+                      فعال: {detailUsers.filter((u) => u.status === 'active').length} از {detailUsers.length}
+                    </p>
+                  )}
                 </div>
                 <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl p-3 text-center">
                   <p className="text-2xl font-bold text-white">{viewTenant.products_count}</p>

@@ -85,7 +85,7 @@ export default function StaffPage() {
       staff.map(s => ({
         ...s,
         hire_date: s.join_date,
-        salary_paid: s.paid_months.reduce((sum, _m) => sum + s.salary, 0),
+        salary_paid: s.paid_months.length * s.salary,
         salary_due: s.status === 'active' && !s.paid_months.includes(currentMonth) ? s.salary : 0,
       })),
     [staff, currentMonth]

@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: dokanyarshopi-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run server
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: JWT_SECRET
+        sync: false

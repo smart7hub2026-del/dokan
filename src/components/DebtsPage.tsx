@@ -79,14 +79,14 @@ export default function DebtsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">{t('manage_debts')}</h1>
-          <p className="text-slate-400 text-sm mt-1">{debts.filter(d => d.status !== 'paid').length} بدهی فعال</p>
+          <p className="text-slate-400 text-sm mt-1">{debts.filter(d => d.status !== 'paid').length} قرضدار فعال</p>
         </div>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'کل بدهی', value: `${(totalDebt/1000).toFixed(1)}K ؋`, color: 'text-white', icon: DollarSign, bg: 'bg-slate-500/10' },
+          { label: 'کل قرضداران', value: `${(totalDebt/1000).toFixed(1)}K ؋`, color: 'text-white', icon: DollarSign, bg: 'bg-slate-500/10' },
           { label: 'معوق', value: `${(overdueDebt/1000).toFixed(1)}K ؋`, color: 'text-rose-400', icon: AlertTriangle, bg: 'bg-rose-500/10' },
           { label: 'جزئی', value: `${(partialDebt/1000).toFixed(1)}K ؋`, color: 'text-amber-400', icon: Clock, bg: 'bg-amber-500/10' },
           { label: 'تسویه‌ها', value: debts.filter(d => d.status === 'paid').length, color: 'text-emerald-400', icon: CheckCircle, bg: 'bg-emerald-500/10' },
@@ -197,7 +197,7 @@ export default function DebtsPage() {
                 <tr>
                   <td colSpan={9} className="text-center py-12 text-slate-500">
                     <DollarSign size={32} className="mx-auto mb-2 opacity-30" />
-                    <p className="text-sm">بدهی‌ای یافت نشد</p>
+                    <p className="text-sm">قرضداری یافت نشد</p>
                   </td>
                 </tr>
               )}
@@ -211,7 +211,7 @@ export default function DebtsPage() {
         {filtered.length === 0 ? (
           <div className="glass rounded-2xl py-12 text-center text-slate-500">
             <DollarSign size={32} className="mx-auto mb-2 opacity-30" />
-            <p className="text-sm">بدهی‌ای یافت نشد</p>
+            <p className="text-sm">قرضداری یافت نشد</p>
           </div>
         ) : (
           filtered.map(d => {

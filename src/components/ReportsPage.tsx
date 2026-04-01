@@ -1,27 +1,38 @@
 import { useState, useMemo } from 'react';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Download, FileText, TrendingUp, TrendingDown, DollarSign, Users, Filter, Calendar } from 'lucide-react';
+import { Download, FileText, TrendingUp, TrendingDown, DollarSign, Users, Filter, Calendar, CalendarDays } from 'lucide-react';
 import { useToast } from './Toast';
 import { useApp } from '../context/AppContext';
 import { useStore } from '../store/useStore';
 import { formatDateByCalendar, formatMonthLabelByCalendar, formatWeekdayByCalendar, type CalendarMode } from '../utils/dateFormat';
+import { downloadReportExcel, downloadReportPdf } from '../utils/reportExport';
+import { bookToProductForSale } from '../utils/bookInventory';
 
 const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
 const tooltipStyle = { background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', color: '#fff', fontSize: 12 };
-const fmt = (v: unknown) => [`${Number(v).toLocaleString()} ؋`, ''];
 
 export default function ReportsPage() {
-  const { formatPrice, t } = useApp();
-  const { success } = useToast();
+  const { t, currencies, isDark } = useApp();
+  const { success, error: toastError } = useToast();
   const invoices = useStore(s => s.invoices);
   const customers = useStore(s => s.customers);
   const products = useStore(s => s.products);
+  const books = useStore(s => s.books);
+  const shopSettings = useStore(s => s.shopSettings);
   const debts = useStore(s => s.debts);
   const expenses = useStore(s => s.expenses);
   const calendarMode = (useStore(s => s.shopSettings.date_calendar) || 'jalali') as CalendarMode;
 
+  const reportCatalog = useMemo(() => {
+    if (shopSettings.business_type === 'bookstore') {
+      return books.filter((b) => b.is_active).map(bookToProductForSale);
+    }
+    return products;
+  }, [shopSettings.business_type, books, products]);
+
   const [reportType, setReportType] = useState<'sales' | 'inventory' | 'debts' | 'customers'>('sales');
+  const [viewCurrency, setViewCurrency] = useState<'AFN' | 'USD' | 'EUR'>('AFN');
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
@@ -65,7 +76,7 @@ export default function ReportsPage() {
     const catTotals = new Map<string, number>();
     for (const inv of filteredInvoices) {
       for (const it of inv.items) {
-        const prod = products.find(p => p.id === it.product_id);
+        const prod = reportCatalog.find(p => p.id === it.product_id);
         const cat = prod?.category_name || 'سایر';
         catTotals.set(cat, (catTotals.get(cat) || 0) + it.total_price);
       }
@@ -76,7 +87,7 @@ export default function ReportsPage() {
       .slice(0, 8)
       .map(([name, v]) => ({ name, value: Math.max(1, Math.round((v / sum) * 100)) }));
     return rows.length ? rows : [{ name: 'بدون فروش در بازه', value: 100 }];
-  }, [filteredInvoices, products]);
+  }, [filteredInvoices, reportCatalog]);
 
   const debtData = useMemo(
     () =>
@@ -108,19 +119,88 @@ export default function ReportsPage() {
 
   const axisStyle = { fill: '#94a3b8', fontSize: 11 };
   const gridColor = 'rgba(255,255,255,0.06)';
+  const formatByViewCurrency = (afnAmount: number) => {
+    const safe = Number(afnAmount || 0);
+    if (viewCurrency === 'AFN') return `${safe.toLocaleString()} ؋`;
+    const rate = currencies.find((c) => c.code === viewCurrency)?.exchange_rate || 1;
+    const symbol = currencies.find((c) => c.code === viewCurrency)?.symbol || viewCurrency;
+    return `${(safe / rate).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${symbol}`;
+  };
+  const fmt = (v: unknown) => [formatByViewCurrency(Number(v) || 0), ''];
 
   return (
     <div className="space-y-6 fade-in">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">{t('reports')}</h1>
-          <p className="text-slate-400 text-sm mt-1">تحلیل و بررسی عملکرد</p>
+          <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'light-title'}`}>{t('reports')}</h1>
+          <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'light-subtle'}`}>تحلیل و بررسی عملکرد</p>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => success('Excel آماده شد', 'فایل در حال دانلود است...')} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-600/30 text-sm transition-all">
+          <div className={`flex items-center gap-1 rounded-xl p-1 ${isDark ? 'border border-white/10 bg-black/20' : 'light-segmented'}`}>
+            {(['AFN', 'USD', 'EUR'] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setViewCurrency(c)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                  viewCurrency === c ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                downloadReportExcel({
+                  reportType,
+                  dateFrom,
+                  dateTo,
+                  viewCurrency,
+                  invoices,
+                  products: reportCatalog,
+                  customers,
+                  debts,
+                  currencies,
+                  calendarMode,
+                });
+                success('خروجی Excel', 'فایل اکسل دانلود شد.');
+              } catch (e) {
+                toastError('خطا در Excel', e instanceof Error ? e.message : 'نامشخص');
+              }
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-600/30 text-sm transition-all"
+          >
             <Download size={15} /> Excel
           </button>
-          <button onClick={() => success('PDF آماده شد', 'فایل در حال دانلود است...')} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600/20 border border-rose-500/30 text-rose-400 hover:bg-rose-600/30 text-sm transition-all">
+          <button
+            type="button"
+            onClick={() => {
+              void (async () => {
+                try {
+                  success('در حال ساخت PDF', 'لطفاً چند لحظه صبر کنید…');
+                  await downloadReportPdf({
+                    reportType,
+                    dateFrom,
+                    dateTo,
+                    viewCurrency,
+                    invoices,
+                    products: reportCatalog,
+                    customers,
+                    debts,
+                    currencies,
+                    calendarMode,
+                  });
+                  success('خروجی PDF', 'فایل PDF دانلود شد.');
+                } catch (e) {
+                  toastError('خطا در PDF', e instanceof Error ? e.message : 'نامشخص');
+                }
+              })();
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-rose-600/20 border border-rose-500/30 text-rose-400 hover:bg-rose-600/30 text-sm transition-all"
+          >
             <FileText size={15} /> PDF
           </button>
         </div>
@@ -129,9 +209,9 @@ export default function ReportsPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {[
-          { label: 'کل فروش (بازه)', value: formatPrice(totalSales), icon: DollarSign, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
-          { label: 'کل مانده بدهی', value: formatPrice(totalDebts), icon: TrendingDown, color: 'text-rose-400', bg: 'bg-rose-500/10' },
-          { label: 'میانگین فاکتور', value: formatPrice(avgSale), icon: TrendingUp, color: 'text-indigo-400', bg: 'bg-indigo-500/10' },
+          { label: 'کل فروش (بازه)', value: formatByViewCurrency(totalSales), icon: DollarSign, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
+          { label: 'کل مانده بدهی', value: formatByViewCurrency(totalDebts), icon: TrendingDown, color: 'text-rose-400', bg: 'bg-rose-500/10' },
+          { label: 'میانگین فاکتور', value: formatByViewCurrency(avgSale), icon: TrendingUp, color: 'text-indigo-400', bg: 'bg-indigo-500/10' },
           { label: 'مشتریان فعال', value: String(customers.filter(c => c.status === 'active').length), icon: Users, color: 'text-purple-400', bg: 'bg-purple-500/10' },
         ].map(stat => {
           const Icon = stat.icon;
@@ -150,7 +230,7 @@ export default function ReportsPage() {
       </div>
 
       {/* Filters */}
-      <div className="glass rounded-2xl p-4">
+      <div className={`${isDark ? 'glass' : 'light-surface'} rounded-2xl p-4`}>
         <div className="flex flex-wrap gap-3 items-center">
           <Filter size={16} className="text-slate-400" />
           <div className="flex gap-1 glass rounded-xl p-1">
@@ -159,11 +239,17 @@ export default function ReportsPage() {
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${reportType === v ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>{l}</button>
             ))}
           </div>
-          <div className="flex items-center gap-2 text-xs text-slate-400">
+          <div className={`flex items-center gap-2 text-xs ${isDark ? 'text-slate-400' : 'light-subtle'}`}>
             <Calendar size={13} />
-            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="bg-slate-800/50 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs" />
+            <div className="relative">
+              <CalendarDays size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-indigo-400 pointer-events-none" />
+              <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className={`rounded-lg px-2 py-1 pl-7 text-xs ${isDark ? 'bg-slate-800/50 border border-slate-700 text-white' : 'light-input'}`} />
+            </div>
             <span>تا</span>
-            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="bg-slate-800/50 border border-slate-700 rounded-lg px-2 py-1 text-white text-xs" />
+            <div className="relative">
+              <CalendarDays size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-indigo-400 pointer-events-none" />
+              <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className={`rounded-lg px-2 py-1 pl-7 text-xs ${isDark ? 'bg-slate-800/50 border border-slate-700 text-white' : 'light-input'}`} />
+            </div>
           </div>
         </div>
       </div>
@@ -227,7 +313,7 @@ export default function ReportsPage() {
               {filteredInvoices.slice(0, 20).map(inv => (
                 <div key={inv.id} className="flex justify-between bg-slate-800/40 rounded-xl px-3 py-2">
                   <div><p className="text-white text-xs font-bold">{inv.invoice_number}</p><p className="text-slate-400 text-xs">{inv.customer_name}</p></div>
-                  <div className="text-right"><p className="text-emerald-400 font-bold text-xs">{inv.total.toLocaleString()} ؋</p><p className="text-slate-500 text-xs">{formatDateByCalendar(inv.invoice_date, calendarMode)}</p></div>
+                  <div className="text-right"><p className="text-emerald-400 font-bold text-xs">{formatByViewCurrency(inv.total)}</p><p className="text-slate-500 text-xs">{formatDateByCalendar(inv.invoice_date, calendarMode)}</p></div>
                 </div>
               ))}
             </div>
@@ -240,7 +326,7 @@ export default function ReportsPage() {
           <div className="glass rounded-2xl p-5 lg:col-span-2">
             <h3 className="text-white font-semibold mb-4 text-sm">وضعیت موجودی محصولات</h3>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={products.slice(0, 12).map(p => ({ name: p.name.substring(0, 10), فروشگاه: p.stock_shop, انبار: p.stock_warehouse, حداقل: p.min_stock }))}>
+              <BarChart data={reportCatalog.slice(0, 12).map(p => ({ name: p.name.substring(0, 10), فروشگاه: p.stock_shop, انبار: p.stock_warehouse, حداقل: p.min_stock }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
                 <XAxis dataKey="name" tick={{ ...axisStyle, fontSize: 9 }} />
                 <YAxis tick={axisStyle} />
@@ -255,7 +341,7 @@ export default function ReportsPage() {
           <div className="glass rounded-2xl p-5">
             <h3 className="text-white font-semibold mb-3 text-sm">محصولات کم‌موجودی</h3>
             <div className="space-y-2">
-              {products.filter(p => p.stock_shop <= p.min_stock).map(p => (
+              {reportCatalog.filter(p => p.stock_shop <= p.min_stock).map(p => (
                 <div key={p.id} className="flex justify-between bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">
                   <div><p className="text-white text-xs">{p.name}</p><p className="text-slate-400 text-xs">حداقل: {p.min_stock}</p></div>
                   <span className="text-rose-400 font-bold">{p.stock_shop}</span>
@@ -266,7 +352,7 @@ export default function ReportsPage() {
           <div className="glass rounded-2xl p-5">
             <h3 className="text-white font-semibold mb-3 text-sm">آمار موجودی</h3>
             <div className="space-y-3">
-              {[['کل محصولات', products.length, 'text-white'], ['فعال', products.filter(p => p.is_active).length, 'text-emerald-400'], ['کم‌موجودی', products.filter(p => p.stock_shop <= p.min_stock).length, 'text-amber-400'], ['اتمام موجودی', products.filter(p => p.stock_shop === 0).length, 'text-rose-400']].map(([l, v, c]) => (
+              {[['کل محصولات', reportCatalog.length, 'text-white'], ['فعال', reportCatalog.filter(p => p.is_active).length, 'text-emerald-400'], ['کم‌موجودی', reportCatalog.filter(p => p.stock_shop <= p.min_stock).length, 'text-amber-400'], ['اتمام موجودی', reportCatalog.filter(p => p.stock_shop === 0).length, 'text-rose-400']].map(([l, v, c]) => (
                 <div key={String(l)} className="flex justify-between"><span className="text-slate-400 text-sm">{l}</span><span className={`font-bold text-lg ${c}`}>{v}</span></div>
               ))}
             </div>
@@ -297,9 +383,9 @@ export default function ReportsPage() {
                   {debts.map(d => (
                     <tr key={d.id} className="border-t border-white/5 table-row-hover">
                       <td className="py-3 px-4 text-white text-xs">{d.customer_name}</td>
-                      <td className="py-3 px-4 text-slate-300 text-xs">{d.amount.toLocaleString()} ؋</td>
-                      <td className="py-3 px-4 text-emerald-400 text-xs">{d.paid_amount.toLocaleString()} ؋</td>
-                      <td className="py-3 px-4 text-rose-400 font-bold text-xs">{d.remaining_amount.toLocaleString()} ؋</td>
+                      <td className="py-3 px-4 text-slate-300 text-xs">{formatByViewCurrency(d.amount)}</td>
+                      <td className="py-3 px-4 text-emerald-400 text-xs">{formatByViewCurrency(d.paid_amount)}</td>
+                      <td className="py-3 px-4 text-rose-400 font-bold text-xs">{formatByViewCurrency(d.remaining_amount)}</td>
                       <td className="py-3 px-4"><span className={`text-xs px-2 py-0.5 rounded-full ${d.status === 'overdue' ? 'badge-red' : d.status === 'partial' ? 'badge-yellow' : 'badge-blue'}`}>{d.status === 'overdue' ? 'معوق' : d.status === 'partial' ? 'جزئی' : 'انتظار'}</span></td>
                       <td className="py-3 px-4 text-slate-400 text-xs">{formatDateByCalendar(d.due_date, calendarMode)}</td>
                     </tr>

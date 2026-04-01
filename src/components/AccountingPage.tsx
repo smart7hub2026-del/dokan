@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { DollarSign, TrendingUp, TrendingDown, Plus, Trash2, Search, BarChart3, Wallet, ShoppingBag, ArrowUpRight, ArrowDownRight, Check, Printer, Mic, MicOff } from 'lucide-react';
 import { useToast } from './Toast';
 import { ConfirmModal } from './Modal';
@@ -52,7 +52,7 @@ function printExpenseVoucher(e: Expense, shop: { shop_name: string; shop_phone: 
 }
 
 export default function AccountingPage() {
-  const { t } = useApp();
+  const { t, currencies, isDark } = useApp();
   const { success, error } = useToast();
   const [tab, setTab] = useState<'overview' | 'expenses' | 'cashbox' | 'returns'>('overview');
   
@@ -75,6 +75,8 @@ export default function AccountingPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleteType, setDeleteType] = useState<'expense' | 'cash' | 'return'>('expense');
   const [search, setSearch] = useState('');
+  const [viewCurrency, setViewCurrency] = useState<'AFN' | 'USD' | 'EUR'>('AFN');
+  const [cashCalcMode, setCashCalcMode] = useState<'auto' | 'manual' | 'combined'>('auto');
   const { isListening, startListening, stopListening, supported: voiceOk } = useVoiceSearch((text) => {
     setSearch(text);
   });
@@ -120,9 +122,34 @@ export default function AccountingPage() {
   const netProfit = grossProfit - totalExpenses;
   const profitMargin = totalSales > 0 ? ((netProfit / totalSales) * 100).toFixed(1) : '0.0';
 
-  const cashIn = cashBox.filter(c => c.type === 'in').reduce((s, c) => s + c.amount, 0);
-  const cashOut = cashBox.filter(c => c.type === 'out').reduce((s, c) => s + c.amount, 0);
+  const manualCashIn = cashBox.filter(c => c.type === 'in').reduce((s, c) => s + c.amount, 0);
+  const manualCashOut = cashBox.filter(c => c.type === 'out').reduce((s, c) => s + c.amount, 0);
+  const autoCashInSales = storeInvoices
+    .filter((inv) => inv.payment_method === 'cash')
+    .reduce((s, inv) => s + Math.max(0, Number(inv.paid_amount || inv.total || 0)), 0);
+  const autoCashOutOps = storeExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const autoCashOutReturns = returns
+    .filter((r) => r.status === 'approved')
+    .reduce((s, r) => s + Number(r.amount || 0), 0);
+  const autoIn = autoCashInSales;
+  const autoOut = autoCashOutOps + autoCashOutReturns;
+  const cashIn = cashCalcMode === 'manual' ? manualCashIn : cashCalcMode === 'combined' ? manualCashIn + autoIn : autoIn;
+  const cashOut = cashCalcMode === 'manual' ? manualCashOut : cashCalcMode === 'combined' ? manualCashOut + autoOut : autoOut;
   const cashBalance = cashIn - cashOut;
+  const expenseToSalesPct = totalSales > 0 ? (totalExpenses / totalSales) * 100 : 0;
+
+  const symbolByCode = useMemo(
+    () =>
+      Object.fromEntries(currencies.map((c) => [c.code, c.symbol])) as Record<string, string>,
+    [currencies]
+  );
+  const formatByViewCurrency = (afnAmount: number) => {
+    const safe = Number(afnAmount || 0);
+    if (viewCurrency === 'AFN') return `${safe.toLocaleString()} ${symbolByCode.AFN || '؋'}`;
+    const rate = currencies.find((c) => c.code === viewCurrency)?.exchange_rate || 1;
+    const converted = safe / rate;
+    return `${converted.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${symbolByCode[viewCurrency] || viewCurrency}`;
+  };
 
   const addExpense = () => {
     if (!expForm.title || !expForm.amount) { error('خطا', 'عنوان و مبلغ الزامی است'); return; }
@@ -160,7 +187,7 @@ export default function AccountingPage() {
         currentUser?.id ?? 0,
         payer
       );
-      success('ارسال شد', 'پس از تأیید مدیر در «تأیید فروش» در حسابداری ثبت می‌شود.');
+      success('ارسال شد', 'پس از تأیید مدیر در «تأیید فعالیت» در حسابداری ثبت می‌شود.');
     }
     setExpForm({
       title: '',
@@ -221,11 +248,11 @@ export default function AccountingPage() {
         date: retForm.date,
         status: 'pending',
       });
-      success('مرجوعی ثبت شد');
+      success('واپسی ثبت شد');
     } else {
       addPendingApproval({
         type: 'staff_return',
-        title: `مرجوعی: ${retForm.product_name}`,
+        title: `واپسی: ${retForm.product_name}`,
         description: `فاکتور ${retForm.invoice_number} — ${Number(retForm.amount).toLocaleString()} ؋`,
         data: {
           invoice_number: retForm.invoice_number,
@@ -241,12 +268,12 @@ export default function AccountingPage() {
         submitted_by_role: currentUser?.role || '',
       });
       reportStaffActivityToAdmins(
-        'درخواست ثبت مرجوعی',
+        'درخواست ثبت واپسی',
         `${currentUser?.full_name}: ${retForm.product_name} — ${retForm.invoice_number}`,
         currentUser?.id ?? 0,
         currentUser?.full_name || 'کاربر'
       );
-      success('ارسال شد', 'پس از تأیید مدیر در لیست مرجوعی ثبت می‌شود.');
+      success('ارسال شد', 'پس از تأیید مدیر در لیست واپسی ثبت می‌شود.');
     }
     setRetForm({ invoice_number: '', customer_name: '', product_name: '', quantity: '', amount: '', reason: '', date: new Date().toISOString().split('T')[0] });
     setShowAddReturn(false);
@@ -277,14 +304,28 @@ export default function AccountingPage() {
     <div className="space-y-5 fade-in">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2"><BarChart3 size={24} className="text-indigo-400" /> {t('accounting')}</h1>
-          <p className="text-slate-400 text-sm mt-1">{t('shop_management')}</p>
+          <h1 className={`text-2xl font-bold flex items-center gap-2 ${isDark ? 'text-white' : 'light-title'}`}><BarChart3 size={24} className="text-indigo-400" /> {t('accounting')}</h1>
+          <p className={`text-sm mt-1 ${isDark ? 'text-slate-400' : 'light-subtle'}`}>{t('shop_management')}</p>
         </div>
-        <div className="flex gap-2 glass rounded-xl p-1 flex-wrap">
-          {[['overview', 'نمای کلی', BarChart3], ['expenses', 'مصارف', TrendingDown], ['cashbox', 'صندوق', Wallet], ['returns', 'مرجوعی', ShoppingBag]].map(([key, label, Icon]) => (
+        <div className={`flex gap-2 rounded-xl p-1 flex-wrap ${isDark ? 'glass' : 'light-segmented'}`}>
+          {[['overview', 'نمای کلی', BarChart3], ['expenses', 'مصارف', TrendingDown], ['cashbox', 'صندوق', Wallet], ['returns', 'واپسی', ShoppingBag]].map(([key, label, Icon]) => (
             <button key={key as string} onClick={() => setTab(key as any)}
               className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${tab === key ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
               <Icon size={13} />{label as string}
+            </button>
+          ))}
+        </div>
+        <div className={`flex items-center gap-1 rounded-xl p-1 ${isDark ? 'border border-white/10 bg-black/20' : 'light-segmented'}`}>
+          {(['AFN', 'USD', 'EUR'] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setViewCurrency(c)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                viewCurrency === c ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              {c}
             </button>
           ))}
         </div>
@@ -306,7 +347,7 @@ export default function AccountingPage() {
                   <item.icon size={20} className={item.color} />
                   <span className={`text-xs font-medium ${item.color}`}>{item.label}</span>
                 </div>
-                <p className={`text-xl font-bold ${item.color}`}>{item.value.toLocaleString()} ؋</p>
+                <p className={`text-xl font-bold ${item.color}`}>{formatByViewCurrency(item.value)}</p>
               </div>
             ))}
           </div>
@@ -318,14 +359,14 @@ export default function AccountingPage() {
               <div className="space-y-3">
                 <div>
                   <div className="flex justify-between text-xs text-slate-400 mb-1"><span>حاشیه سود خالص</span><span className="text-emerald-400 font-bold">{profitMargin}%</span></div>
-                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                    <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
                     <div className="h-full bg-emerald-500 rounded-full transition-all" style={{ width: `${Math.max(0, Math.min(100, +profitMargin))}%` }} />
                   </div>
                 </div>
                 <div>
-                  <div className="flex justify-between text-xs text-slate-400 mb-1"><span>هزینه به فروش</span><span className="text-blue-400">{((totalExpenses / totalSales) * 100).toFixed(1)}%</span></div>
-                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${(totalExpenses / totalSales) * 100}%` }} />
+                  <div className="flex justify-between text-xs text-slate-400 mb-1"><span>هزینه به فروش</span><span className="text-blue-400">{expenseToSalesPct.toFixed(1)}%</span></div>
+                  <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-slate-700' : 'bg-slate-200'}`}>
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.max(0, Math.min(100, expenseToSalesPct))}%` }} />
                   </div>
                 </div>
               </div>
@@ -333,16 +374,34 @@ export default function AccountingPage() {
 
             <div className="glass rounded-2xl p-5">
               <h3 className="text-white font-semibold mb-4">صندوق نقدی</h3>
+              <div className="mb-3 flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-black/20 p-1">
+                {([
+                  ['auto', 'خودکار'],
+                  ['manual', 'دستی'],
+                  ['combined', 'ترکیبی'],
+                ] as const).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setCashCalcMode(id)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                      cashCalcMode === id ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               <div className="text-center">
-                <p className={`text-3xl font-bold ${cashBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{cashBalance.toLocaleString()} ؋</p>
+                <p className={`text-3xl font-bold ${cashBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatByViewCurrency(cashBalance)}</p>
                 <p className="text-slate-400 text-xs mt-1">موجودی فعلی</p>
                 <div className="flex gap-2 mt-4">
                   <div className="flex-1 bg-emerald-500/10 rounded-xl p-2 text-center">
-                    <p className="text-emerald-400 text-sm font-bold">{cashIn.toLocaleString()}</p>
+                    <p className="text-emerald-400 text-sm font-bold">{formatByViewCurrency(cashIn)}</p>
                     <p className="text-slate-500 text-xs">دریافتی</p>
                   </div>
                   <div className="flex-1 bg-rose-500/10 rounded-xl p-2 text-center">
-                    <p className="text-rose-400 text-sm font-bold">{cashOut.toLocaleString()}</p>
+                    <p className="text-rose-400 text-sm font-bold">{formatByViewCurrency(cashOut)}</p>
                     <p className="text-slate-500 text-xs">پرداختی</p>
                   </div>
                 </div>
@@ -358,10 +417,10 @@ export default function AccountingPage() {
                   <div key={cat}>
                     <div className="flex justify-between text-xs mb-0.5">
                       <span className={`${categoryColors[cat]?.split(' ')[0] || 'text-slate-400'}`}>{cat}</span>
-                      <span className="text-slate-400">{amt.toLocaleString()} ؋</span>
+                      <span className="text-slate-400">{formatByViewCurrency(amt)}</span>
                     </div>
                     <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                      <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${(amt / totalExpenses) * 100}%` }} />
+                      <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${totalExpenses > 0 ? (amt / totalExpenses) * 100 : 0}%` }} />
                     </div>
                   </div>
                 ))}
@@ -383,7 +442,7 @@ export default function AccountingPage() {
                 <div key={row.label} className={`flex justify-between items-center py-2 ${row.border ? 'border-t border-white/10 mt-1' : ''}`}>
                   <span className={row.bold ? 'text-white font-bold' : 'text-slate-300'}>{row.label}</span>
                   <span className={`font-medium ${row.type === 'income' ? 'text-emerald-400' : row.type === 'expense' ? 'text-rose-400' : row.type === 'profit' ? 'text-blue-400' : 'text-rose-500'} ${row.bold ? 'text-base font-bold' : ''}`}>
-                    {row.value >= 0 ? '' : '−'} {Math.abs(row.value).toLocaleString()} ؋
+                    {row.value >= 0 ? '' : '−'} {formatByViewCurrency(Math.abs(row.value))}
                   </span>
                 </div>
               ))}
@@ -528,18 +587,38 @@ export default function AccountingPage() {
       {/* Cash Box */}
       {tab === 'cashbox' && (
         <div className="space-y-4">
+          <div className="flex items-center justify-end">
+            <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-black/20 p-1">
+              {([
+                ['auto', 'خودکار'],
+                ['manual', 'دستی'],
+                ['combined', 'ترکیبی'],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setCashCalcMode(id)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                    cashCalcMode === id ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="grid grid-cols-3 gap-4">
             <div className="glass rounded-2xl p-4 border border-emerald-500/20">
               <p className="text-slate-400 text-xs mb-1">کل دریافتی</p>
-              <p className="text-emerald-400 font-bold text-xl">{cashIn.toLocaleString()} ؋</p>
+              <p className="text-emerald-400 font-bold text-xl">{formatByViewCurrency(cashIn)}</p>
             </div>
             <div className="glass rounded-2xl p-4 border border-rose-500/20">
               <p className="text-slate-400 text-xs mb-1">کل پرداختی</p>
-              <p className="text-rose-400 font-bold text-xl">{cashOut.toLocaleString()} ؋</p>
+              <p className="text-rose-400 font-bold text-xl">{formatByViewCurrency(cashOut)}</p>
             </div>
             <div className={`glass rounded-2xl p-4 border ${cashBalance >= 0 ? 'border-blue-500/20' : 'border-rose-500/20'}`}>
               <p className="text-slate-400 text-xs mb-1">موجودی صندوق</p>
-              <p className={`font-bold text-xl ${cashBalance >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>{cashBalance.toLocaleString()} ؋</p>
+              <p className={`font-bold text-xl ${cashBalance >= 0 ? 'text-blue-400' : 'text-rose-400'}`}>{formatByViewCurrency(cashBalance)}</p>
             </div>
           </div>
 
@@ -639,14 +718,14 @@ export default function AccountingPage() {
         <div className="space-y-4">
           <div className="flex justify-end">
             <button onClick={() => setShowAddReturn(true)} className="btn-primary text-white px-4 py-2.5 rounded-xl text-sm flex items-center gap-2">
-              <Plus size={15} /> ثبت مرجوعی
+              <Plus size={15} /> ثبت واپسی
             </button>
           </div>
 
           <FormModal
             open={showAddReturn}
             onClose={() => setShowAddReturn(false)}
-            title="ثبت مرجوعی"
+            title="ثبت واپسی"
             size="md"
             footer={
               <div className="flex gap-3">
@@ -665,8 +744,8 @@ export default function AccountingPage() {
                     ['نام مشتری', 'customer_name', 'text'],
                     ['نام محصول *', 'product_name', 'text'],
                     ['تعداد', 'quantity', 'number'],
-                    ['مبلغ مرجوعی (؋) *', 'amount', 'number'],
-                    ['دلیل مرجوعی', 'reason', 'text'],
+                    ['مبلغ واپسی (؋) *', 'amount', 'number'],
+                    ['دلیل واپسی', 'reason', 'text'],
                   ].map(([label, field, type]) => (
                     <div key={field as string}>
                       <label className="text-slate-400 text-xs block mb-1">{label as string}</label>
@@ -706,7 +785,7 @@ export default function AccountingPage() {
                       <td className="py-3 px-4">
                         <div className="flex gap-1">
                           {ret.status === 'pending' && (
-                            <button onClick={() => { storeUpdateProductReturn({ ...ret, status: 'approved' }); success('مرجوعی تأیید شد'); }}
+                            <button onClick={() => { storeUpdateProductReturn({ ...ret, status: 'approved' }); success('واپسی تأیید شد'); }}
                               className="p-1.5 rounded-lg glass text-slate-400 hover:text-emerald-400 transition-colors" title="تأیید">
                               <Check size={13} />
                             </button>
@@ -722,7 +801,7 @@ export default function AccountingPage() {
                 </tbody>
               </table>
               {returns.length === 0 && (
-                <div className="text-center py-12 text-slate-500"><ShoppingBag size={32} className="mx-auto mb-2 opacity-30" /><p>مرجوعی ثبت نشده</p></div>
+                <div className="text-center py-12 text-slate-500"><ShoppingBag size={32} className="mx-auto mb-2 opacity-30" /><p>واپسی ثبت نشده</p></div>
               )}
             </div>
           </div>

@@ -319,7 +319,7 @@ export default function WelcomePage({ onLogin }: WelcomePageProps) {
                   <p className={`text-sm ${textSub}`}>مرحله ۱ از ۳</p>
                 </div>
                 {[
-                  { label: 'نام فروشگاه *', key: 'shopName', placeholder: 'مثال: سوپرمارکت احمد' },
+                  { label: 'نام فروشگاه *', key: 'shopName', placeholder: 'مثال: فروشگاه احمد' },
                   { label: 'نام صاحب فروشگاه *', key: 'ownerName', placeholder: 'نام کامل' },
                   { label: 'شماره موبایل *', key: 'phone', placeholder: '۰۷۰۰-۰۰۰-۰۰۰' },
                   { label: 'ایمیل (اختیاری)', key: 'email', placeholder: 'example@email.com' },

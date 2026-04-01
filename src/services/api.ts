@@ -222,17 +222,28 @@ interface TwoFactorRequiredResponse {
 
 export type LoginResult = ShopSessionPayload | TwoFactorRequiredResponse;
 
-// ============================================================
-// ✅ آدرس مستقیم بک‌اند در Render
-// ============================================================
-const API_BASE = 'https://dokanyarshopi-backend-full.onrender.com';
-// ============================================================
+const REMOTE_PROD_API = 'https://dokanyarshopi-backend-1.onrender.com';
+const ENV_API_BASE = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
+const IS_VERCEL_PROD =
+  typeof window !== 'undefined' && window.location.hostname === 'dokanyarshopi.vercel.app';
+const API_BASE = ENV_API_BASE || (IS_VERCEL_PROD ? REMOTE_PROD_API : '');
+const DEV_FALLBACK_BASE = '';
 
 export const getApiBaseUrl = (): string => API_BASE;
 
 export const apiGetPublicMeta = async (): Promise<{ trial_quick_signup_enabled: boolean }> => {
   try {
-    const res = await fetch(`${API_BASE}/api/meta/public`, { credentials: 'omit' });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/api/meta/public`, { credentials: 'omit' });
+    } catch {
+      // In dev/mobile LAN, fall back to Vite proxy when explicit base is unreachable.
+      if (import.meta.env.DEV && API_BASE) {
+        res = await fetch(`${DEV_FALLBACK_BASE}/api/meta/public`, { credentials: 'omit' });
+      } else {
+        throw new Error('meta fetch failed');
+      }
+    }
     if (!res.ok) return { trial_quick_signup_enabled: true };
     const j = (await res.json()) as { trial_quick_signup_enabled?: boolean };
     return { trial_quick_signup_enabled: Boolean(j.trial_quick_signup_enabled ?? true) };
@@ -246,6 +257,13 @@ export const apiMasterPlatformBackup = (token?: string) =>
     method: 'POST',
     token,
   });
+
+/** ابرادمین: خروجی JSON پشتیبان یک فروشگاه (shopCode در query) */
+export const apiExportShopBackupJson = (shopCode: string, token?: string) =>
+  request<Record<string, unknown>>(
+    `/api/settings/backup/export?shopCode=${encodeURIComponent(shopCode)}`,
+    { token }
+  );
 
 export const apiMasterLoginAudit = (limit?: number, token?: string) =>
   request<{ entries: Record<string, unknown>[] }>(
@@ -264,7 +282,8 @@ const request = async <T>(
   if (options?.token) {
     headers['Authorization'] = `Bearer ${options.token}`;
   }
-  const { token: _token, ...restOptions } = options ?? {};
+  const { token, ...restOptions } = options ?? {};
+  void token;
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${url}`, {
@@ -273,16 +292,41 @@ const request = async <T>(
       ...restOptions,
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    const looksLikeNetwork =
-      msg.toLowerCase().includes('fetch') ||
-      msg.toLowerCase().includes('network') ||
-      msg.toLowerCase().includes('failed to load');
-    throw new Error(
-      looksLikeNetwork
-        ? 'سرور در دسترس نیست (Failed to fetch). اگر با موبایل وارد شده‌اید: آدرس را با IP کامپیوتر باز کنید (مثلاً http://192.168.1.5:5173) و در .env مقدار VITE_API_BASE_URL را خالی بگذارید؛ سپس سرور dev را دوباره اجرا کنید. مطمئن شوید backend روی همان PC روی پورت ۴۰۰۰ اجرا است.'
-        : msg
-    );
+    if (import.meta.env.DEV && API_BASE) {
+      try {
+        res = await fetch(`${DEV_FALLBACK_BASE}${url}`, {
+          credentials: 'include',
+          headers,
+          ...restOptions,
+        });
+      } catch {
+        const msg = e instanceof Error ? e.message : String(e);
+        const looksLikeNetwork =
+          msg.toLowerCase().includes('fetch') ||
+          msg.toLowerCase().includes('network') ||
+          msg.toLowerCase().includes('failed to load');
+        const err = new Error(
+          looksLikeNetwork
+            ? 'سرور در دسترس نیست. اگر لوکال کار می‌کنید: `npm run server` را اجرا کنید و `VITE_API_BASE_URL` را خالی بگذارید.'
+            : msg
+        ) as Error & { cause?: unknown };
+        err.cause = e;
+        throw err;
+      }
+    } else {
+      const msg = e instanceof Error ? e.message : String(e);
+      const looksLikeNetwork =
+        msg.toLowerCase().includes('fetch') ||
+        msg.toLowerCase().includes('network') ||
+        msg.toLowerCase().includes('failed to load');
+      const err = new Error(
+        looksLikeNetwork
+          ? 'سرور در دسترس نیست (Failed to fetch). اگر با موبایل وارد شده‌اید: آدرس را با IP کامپیوتر باز کنید (مثلاً http://192.168.1.5:5173) و در .env مقدار VITE_API_BASE_URL را خالی بگذارید؛ سپس سرور dev را دوباره اجرا کنید. مطمئن شوید backend روی همان PC روی پورت ۴۰۰۰ اجرا است.'
+          : msg
+      ) as Error & { cause?: unknown };
+      err.cause = e;
+      throw err;
+    }
   }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {

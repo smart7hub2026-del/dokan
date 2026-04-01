@@ -27,7 +27,6 @@ export default function ActiveSessionsPage({ embedded = false }: { embedded?: bo
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authToken]);
 
   const removeOne = async (id: number, isCurrent: boolean) => {

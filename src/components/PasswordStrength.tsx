@@ -1,4 +1,3 @@
-import React from 'react';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { evaluatePasswordPolicy } from '../utils/passwordPolicy';
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Warehouse, ArrowDownToLine, Search, Package, Plus, Trash2, Mic, MicOff } from 'lucide-react';
+import { Warehouse, ArrowDownToLine, ArrowUpFromLine, Search, Package, Plus, Trash2, Mic, MicOff } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { useStore } from '../store/useStore';
 import FormModal from './ui/FormModal';
@@ -23,7 +23,7 @@ export default function WarehousePage() {
   const addPendingApproval = useStore(s => s.addPendingApproval);
   const reportStaffActivityToAdmins = useStore(s => s.reportStaffActivityToAdmins);
   const [search, setSearch] = useState('');
-  const [moveProduct, setMoveProduct] = useState<Product | null>(null);
+  const [moveTarget, setMoveTarget] = useState<{ product: Product; direction: 'to_shop' | 'to_warehouse' } | null>(null);
   const [moveQty, setMoveQty] = useState('');
   const [newBinName, setNewBinName] = useState('');
 
@@ -46,57 +46,88 @@ export default function WarehousePage() {
       .sort((a, b) => a.name.localeCompare(b.name, 'fa'));
   }, [catalogProducts, search]);
 
-  const confirmMoveToShop = () => {
-    if (!moveProduct) return;
+  const confirmMove = () => {
+    if (!moveTarget) return;
+    const { product, direction } = moveTarget;
     const n = Math.floor(Number(moveQty));
     if (!n || n < 1) {
       error('خطا', 'تعداد معتبر وارد کنید');
       return;
     }
-    if (n > moveProduct.stock_warehouse) {
-      error('خطا', 'موجودی انبار کافی نیست');
+    if (direction === 'to_shop') {
+      if (n > product.stock_warehouse) {
+        error('خطا', 'موجودی انبار کافی نیست');
+        return;
+      }
+    } else if (n > product.stock_shop) {
+      error('خطا', 'موجودی مغازه کافی نیست');
       return;
     }
+
     if (currentUser?.role === 'admin') {
       if (shopSettings.business_type === 'bookstore') {
-        const b = books.find((x) => x.id === moveProduct.id);
+        const b = books.find((x) => x.id === product.id);
         if (b) {
-          updateBook({
-            ...b,
-            stock_warehouse: b.stock_warehouse - n,
-            stock_shop: b.stock_shop + n,
-          });
+          if (direction === 'to_shop') {
+            updateBook({
+              ...b,
+              stock_warehouse: b.stock_warehouse - n,
+              stock_shop: b.stock_shop + n,
+            });
+          } else {
+            updateBook({
+              ...b,
+              stock_shop: b.stock_shop - n,
+              stock_warehouse: b.stock_warehouse + n,
+            });
+          }
         }
+      } else if (direction === 'to_shop') {
+        updateProduct({
+          ...product,
+          stock_warehouse: product.stock_warehouse - n,
+          stock_shop: product.stock_shop + n,
+        });
       } else {
         updateProduct({
-          ...moveProduct,
-          stock_warehouse: moveProduct.stock_warehouse - n,
-          stock_shop: moveProduct.stock_shop + n,
+          ...product,
+          stock_shop: product.stock_shop - n,
+          stock_warehouse: product.stock_warehouse + n,
         });
       }
-      success('انتقال انجام شد', `${n} واحد از انبار به مغازه`);
+      success(
+        'انتقال انجام شد',
+        direction === 'to_shop' ? `${n} واحد از انبار به مغازه` : `${n} واحد از مغازه به انبار`
+      );
     } else {
       addPendingApproval({
         type: 'warehouse_transfer',
-        title: `انتقال به مغازه: ${moveProduct.name}`,
-        description: `${n} واحد از انبار به مغازه`,
+        title:
+          direction === 'to_shop'
+            ? `انتقال به مغازه: ${product.name}`
+            : `انتقال به انبار: ${product.name}`,
+        description:
+          direction === 'to_shop'
+            ? `${n} واحد از انبار به مغازه`
+            : `${n} واحد از مغازه به انبار`,
         data: {
-          product_id: moveProduct.id,
-          product_name: moveProduct.name,
+          product_id: product.id,
+          product_name: product.name,
           quantity: n,
+          direction,
         },
         submitted_by: currentUser?.full_name || 'کاربر',
         submitted_by_role: currentUser?.role || '',
       });
       reportStaffActivityToAdmins(
-        'درخواست انتقال انبار → مغازه',
-        `${currentUser?.full_name} درخواست انتقال ${n} عدد «${moveProduct.name}» به مغازه داد.`,
+        direction === 'to_shop' ? 'درخواست انتقال انبار → مغازه' : 'درخواست انتقال مغازه → انبار',
+        `${currentUser?.full_name}: ${n} عدد «${product.name}» — ${direction === 'to_shop' ? 'به مغازه' : 'به انبار'}.`,
         currentUser?.id ?? 0,
         currentUser?.full_name || 'کاربر'
       );
-      success('ارسال شد', 'تا تأیید مدیر در «تأیید فروش»، موجودی تغییر نمی‌کند.');
+      success('ارسال شد', 'تا تأیید مدیر در «تأیید فعالیت»، موجودی تغییر نمی‌کند.');
     }
-    setMoveProduct(null);
+    setMoveTarget(null);
     setMoveQty('');
   };
 
@@ -206,7 +237,7 @@ export default function WarehousePage() {
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className={isDark ? 'bg-slate-800/60 border-b border-white/10' : 'bg-slate-50 border-b border-slate-200'}>
-                {['کالا', 'کد', 'موجودی انبار', 'مغازه', 'حداقل', ''].map(h => (
+                {['کالا', 'کد', 'موجودی انبار', 'مغازه', 'حداقل', 'انتقال'].map(h => (
                   <th key={h || 'a'} className={`text-right py-3 px-3 font-medium ${textSub} text-xs`}>
                     {h}
                   </th>
@@ -237,18 +268,32 @@ export default function WarehousePage() {
                     <td className={`py-3 px-3 tabular-nums ${textSub}`}>{p.stock_shop}</td>
                     <td className={`py-3 px-3 tabular-nums ${textSub}`}>{p.min_stock}</td>
                     <td className="py-3 px-3">
-                      <button
-                        type="button"
-                        disabled={p.stock_warehouse <= 0}
-                        onClick={() => {
-                          setMoveProduct(p);
-                          setMoveQty(String(Math.min(1, p.stock_warehouse) || 1));
-                        }}
-                        className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:pointer-events-none"
-                      >
-                        <ArrowDownToLine size={14} />
-                        به مغازه
-                      </button>
+                      <div className="flex flex-wrap gap-1 justify-end">
+                        <button
+                          type="button"
+                          disabled={p.stock_warehouse <= 0}
+                          onClick={() => {
+                            setMoveTarget({ product: p, direction: 'to_shop' });
+                            setMoveQty(String(Math.min(1, p.stock_warehouse) || 1));
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:pointer-events-none"
+                        >
+                          <ArrowDownToLine size={13} />
+                          به مغازه
+                        </button>
+                        <button
+                          type="button"
+                          disabled={p.stock_shop <= 0}
+                          onClick={() => {
+                            setMoveTarget({ product: p, direction: 'to_warehouse' });
+                            setMoveQty(String(Math.min(1, p.stock_shop) || 1));
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold bg-cyan-700 text-white hover:bg-cyan-600 disabled:opacity-40 disabled:pointer-events-none"
+                        >
+                          <ArrowUpFromLine size={13} />
+                          به انبار
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -293,18 +338,32 @@ export default function WarehousePage() {
                     <p className={`font-bold tabular-nums ${textSub}`}>{p.min_stock}</p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  disabled={p.stock_warehouse <= 0}
-                  onClick={() => {
-                    setMoveProduct(p);
-                    setMoveQty(String(Math.min(1, p.stock_warehouse) || 1));
-                  }}
-                  className="w-full inline-flex items-center justify-center gap-1 rounded-xl py-2.5 text-xs font-bold bg-indigo-600 text-white disabled:opacity-40"
-                >
-                  <ArrowDownToLine size={14} />
-                  انتقال به مغازه
-                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={p.stock_warehouse <= 0}
+                    onClick={() => {
+                      setMoveTarget({ product: p, direction: 'to_shop' });
+                      setMoveQty(String(Math.min(1, p.stock_warehouse) || 1));
+                    }}
+                    className="inline-flex items-center justify-center gap-1 rounded-xl py-2.5 text-[11px] font-bold bg-indigo-600 text-white disabled:opacity-40"
+                  >
+                    <ArrowDownToLine size={14} />
+                    به مغازه
+                  </button>
+                  <button
+                    type="button"
+                    disabled={p.stock_shop <= 0}
+                    onClick={() => {
+                      setMoveTarget({ product: p, direction: 'to_warehouse' });
+                      setMoveQty(String(Math.min(1, p.stock_shop) || 1));
+                    }}
+                    className="inline-flex items-center justify-center gap-1 rounded-xl py-2.5 text-[11px] font-bold bg-cyan-700 text-white disabled:opacity-40"
+                  >
+                    <ArrowUpFromLine size={14} />
+                    به انبار
+                  </button>
+                </div>
               </div>
             ))
           )}
@@ -312,18 +371,24 @@ export default function WarehousePage() {
       </div>
 
       <FormModal
-        open={!!moveProduct}
+        open={!!moveTarget}
         onClose={() => {
-          setMoveProduct(null);
+          setMoveTarget(null);
           setMoveQty('');
         }}
-        title={moveProduct ? `انتقال از انبار — ${moveProduct.name}` : ''}
+        title={
+          moveTarget
+            ? moveTarget.direction === 'to_shop'
+              ? `انبار → مغازه — ${moveTarget.product.name}`
+              : `مغازه → انبار — ${moveTarget.product.name}`
+            : ''
+        }
         size="sm"
         footer={
           <div className="flex gap-3">
             <button
               type="button"
-              onClick={confirmMoveToShop}
+              onClick={confirmMove}
               className="flex-1 btn-primary text-white py-2.5 rounded-xl text-sm font-bold"
             >
               تأیید انتقال
@@ -331,34 +396,62 @@ export default function WarehousePage() {
             <button
               type="button"
               onClick={() => {
-                setMoveProduct(null);
+                setMoveTarget(null);
                 setMoveQty('');
               }}
-              className="flex-1 rounded-xl border border-white/10 py-2.5 text-sm text-slate-400 glass"
+              className={`flex-1 rounded-xl border py-2.5 text-sm ${
+                isDark ? 'border-white/10 text-slate-400 glass' : 'border-slate-200 text-slate-600 bg-slate-50'
+              }`}
             >
               انصراف
             </button>
           </div>
         }
       >
-        {moveProduct ? (
+        {moveTarget ? (
           <div className="space-y-4 text-right">
-            <p className="text-slate-400 text-xs">
-              موجودی انبار: <strong className="text-amber-300">{moveProduct.stock_warehouse}</strong> — قیمت فروش:{' '}
-              {formatPrice(moveProduct.sale_price)}
+            <p className={`text-xs ${textSub}`}>
+              {moveTarget.direction === 'to_shop' ? (
+                <>
+                  موجودی انبار:{' '}
+                  <strong className={isDark ? 'text-amber-300' : 'text-amber-700'}>{moveTarget.product.stock_warehouse}</strong>
+                  {' — '}مغازه: {moveTarget.product.stock_shop}
+                </>
+              ) : (
+                <>
+                  موجودی مغازه:{' '}
+                  <strong className={isDark ? 'text-cyan-300' : 'text-cyan-800'}>{moveTarget.product.stock_shop}</strong>
+                  {' — '}انبار: {moveTarget.product.stock_warehouse}
+                </>
+              )}
+              {' — '}
+              قیمت فروش: {formatPrice(moveTarget.product.sale_price)}
             </p>
             <div>
-              <label className="text-slate-400 text-xs block mb-1">تعداد انتقال به مغازه</label>
+              <label className={`${textSub} text-xs block mb-1`}>
+                {moveTarget.direction === 'to_shop' ? 'تعداد انتقال به مغازه' : 'تعداد انتقال به انبار'}
+              </label>
               <input
                 type="number"
                 min={1}
-                max={moveProduct.stock_warehouse}
+                max={
+                  moveTarget.direction === 'to_shop'
+                    ? moveTarget.product.stock_warehouse
+                    : moveTarget.product.stock_shop
+                }
                 value={moveQty}
                 onChange={e => setMoveQty(e.target.value)}
-                className="w-full rounded-xl bg-slate-800/50 border border-slate-600 px-3 py-2.5 text-white text-sm"
+                className={`w-full rounded-xl border px-3 py-2.5 text-sm ${
+                  isDark ? 'bg-slate-800/50 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'
+                }`}
                 dir="ltr"
               />
             </div>
+            {currentUser?.role !== 'admin' && (
+              <p className={`text-[11px] ${isDark ? 'text-amber-200/90' : 'text-amber-800'}`}>
+                پس از ارسال، مدیر از صفحه «تأیید فعالیت» و اعلان‌ها مطلع می‌شود.
+              </p>
+            )}
           </div>
         ) : null}
       </FormModal>

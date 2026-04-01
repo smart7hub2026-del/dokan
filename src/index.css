@@ -131,18 +131,18 @@ body.light-theme ::-webkit-scrollbar-thumb { background: #1e3a8a; }
 
 /* کارت‌ها: خاکستری بسیار ملایم، گوشه‌های گرد */
 body.light-theme .glass {
-  background: var(--surface-card) !important;
+  background: linear-gradient(180deg, #ffffff, #f8fafc) !important;
   backdrop-filter: none !important;
-  border: 1px solid #e8ecf1 !important;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06) !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06) !important;
   border-radius: 1rem !important;
 }
 
 body.light-theme .glass-dark {
   background: #ffffff !important;
   backdrop-filter: none !important;
-  border-bottom: 1px solid #e8ecf1 !important;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05) !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06) !important;
 }
 
 /* Table overrides */
@@ -188,6 +188,13 @@ body.light-theme .stat-card::before {
   background: radial-gradient(circle, rgba(8, 102, 255, 0.1) 0%, transparent 70%);
 }
 
+body.light-theme .gradient-text {
+  background: linear-gradient(135deg, #10b981, #22c55e, #4ade80);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
 /* ── Dark→light overrides ONLY inside the main database shell ── */
 /* Scoped to .app-shell so welcome/login pages keep their dark glass design */
 
@@ -195,6 +202,33 @@ body.light-theme .app-shell {
   font-size: 15px;
   line-height: 1.55;
   color: var(--text-body);
+}
+
+/* Reusable light theme surfaces for financial pages */
+body.light-theme .app-shell .light-surface {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06) !important;
+  border-radius: 1rem !important;
+}
+body.light-theme .app-shell .light-surface-muted {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+}
+body.light-theme .app-shell .light-title {
+  color: #0f172a !important;
+}
+body.light-theme .app-shell .light-subtle {
+  color: #64748b !important;
+}
+body.light-theme .app-shell .light-segmented {
+  background: #f1f5f9 !important;
+  border: 1px solid #dbeafe !important;
+}
+body.light-theme .app-shell .light-input {
+  background: #f8fafc !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
 }
 
 body.light-theme .app-shell h1,
@@ -314,25 +348,25 @@ body.light-theme .app-shell textarea::placeholder {
 
 /* ============ SCROLLBAR ============ */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: #0f172a; }
-::-webkit-scrollbar-thumb { background: #4f46e5; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #4338ca; }
+::-webkit-scrollbar-track { background: #0b1f3a; }
+::-webkit-scrollbar-thumb { background: #2d9cdb; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #56ccf2; }
 
 /* Glass — default is dark, matching login page aesthetic */
 .glass {
-  background: rgba(15, 23, 42, 0.6);
+  background: rgba(17, 42, 77, 0.85);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(28, 58, 99, 0.45);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
-  color: #e2e8f0;
+  color: #c9d6e2;
 }
 
 .glass-dark {
-  background: rgba(15, 23, 42, 0.8);
+  background: rgba(17, 42, 77, 0.92);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
-  color: #e2e8f0;
+  border: 1px solid rgba(28, 58, 99, 0.4);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
+  color: #c9d6e2;
 }
 
 .glass-dark * {
@@ -360,30 +394,37 @@ body.light-theme .glass-dark {
 
 /* ============ GRADIENT TEXT ============ */
 .gradient-text {
-  background: linear-gradient(135deg, #10b981, #22c55e, #4ade80);
+  background: linear-gradient(135deg, #2d9cdb, #56ccf2, #a5d8ff);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 /* ============ CARD HOVER ============ */
-.card-hover { transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1); }
+.card-hover { transition: all 0.2s ease; }
 .card-hover:hover {
+  transform: translateY(-2px);
+  background-color: #16345f;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.3);
+}
+
+body.light-theme .card-hover:hover {
   transform: translateY(-4px);
-  box-shadow: 0 18px 38px rgba(37, 99, 235, 0.18);
-  border-color: rgba(59, 130, 246, 0.4);
+  background-color: transparent;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.1);
+  border-color: rgba(30, 58, 138, 0.22);
 }
 
 /* ============ SIDEBAR ============ */
-.sidebar-link { transition: all 0.25s ease; }
+.sidebar-link { transition: all 0.2s ease; }
 .sidebar-link:hover {
-  background: rgba(59, 130, 246, 0.12);
+  background: rgba(45, 156, 219, 0.1);
   transform: translateX(-4px);
 }
 .sidebar-link.active {
-  background: rgba(99, 102, 241, 0.2);
-  border-right: 4px solid #6366f1;
-  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.3);
+  background: #16345f;
+  border-right: 4px solid #56ccf2;
+  box-shadow: inset 0 0 0 1px rgba(45, 156, 219, 0.25);
   color: #ffffff;
 }
 
@@ -393,11 +434,19 @@ body.light-theme .sidebar-link:hover {
 }
 
 body.light-theme .sidebar-link.active {
-  background: var(--royal-soft);
+  background: linear-gradient(90deg, #dbeafe, #eff6ff);
   border-right: 3px solid var(--royal);
-  box-shadow: none;
+  box-shadow: 0 8px 20px rgba(30, 58, 138, 0.08);
   color: var(--royal) !important;
   font-weight: 700;
+}
+
+body.light-theme .sidebar-link {
+  border-radius: 12px;
+}
+
+body.light-theme .sidebar-link:hover {
+  box-shadow: inset 0 0 0 1px #dbeafe;
 }
 
 /* دکمه‌ها — تم روشن */
@@ -513,8 +562,8 @@ input, select, textarea {
   transition: all 0.25s ease;
 }
 input:focus, select:focus, textarea:focus {
-  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.28);
-  border-color: #4f46e5 !important;
+  box-shadow: 0 0 0 2px rgba(45, 156, 219, 0.2);
+  border-color: #2d9cdb !important;
 }
 
 body.light-theme .app-shell input:focus,
@@ -526,17 +575,20 @@ body.light-theme .app-shell textarea:focus {
 
 /* ============ BUTTONS ============ */
 .btn-primary {
-  background: linear-gradient(135deg, #4f46e5, #2563eb);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 12px 25px rgba(59, 130, 246, 0.35);
-  color: white;
+  background: #2d9cdb;
+  transition: all 0.2s ease;
+  box-shadow: 0 10px 24px rgba(45, 156, 219, 0.35);
+  color: #ffffff;
 }
 .btn-primary:hover {
-  background: linear-gradient(135deg, #4338ca, #1d4ed8);
-  transform: translateY(-2px);
-  box-shadow: 0 15px 30px rgba(59, 130, 246, 0.45);
+  background: #56ccf2;
+  transform: translateY(-1px);
+  box-shadow: 0 12px 28px rgba(45, 156, 219, 0.4);
 }
-.btn-primary:active { transform: translateY(0); }
+.btn-primary:active {
+  transform: translateY(0);
+  background: #1b7fc2;
+}
 
 .btn-danger {
   background: linear-gradient(135deg, #ef4444, #dc2626);
@@ -1283,30 +1335,329 @@ header.glass-dark .text-slate-400 {
     font-size: 1.2rem;
     line-height: 1.35;
   }
+
+  body.light-theme nav[class*='fixed bottom-0'] {
+    background: rgba(255, 255, 255, 0.97) !important;
+    border-top: 1px solid #e2e8f0 !important;
+    box-shadow: 0 -6px 22px rgba(30, 58, 138, 0.12) !important;
+  }
+
+  /* همه جدول‌های پنل در موبایل به کارت تبدیل شوند */
+  .app-shell table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .app-shell table thead {
+    display: none !important;
+  }
+
+  .app-shell table tbody,
+  .app-shell table tr,
+  .app-shell table td {
+    display: block;
+    width: 100%;
+  }
+
+  .app-shell table tbody tr {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(15, 23, 42, 0.35);
+  }
+
+  .app-shell table tbody td {
+    border: 0 !important;
+    padding: 7px 0 !important;
+    white-space: normal !important;
+  }
+
+  .app-shell table tbody td + td {
+    border-top: 1px dashed rgba(148, 163, 184, 0.18) !important;
+  }
 }
 
-/* تم آبی تاریک — بدون مشکی خالص؛ فونت و کنتراست مطابق Vazirmatn */
+/* Dark Premium — پالت آبی عمیق (dark + deep_blue) */
+body.dark-theme,
 body.deep-blue-theme {
-  background-color: #0a1628;
-  color: #e2e8f0;
+  background-color: #0b1f3a;
+  color: #c9d6e2;
 }
 
-body.deep-blue-theme .glass-dark {
-  background: rgba(15, 35, 60, 0.72);
-  border-color: rgba(56, 189, 248, 0.12);
-  box-shadow: 0 12px 40px rgba(2, 12, 27, 0.45);
-}
-
+body.dark-theme .glass,
 body.deep-blue-theme .glass {
-  background: rgba(30, 58, 95, 0.35);
-  border-color: rgba(125, 211, 252, 0.14);
+  background: #112a4d !important;
+  backdrop-filter: blur(14px);
+  border: none !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3) !important;
+  color: #c9d6e2;
 }
 
-body.deep-blue-theme .app-shell .text-white,
+body.dark-theme .glass-dark,
+body.deep-blue-theme .glass-dark {
+  background: #112a4d !important;
+  backdrop-filter: blur(14px);
+  border: none !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3) !important;
+  color: #c9d6e2;
+}
+
+body.dark-theme .sidebar-shell.glass-dark,
+body.deep-blue-theme .sidebar-shell.glass-dark {
+  background: #0e2747 !important;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28) !important;
+}
+
+body.dark-theme .glass-dark:hover,
+body.deep-blue-theme .glass-dark:hover,
+body.dark-theme .glass:hover,
+body.deep-blue-theme .glass:hover {
+  background: #16345f !important;
+}
+
+body.dark-theme .sidebar-shell.glass-dark:hover,
+body.deep-blue-theme .sidebar-shell.glass-dark:hover {
+  background: #0e2747 !important;
+}
+
+body.dark-theme .card-hover:hover,
+body.deep-blue-theme .card-hover:hover {
+  background-color: #16345f !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3) !important;
+}
+
+body.dark-theme .btn-primary,
+body.deep-blue-theme .btn-primary {
+  background: #2d9cdb !important;
+  box-shadow: 0 10px 24px rgba(45, 156, 219, 0.35) !important;
+  color: #ffffff !important;
+}
+
+body.dark-theme .btn-primary:hover,
+body.deep-blue-theme .btn-primary:hover {
+  background: #56ccf2 !important;
+}
+
+body.dark-theme .btn-primary:active,
+body.deep-blue-theme .btn-primary:active {
+  background: #1b7fc2 !important;
+}
+
+body.dark-theme .btn-secondary-outline,
+body.deep-blue-theme .btn-secondary-outline {
+  border-width: 1px;
+  border-color: #2d9cdb !important;
+  color: #2d9cdb !important;
+}
+
+body.dark-theme .btn-secondary-outline:hover,
+body.deep-blue-theme .btn-secondary-outline:hover {
+  background: rgba(45, 156, 219, 0.1) !important;
+  color: #56ccf2 !important;
+}
+
+body.dark-theme .app-shell input:not([type='checkbox']):not([type='radio']),
+body.dark-theme .app-shell select,
+body.dark-theme .app-shell textarea,
+body.deep-blue-theme .app-shell input:not([type='checkbox']):not([type='radio']),
+body.deep-blue-theme .app-shell select,
+body.deep-blue-theme .app-shell textarea {
+  background-color: #112a4d !important;
+  border-color: #1c3a63 !important;
+  color: #ffffff !important;
+}
+
+body.dark-theme .app-shell input::placeholder,
+body.dark-theme .app-shell textarea::placeholder,
+body.deep-blue-theme .app-shell input::placeholder,
+body.deep-blue-theme .app-shell textarea::placeholder {
+  color: #6b85a6 !important;
+}
+
+body.dark-theme .app-shell input:focus,
+body.dark-theme .app-shell select:focus,
+body.dark-theme .app-shell textarea:focus,
+body.deep-blue-theme .app-shell input:focus,
+body.deep-blue-theme .app-shell select:focus,
+body.deep-blue-theme .app-shell textarea:focus {
+  box-shadow: 0 0 0 2px rgba(45, 156, 219, 0.2) !important;
+  border-color: #2d9cdb !important;
+}
+
+body.dark-theme ::-webkit-scrollbar-track,
+body.deep-blue-theme ::-webkit-scrollbar-track {
+  background: #0b1f3a;
+}
+
+body.dark-theme ::-webkit-scrollbar-thumb,
+body.deep-blue-theme ::-webkit-scrollbar-thumb {
+  background: #2d9cdb;
+}
+
+body.dark-theme ::-webkit-scrollbar-thumb:hover,
+body.deep-blue-theme ::-webkit-scrollbar-thumb:hover {
+  background: #56ccf2;
+}
+
+body.dark-theme .gradient-text,
+body.deep-blue-theme .gradient-text {
+  background: linear-gradient(135deg, #2d9cdb, #56ccf2, #a5d8ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+body.dark-theme .stat-card::before,
+body.deep-blue-theme .stat-card::before {
+  background: radial-gradient(circle, rgba(45, 156, 219, 0.14) 0%, transparent 70%);
+}
+
+/* خوانایی داخل پنل: خنثی‌کردن قانون «متن تیره روی glass» */
+body.dark-theme .app-shell .glass .text-white,
+body.dark-theme .app-shell .glass-dark .text-white,
+body.deep-blue-theme .app-shell .glass .text-white,
+body.deep-blue-theme .app-shell .glass-dark .text-white {
+  color: #ffffff !important;
+}
+
+body.dark-theme .app-shell .glass .text-slate-200,
+body.dark-theme .app-shell .glass .text-slate-300,
+body.dark-theme .app-shell .glass .text-slate-400,
+body.dark-theme .app-shell .glass-dark .text-slate-200,
+body.dark-theme .app-shell .glass-dark .text-slate-300,
+body.dark-theme .app-shell .glass-dark .text-slate-400,
+body.deep-blue-theme .app-shell .glass .text-slate-200,
+body.deep-blue-theme .app-shell .glass .text-slate-300,
+body.deep-blue-theme .app-shell .glass .text-slate-400,
+body.deep-blue-theme .app-shell .glass-dark .text-slate-200,
+body.deep-blue-theme .app-shell .glass-dark .text-slate-300,
+body.deep-blue-theme .app-shell .glass-dark .text-slate-400 {
+  color: #8fa6bf !important;
+}
+
+body.dark-theme .app-shell .glass svg,
+body.dark-theme .app-shell .glass-dark svg,
+body.deep-blue-theme .app-shell .glass svg,
+body.deep-blue-theme .app-shell .glass-dark svg {
+  color: inherit;
+}
+
+body.dark-theme .sidebar-shell .sidebar-link:not(.active) svg,
+body.deep-blue-theme .sidebar-shell .sidebar-link:not(.active) svg {
+  color: #8fa6bf !important;
+}
+
+body.dark-theme .sidebar-shell .sidebar-link:hover svg,
+body.deep-blue-theme .sidebar-shell .sidebar-link:hover svg {
+  color: #56ccf2 !important;
+}
+
+body.dark-theme .sidebar-shell .sidebar-link.active svg,
+body.deep-blue-theme .sidebar-shell .sidebar-link.active svg {
+  color: #56ccf2 !important;
+}
+
+body.dark-theme .app-shell [class*='text-slate-100'],
 body.deep-blue-theme .app-shell [class*='text-slate-100'] {
-  color: #f1f5f9 !important;
+  color: #ffffff !important;
 }
 
+body.dark-theme .app-shell [class*='text-slate-400'],
 body.deep-blue-theme .app-shell [class*='text-slate-400'] {
-  color: #94a3b8 !important;
+  color: #8fa6bf !important;
+}
+
+body.dark-theme .app-shell .text-indigo-400,
+body.dark-theme .app-shell .text-blue-400,
+body.deep-blue-theme .app-shell .text-indigo-400,
+body.deep-blue-theme .app-shell .text-blue-400 {
+  color: #56ccf2 !important;
+}
+
+/* تم Tigers — مشکی + قرمز با خطوط عمودی */
+body.tigers-theme {
+  background-color: #070709;
+  color: #f3f4f6;
+  position: relative;
+}
+
+body.tigers-theme::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(239, 68, 68, 0.06) 1px, transparent 1px),
+    radial-gradient(circle at 12% 18%, rgba(239, 68, 68, 0.16), transparent 34%),
+    radial-gradient(circle at 88% 10%, rgba(148, 163, 184, 0.12), transparent 28%);
+  background-size: 72px 100%, auto, auto;
+  z-index: 0;
+}
+
+body.tigers-theme .app-shell,
+body.tigers-theme .app-shell * {
+  position: relative;
+  z-index: 1;
+}
+
+body.tigers-theme .glass,
+body.tigers-theme .glass-dark {
+  background: linear-gradient(180deg, rgba(17, 17, 21, 0.92), rgba(10, 10, 14, 0.95)) !important;
+  border: 1px solid rgba(239, 68, 68, 0.18) !important;
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.5) !important;
+  color: #e5e7eb !important;
+}
+
+body.tigers-theme .card-hover:hover {
+  transform: translateY(-4px);
+  border-color: rgba(239, 68, 68, 0.45) !important;
+  box-shadow: 0 22px 44px rgba(127, 29, 29, 0.35) !important;
+}
+
+body.tigers-theme .sidebar-link:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+body.tigers-theme .sidebar-link.active {
+  background: rgba(239, 68, 68, 0.2);
+  border-right: 4px solid #ef4444;
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.3);
+  color: #fff;
+}
+
+body.tigers-theme .badge-blue,
+body.tigers-theme .badge-teal {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  border-color: rgba(239, 68, 68, 0.28);
+}
+
+body.tigers-theme .btn-primary,
+body.tigers-theme .progress-fill {
+  background: linear-gradient(135deg, #dc2626, #b91c1c) !important;
+  box-shadow: 0 12px 24px rgba(127, 29, 29, 0.45) !important;
+}
+
+body.tigers-theme .btn-primary:hover {
+  background: linear-gradient(135deg, #ef4444, #b91c1c) !important;
+}
+
+body.tigers-theme .app-shell .text-indigo-400,
+body.tigers-theme .app-shell .text-indigo-300,
+body.tigers-theme .app-shell .text-blue-400,
+body.tigers-theme .app-shell .text-emerald-400 {
+  color: #f87171 !important;
+}
+
+body.tigers-theme .app-shell [class*='border-slate-700'],
+body.tigers-theme .app-shell [class*='border-slate-800'],
+body.tigers-theme .app-shell [class*='border-white/10'] {
+  border-color: rgba(148, 163, 184, 0.18) !important;
+}
+
+/* تصویرهای پازلی الهام‌گرفته از Tigers */
+.tigers-puzzle-mask {
+  clip-path: polygon(0 10%, 12% 0, 44% 0, 52% 8%, 86% 8%, 100% 20%, 100% 88%, 88% 100%, 18% 100%, 0 84%);
+  overflow: hidden;
 }

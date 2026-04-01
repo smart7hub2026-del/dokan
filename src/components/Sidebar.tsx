@@ -92,6 +92,30 @@ const stockLinks = [
 const ICON_STROKE = 1.75;
 const ICON_STROKE_ACTIVE = 2;
 
+const MENU_ICON_COLORS: Record<string, string> = {
+  dashboard: 'text-sky-500',
+  sales: 'text-emerald-500',
+  invoices: 'text-violet-500',
+  products: 'text-amber-500',
+  warehouse: 'text-cyan-500',
+  customers: 'text-rose-500',
+  suppliers: 'text-orange-500',
+  debts: 'text-red-500',
+  accounting: 'text-indigo-500',
+  staff: 'text-lime-500',
+  pending: 'text-fuchsia-500',
+  reminders: 'text-teal-500',
+  reports: 'text-blue-500',
+  notifications: 'text-pink-500',
+  settings: 'text-slate-500',
+  tenants: 'text-purple-500',
+  billing: 'text-green-600',
+  'business-types': 'text-yellow-600',
+  'admin-notifications': 'text-red-600',
+  'product-sales-ranking': 'text-blue-600',
+  'reorder-list': 'text-cyan-600',
+};
+
 export default function Sidebar({ currentUser, activePage, onPageChange, onLogout, collapsed, onToggle, notifCount = 0 }: SidebarProps) {
   const { isOnline, t, isDark } = useApp();
   const businessType = useStore((s) => s.shopSettings.business_type);
@@ -129,7 +153,9 @@ export default function Sidebar({ currentUser, activePage, onPageChange, onLogou
   const divider = isDark ? 'border-white/10' : 'border-slate-100';
 
   return (
-    <div className={`relative flex flex-col h-full transition-all duration-300 ${shell} ${collapsed ? 'w-16' : 'w-64'}`}>
+    <div
+      className={`relative flex flex-col h-full transition-all duration-300 sidebar-shell ${shell} ${collapsed ? 'w-16' : 'w-64'}`}
+    >
       {/* Toggle */}
       <button
         type="button"
@@ -228,7 +254,11 @@ export default function Sidebar({ currentUser, activePage, onPageChange, onLogou
                         : 'p-0 text-slate-500'
                   }`}
                 >
-                  <Icon size={18} strokeWidth={isActive ? ICON_STROKE_ACTIVE : ICON_STROKE} className={isActive && isDark ? 'text-white' : ''} />
+                  <Icon
+                    size={18}
+                    strokeWidth={isActive ? ICON_STROKE_ACTIVE : ICON_STROKE}
+                    className={isActive ? (isDark ? 'text-white' : 'text-[#1e3a8a]') : (MENU_ICON_COLORS[link.id] || '')}
+                  />
                 </span>
                 {hasNotif && collapsed && (
                   <span

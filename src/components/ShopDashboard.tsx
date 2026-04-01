@@ -1,9 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ShoppingCart, Users, Package, CreditCard, TrendingUp,
-  AlertTriangle, PlusCircle, ArrowUpRight, ArrowDownRight,
-  Briefcase, FileText, Settings, BarChart3, ClipboardList,
+  AlertTriangle, PlusCircle, ArrowUpRight, ArrowDownRight, DollarSign,
+  Briefcase, FileText, BarChart3, ClipboardList, Euro, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { User, type Product } from '../data/mockData';
@@ -49,7 +49,7 @@ const QuickAction = ({ icon: Icon, label, color, onClick }: any) => (
   </button>
 );
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label, formatValue }: any) => {
   if (active && payload && payload.length) {
     return (
       <div className="glass-dark rounded-xl p-4 border border-white/10 shadow-2xl">
@@ -61,7 +61,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
                 <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color }} />
                 {p.name}
               </span>
-              <span className="text-xs font-black text-white">{p.value.toLocaleString()} ؋</span>
+              <span className="text-xs font-black text-white">{typeof formatValue === 'function' ? formatValue(Number(p.value || 0)) : `${Number(p.value || 0).toLocaleString()} ؋`}</span>
             </div>
           ))}
         </div>
@@ -72,8 +72,10 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function ShopDashboard({ currentUser }: Props) {
-  const { t } = useApp();
+  const { t, currencies, isDark } = useApp();
   const navigate = useNavigate();
+  const [viewCurrency, setViewCurrency] = useState<'AFN' | 'USD' | 'EUR'>('AFN');
+  const [purchaseDetailOpen, setPurchaseDetailOpen] = useState(false);
   const products = useStore(s => s.products);
   const books = useStore(s => s.books);
   const shopSettings = useStore(s => s.shopSettings);
@@ -206,20 +208,73 @@ export default function ShopDashboard({ currentUser }: Props) {
       .map((p) => ({ ...p, rowKind: 'normal' as const }));
   }, [lowStock, products, books, isBookstore]);
 
+  const formatByViewCurrency = (afnAmount: number) => {
+    const safe = Number(afnAmount || 0);
+    if (viewCurrency === 'AFN') return `${safe.toLocaleString()} ؋`;
+    const rate = currencies.find((c) => c.code === viewCurrency)?.exchange_rate || 1;
+    const symbol = currencies.find((c) => c.code === viewCurrency)?.symbol || viewCurrency;
+    return `${(safe / rate).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${symbol}`;
+  };
+
+  /** سرمایه موجودی بر اساس قیمت خرید و ارز ثبت‌شده هر کالا */
+  const purchaseCapital = useMemo(() => {
+    const catalog: Product[] = isBookstore
+      ? books.filter((b) => b.is_active).map(bookToProductForSale)
+      : products.filter((p) => p.is_active);
+    const rows = catalog
+      .map((p) => {
+        const qty = Number(p.stock_shop || 0) + Number(p.stock_warehouse || 0);
+        const cur = (p.currency_code ?? 'AFN') as 'AFN' | 'USD' | 'EUR';
+        const purchase = Number(p.purchase_price || 0);
+        const lineValue = qty * purchase;
+        return {
+          id: p.id,
+          name: p.name,
+          product_code: p.product_code,
+          qty,
+          purchase_price: purchase,
+          currency: cur,
+          lineValue,
+        };
+      })
+      .filter((r) => r.qty > 0 && r.lineValue !== 0)
+      .sort((a, b) => b.lineValue - a.lineValue);
+    const sumAfn = rows.filter((r) => r.currency === 'AFN').reduce((s, r) => s + r.lineValue, 0);
+    const sumUsd = rows.filter((r) => r.currency === 'USD').reduce((s, r) => s + r.lineValue, 0);
+    const sumEur = rows.filter((r) => r.currency === 'EUR').reduce((s, r) => s + r.lineValue, 0);
+    return { rows, sumAfn, sumUsd, sumEur };
+  }, [isBookstore, books, products]);
+
+  const fmtPurchaseCell = (v: number, code: 'AFN' | 'USD' | 'EUR') => {
+    if (code === 'AFN') return `${Math.round(v).toLocaleString()} ؋`;
+    return `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${code === 'USD' ? '$' : '€'}`;
+  };
+
   return (
     <div className="space-y-8 fade-in pb-10">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black text-white tracking-tight">{t('welcome_message')}، {currentUser.full_name}</h1>
+          <h1 className={`text-3xl font-black tracking-tight ${isDark ? 'text-white' : 'light-title'}`}>{t('welcome_message')}، {currentUser.full_name}</h1>
         </div>
         <div className="flex items-center gap-3">
-          <div className="glass-dark rounded-xl px-4 py-2 flex items-center gap-2 border border-emerald-500/20 shadow-lg shadow-emerald-500/5">
+          <div className={`flex items-center gap-1 rounded-xl p-1 ${isDark ? 'border border-white/10 bg-black/20' : 'light-segmented'}`}>
+            {(['AFN', 'USD', 'EUR'] as const).map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setViewCurrency(c)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                  viewCurrency === c ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+          <div className={`${isDark ? 'glass-dark border border-emerald-500/20 shadow-lg shadow-emerald-500/5' : 'light-surface border border-emerald-200'} rounded-xl px-4 py-2 flex items-center gap-2`}>
             <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="text-emerald-400 text-sm font-black">فعال</span>
           </div>
-          <button className="p-2 rounded-xl glass-dark text-slate-300 hover:text-white transition-colors border border-white/10">
-            <Settings size={20} />
-          </button>
         </div>
       </div>
 
@@ -236,13 +291,13 @@ export default function ShopDashboard({ currentUser }: Props) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
           icon={ShoppingCart} label="فروش امروز" 
-          value={`${todaySales.toLocaleString()} ؋`} 
+          value={formatByViewCurrency(todaySales)} 
           sub="از فاکتورهای ثبت‌شده"
           color="bg-gradient-to-br from-indigo-500 to-blue-600" 
         />
         <StatCard 
           icon={TrendingUp} label="سود خالص ماهانه (تقریبی)" 
-          value={`${monthProfit.toLocaleString()} ؋`} 
+          value={formatByViewCurrency(monthProfit)} 
           sub="فروش ماه − هزینه‌های ماه"
           color="bg-gradient-to-br from-emerald-500 to-teal-600" 
         />
@@ -255,17 +310,90 @@ export default function ShopDashboard({ currentUser }: Props) {
         />
         <StatCard 
           icon={CreditCard} label="بدهی معوق" 
-          value={`${overdueDebtTotal.toLocaleString()} ؋`} 
+          value={formatByViewCurrency(overdueDebtTotal)} 
           sub={overdueDebts.length > 0 ? `${overdueDebts.length} فقره سررسید گذشته` : totalDebts > 0 ? 'بدون معوق؛ بدهی باز دارد' : 'بدون بدهی باز'} 
           textColor="text-rose-400" 
           color="bg-gradient-to-br from-rose-500 to-red-600" 
         />
       </div>
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <StatCard
+            icon={Briefcase}
+            label="سرمایه موجودی (قیمت خرید — ؋)"
+            value={fmtPurchaseCell(purchaseCapital.sumAfn, 'AFN')}
+            sub="جمع کالاهایی که به افغانی خریداری شده‌اند"
+            color="bg-gradient-to-br from-blue-600 to-indigo-700"
+          />
+          <StatCard
+            icon={DollarSign}
+            label="سرمایه موجودی (قیمت خرید — $)"
+            value={fmtPurchaseCell(purchaseCapital.sumUsd, 'USD')}
+            sub="جمع کالاهایی که به دلار خریداری شده‌اند"
+            color="bg-gradient-to-br from-emerald-600 to-teal-700"
+          />
+          <StatCard
+            icon={Euro}
+            label="سرمایه موجودی (قیمت خرید — €)"
+            value={fmtPurchaseCell(purchaseCapital.sumEur, 'EUR')}
+            sub="جمع کالاهایی که به یورو خریداری شده‌اند"
+            color="bg-gradient-to-br from-violet-600 to-fuchsia-700"
+          />
+        </div>
+        <div className={`${isDark ? 'glass-dark border border-white/10' : 'light-surface'} rounded-2xl overflow-hidden`}>
+          <button
+            type="button"
+            onClick={() => setPurchaseDetailOpen((o) => !o)}
+            className="flex w-full items-center justify-between gap-3 px-5 py-4 text-right transition-colors hover:bg-white/5"
+          >
+            <span className="text-sm font-black text-white">جزئیات سرمایه به تفکیک کالا (نرخ خرید)</span>
+            {purchaseDetailOpen ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
+          </button>
+          {purchaseDetailOpen && (
+            <div className="border-t border-white/10 px-3 pb-4 sm:px-5">
+              <div className="max-h-72 overflow-auto custom-scrollbar">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-white/10 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      <th className="py-2.5 pr-2 text-right">نام کالا</th>
+                      <th className="py-2.5 text-center">کد</th>
+                      <th className="py-2.5 text-center">موجودی</th>
+                      <th className="py-2.5 text-left">قیمت خرید</th>
+                      <th className="py-2.5 text-left">ارز</th>
+                      <th className="py-2.5 pl-2 text-left">ارزش خط</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {purchaseCapital.rows.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-slate-500">
+                          کالایی با موجودی و قیمت خرید ثبت نشده است.
+                        </td>
+                      </tr>
+                    ) : (
+                      purchaseCapital.rows.map((r) => (
+                        <tr key={r.id} className="hover:bg-white/[0.02]">
+                          <td className="py-2.5 pr-2 font-bold text-white">{r.name}</td>
+                          <td className="py-2.5 text-center font-mono text-slate-400">{r.product_code}</td>
+                          <td className="py-2.5 text-center font-semibold text-slate-200">{r.qty}</td>
+                          <td className="py-2.5 text-left text-emerald-300">{fmtPurchaseCell(r.purchase_price, r.currency)}</td>
+                          <td className="py-2.5 text-left text-slate-400">{r.currency}</td>
+                          <td className="py-2.5 pl-2 text-left font-black text-white">{fmtPurchaseCell(r.lineValue, r.currency)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Main Content: Charts & Recent Data */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Sales Chart */}
-        <div className="lg:col-span-2 glass-dark rounded-3xl p-6 border border-white/10 relative overflow-hidden">
+        <div className={`lg:col-span-2 ${isDark ? 'glass-dark border border-white/10' : 'light-surface'} rounded-3xl p-6 relative overflow-hidden`}>
           <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 blur-3xl rounded-full" />
           <div className="flex items-center justify-between mb-8">
             <div>
@@ -312,7 +440,7 @@ export default function ShopDashboard({ currentUser }: Props) {
                 tick={{ fill: '#cbd5e1', fontSize: 11, fontWeight: 700 }} 
                 dx={-10}
               />
-              <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#ffffff10', strokeWidth: 2 }} />
+              <Tooltip content={<CustomTooltip formatValue={formatByViewCurrency} />} cursor={{ stroke: '#ffffff10', strokeWidth: 2 }} />
               <Area 
                 type="monotone" 
                 dataKey="sales" 
@@ -336,7 +464,7 @@ export default function ShopDashboard({ currentUser }: Props) {
         </div>
 
         {/* Top Products */}
-        <div className="glass-dark rounded-3xl p-6 border border-white/10 flex flex-col">
+        <div className={`${isDark ? 'glass-dark border border-white/10' : 'light-surface'} rounded-3xl p-6 flex flex-col`}>
           <div className="mb-8">
             <h3 className="text-white text-lg font-black tracking-tight">پرفروش‌ترین کالاها</h3>
             <p className="text-slate-300 text-xs mt-1 font-medium">۳۰ روز اخیر — تعداد فروش</p>
@@ -392,7 +520,7 @@ export default function ShopDashboard({ currentUser }: Props) {
                   </div>
                 </div>
                 <div className="text-left">
-                  <p className="text-white text-sm font-black">{inv.total.toLocaleString()} ؋</p>
+                  <p className="text-white text-sm font-black">{formatByViewCurrency(inv.total)}</p>
                   <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full inline-block mt-1 ${inv.payment_method === 'cash' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'}`}>
                     {inv.payment_method === 'cash' ? 'نقد' : 'نسیه'}
                   </span>
@@ -448,7 +576,7 @@ export default function ShopDashboard({ currentUser }: Props) {
                         <span className={p.rowKind === 'low' ? 'font-black text-rose-400' : ''}>{p.stock_shop}</span>
                         {p.rowKind === 'low' ? <span className="mr-1 text-[10px] text-slate-500">/{p.min_stock}</span> : null}
                       </td>
-                      <td className="py-3 text-left text-sm font-semibold text-emerald-400">{p.sale_price.toLocaleString()} ؋</td>
+                      <td className="py-3 text-left text-sm font-semibold text-emerald-400">{formatByViewCurrency(p.sale_price)}</td>
                       <td className="py-3 text-left">
                         <span
                           className={`rounded-lg px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${

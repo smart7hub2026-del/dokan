@@ -222,7 +222,7 @@ function printSaleInvoice(
   @media print { body { margin:0; } .page-break { page-break-after: always; } }
 </style></head><body>
 ${sheets}
-<script>window.onload=function(){ window.print(); setTimeout(function(){ window.close(); }, 1500); };<\/script>
+<script>window.onload=function(){ window.print(); setTimeout(function(){ window.close(); }, 1500); };</script>
 </body></html>`;
 
   const win = window.open('', '_blank', 'width=900,height=700');
@@ -289,7 +289,7 @@ function printPurchaseInvoice(
   @media print { .page-break { page-break-after: always; } }
 </style></head><body>
 ${inner}
-<script>window.onload=function(){ window.print(); setTimeout(function(){ window.close(); }, 1500); };<\/script>
+<script>window.onload=function(){ window.print(); setTimeout(function(){ window.close(); }, 1500); };</script>
 </body></html>`;
 
   const win = window.open('', '_blank', 'width=900,height=700');
@@ -428,7 +428,7 @@ export default function InvoicesPage() {
       managerName: storeCurrentUser.full_name,
       managerId: storeCurrentUser.id,
     });
-    success('لیست ارسال شد', `${assignee.full_name} از صفحهٔ «تأیید فروش» لیست را می‌بیند.`);
+    success('لیست ارسال شد', `${assignee.full_name} از صفحهٔ «تأیید فعالیت» لیست را می‌بیند.`);
     setPurchaseShareAssigneeId('');
   };
 
@@ -1251,7 +1251,7 @@ export default function InvoicesPage() {
                     <p className="text-xs font-black">اشتراک‌گذاری لیست خرید با همکار</p>
                   </div>
                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                    قبل یا بعد از چاپ، لیست اقلام را برای فروشنده یا انباردار بفرستید تا کالاها را جمع کند؛ سپس از «تأیید فروش» بدون دردسر تأیید کنید. برای مدیر اعلان و همان صفحه به‌روز می‌شود.
+                    قبل یا بعد از چاپ، لیست اقلام را برای فروشنده یا انباردار بفرستید تا کالاها را جمع کند؛ سپس از «تأیید فعالیت» بدون دردسر تأیید کنید. برای مدیر اعلان و همان صفحه به‌روز می‌شود.
                   </p>
                   <select
                     value={purchaseShareAssigneeId}

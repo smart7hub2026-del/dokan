@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Shield, Smartphone, Key, Eye, EyeOff, CheckCircle, AlertTriangle, QrCode, Copy, Check, ClipboardList } from 'lucide-react';
+import { useState, useMemo, type FormEvent } from 'react';
+import { Shield, Smartphone, Key, Eye, EyeOff, CheckCircle, AlertTriangle, QrCode, Copy, Check } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { apiTwoFactorSetup, apiTwoFactorEnable, apiTwoFactorDisable, getApiBaseUrl } from '../services/api';
 import { SECURITY_GAPS_CATALOG, countGapsByLevel } from '../data/securityGapsCatalog';
@@ -123,7 +123,7 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
     []
   );
 
-  const handleChangePassword = async (e: React.FormEvent) => {
+  const handleChangePassword = async (e: FormEvent) => {
     e.preventDefault();
     if (pwForm.new !== pwForm.confirm) { setPwError('رمزها یکسان نیستند'); return; }
     const pwErr = validatePasswordPolicy(pwForm.new);
@@ -157,6 +157,44 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
       <div>
         <h1 className="text-2xl font-bold text-white">امنیت پیشرفته</h1>
         <p className="text-slate-400 text-sm mt-1">مدیریت امنیت حساب کاربری</p>
+      </div>
+
+      <div className="glass rounded-2xl border border-amber-500/20 p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="text-amber-400 shrink-0" size={18} />
+          <h2 className="text-white font-semibold text-sm">وضعیت و هشدارهای فوری</h2>
+        </div>
+        <ul className="space-y-2">
+          {securityGaps.map((g, i) => (
+            <li
+              key={i}
+              className={`text-xs rounded-lg px-3 py-2 leading-relaxed ${
+                g.level === 'high'
+                  ? 'bg-rose-500/10 text-rose-100 border border-rose-500/25'
+                  : g.level === 'medium'
+                    ? 'bg-amber-500/10 text-amber-100 border border-amber-500/25'
+                    : 'bg-slate-800/60 text-slate-300 border border-white/5'
+              }`}
+            >
+              {g.text}
+            </li>
+          ))}
+        </ul>
+        <p className="text-[10px] text-slate-500 pt-2 border-t border-white/10 leading-relaxed">
+          فهرست بازبینی فنی: بحرانی {catalogCounts.high}، متوسط {catalogCounts.medium}، اطلاعاتی {catalogCounts.info} (جمع {catalogCounts.total})
+        </p>
+        {seriousGaps.length > 0 && (
+          <ul className="text-[10px] text-slate-400 space-y-1 list-disc pr-4">
+            {seriousGaps.flatMap((c) =>
+              c.items.map((it, j) => (
+                <li key={`${c.title}-${j}`}>
+                  <span className="text-slate-500">{c.title}: </span>
+                  {it.text}
+                </li>
+              ))
+            )}
+          </ul>
+        )}
       </div>
 
       {/* 2FA Section */}
@@ -377,84 +415,7 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
         </form>
       </div>
 
-      <div className="glass rounded-2xl p-6 space-y-4 border border-amber-500/20">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <h2 className="text-white font-semibold flex items-center gap-2">
-            <AlertTriangle size={18} className="text-amber-400" />
-            چک‌لیست شخصی شما (همین حساب)
-          </h2>
-          <span className="text-amber-200 text-sm font-black bg-amber-500/15 px-3 py-1 rounded-full border border-amber-500/30">
-            {securityGaps.filter((g) => g.level === 'high').length} مورد مهم · {securityGaps.length} نکته
-          </span>
-        </div>
-        <p className="text-slate-500 text-xs leading-relaxed">
-          موارد زیر بر اساس وضعیت فعلی شما (۲FA، HTTPS، …) به‌صورت پویا محاسبه می‌شود.
-        </p>
-        <ul className="space-y-2 text-sm">
-          {securityGaps.map((g, i) => (
-            <li
-              key={i}
-              className={`rounded-xl px-3 py-2 border ${
-                g.level === 'high'
-                  ? 'bg-rose-500/10 border-rose-500/25 text-rose-100'
-                  : g.level === 'medium'
-                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-100'
-                    : 'bg-slate-800/40 border-white/10 text-slate-300'
-              }`}
-            >
-              {g.text}
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="glass rounded-2xl p-6 space-y-5 border border-slate-600/50">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-          <div>
-            <h2 className="text-white font-semibold flex items-center gap-2 text-lg">
-              <ClipboardList size={20} className="text-violet-400 shrink-0" />
-              یادآوری کمبودات جدی باقی‌مانده
-            </h2>
-            <p className="text-slate-400 text-sm mt-2 leading-relaxed max-w-3xl">
-              فقط موارد بحرانی نمایش داده می‌شوند؛ مواردی که قبلاً حل شده‌اند از این لیست حذف شده‌اند.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs font-bold shrink-0">
-            <span className="px-2.5 py-1 rounded-lg bg-rose-500/15 text-rose-200 border border-rose-500/25">
-              بحرانی: {catalogCounts.high}
-            </span>
-          </div>
-        </div>
-
-        <div className="max-h-[min(70vh,720px)] overflow-y-auto pr-1 space-y-4 scroll-smooth">
-          {seriousGaps.map((cat) => (
-            <div
-              key={cat.title}
-              className="rounded-xl border border-white/10 bg-slate-900/40 p-4 space-y-3"
-            >
-              <div>
-                <h3 className="text-white font-bold text-sm">{cat.title}</h3>
-                {cat.description ? (
-                  <p className="text-slate-500 text-xs mt-1 leading-relaxed">{cat.description}</p>
-                ) : null}
-              </div>
-              <ul className="space-y-2 text-sm">
-                {cat.items.map((item, idx) => (
-                  <li
-                    key={`${cat.title}-${idx}`}
-                    className="rounded-lg px-3 py-2 border leading-relaxed bg-rose-500/10 border-rose-500/20 text-rose-100"
-                  >
-                    <span className="text-[10px] font-black uppercase tracking-wider opacity-70 me-2">
-                      [بحرانی]
-                    </span>
-                    {item.text}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      </div>
+      
 
       <div className="glass rounded-2xl p-6 space-y-3 border border-slate-600/40">
         <h2 className="text-white font-semibold flex items-center gap-2">

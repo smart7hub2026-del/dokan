@@ -1,6 +1,7 @@
 /** آیکن Lucide — باید در WelcomePage در ONBOARDING_LUCIDE ثبت شود */
 export type OnboardingLucideIconName =
   | 'ShoppingCart'
+  | 'BookOpen'
   | 'Pill'
   | 'Smartphone'
   | 'UtensilsCrossed'
@@ -34,9 +35,19 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
     lucideIcon: 'ShoppingCart',
     isActive: true,
     demoDatabaseEnabled: true,
-    titleFa: 'سوپرمارکت',
-    titleEn: 'Supermarket',
+    titleFa: 'فروشگاه عمومی',
+    titleEn: 'General retail',
     accent: 'from-emerald-600/90 to-teal-900/90',
+  },
+  {
+    id: 'bookstore',
+    lucideIcon: 'BookOpen',
+    isActive: true,
+    /** دیتابیس جدا: فقط جدول books — بدون مخلوط با products */
+    demoDatabaseEnabled: true,
+    titleFa: 'کتابفروشی',
+    titleEn: 'Bookstore',
+    accent: 'from-indigo-600/90 to-slate-900/90',
   },
   {
     id: 'pharmacy',

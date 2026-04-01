@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Smartphone, Monitor, Apple, ChevronRight } from 'lucide-react';
 import { DOWNLOAD_URLS } from '../config/downloads';
+import BrandLogo from './BrandLogo';
 
 type Props = {
   onBack: () => void;
@@ -21,7 +22,7 @@ export default function WelcomeDownloadPage({ onBack, onLogin, onRegister }: Pro
   const iosHref = origin ? `${origin}/` : '/';
 
   return (
-    <div className="min-h-screen font-vazir relative flex flex-col overflow-hidden bg-slate-950" dir="rtl">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-slate-950 font-vazir relative overscroll-none" dir="rtl">
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(16,185,129,0.22),transparent_45%),radial-gradient(circle_at_80%_10%,rgba(59,130,246,0.20),transparent_45%),linear-gradient(135deg,#020617,#0f172a,#020617)]" />
         <div className="absolute inset-0 opacity-20 bg-[linear-gradient(to_right,rgba(148,163,184,.15)_1px,transparent_1px),linear-gradient(to_bottom,rgba(148,163,184,.15)_1px,transparent_1px)] bg-[size:28px_28px]" />
@@ -37,7 +38,10 @@ export default function WelcomeDownloadPage({ onBack, onLogin, onRegister }: Pro
             >
               <ChevronRight size={20} />
             </button>
-            <h1 className="text-lg sm:text-xl font-black text-white">دانلود</h1>
+            <div className="flex items-center gap-2">
+              <BrandLogo size={34} variant="header" />
+              <h1 className="text-lg sm:text-xl font-black text-white">دانلود</h1>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -58,7 +62,7 @@ export default function WelcomeDownloadPage({ onBack, onLogin, onRegister }: Pro
         </div>
       </header>
 
-      <main className="relative z-10 flex-1 flex items-center justify-center px-4 py-8 sm:py-12">
+      <main className="relative z-10 flex-1 min-h-0 flex items-center justify-center px-4 py-8 sm:py-12">
         <div className="w-full max-w-6xl">
           <h2 className="text-center text-white font-black text-2xl sm:text-3xl mb-2">دانلود نسخه مناسب دستگاه شما</h2>
           <p className="text-center text-slate-300 text-sm mb-8">هر سه مسیر کامل است: اندروید، iOS (نسخه وب‌اپ)، ویندوز</p>

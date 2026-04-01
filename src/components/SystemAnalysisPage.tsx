@@ -137,9 +137,9 @@ const gaps: Gap[] = [
   // Features
   {
     id: 17, category: 'قابلیت‌ها', priority: 'high', status: 'done',
-    title: 'صفحه تأیید فروش عملکرد واقعی ندارد',
+    title: 'صفحه تأیید فعالیت نیاز به همگام‌سازی سرور دارد',
     description: 'فروش‌های pending در PendingPage نشان داده می‌شوند اما تأیید/رد تأثیری ندارد.',
-    impact: 'workflow تأیید فروش فقط نمایشی است',
+    impact: 'جریان تأیید فعالیت در حالت آفلاین محلی است؛ با API سرور یکپارچه شود',
     solution: 'Global state + بعد از تأیید فاکتور در لیست فاکتورها ظاهر شود'
   },
   {

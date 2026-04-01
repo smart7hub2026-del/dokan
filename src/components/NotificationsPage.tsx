@@ -40,32 +40,43 @@ export default function NotificationsPage() {
   };
 
   const typeLabel = (type: Notification['type']) => {
-    const labels: Record<string, string> = { debt: 'بدهی', stock: 'موجودی', expiry: 'انقضا', pending: 'تأیید', message: 'پیام', note: 'یادداشت' };
+    const labels: Record<string, string> = { debt: 'قرض', stock: 'موجودی', expiry: 'انقضا', pending: 'تأیید', message: 'پیام', note: 'یادداشت' };
     return labels[type] || type;
   };
 
   const typeBg = (type: Notification['type']) => {
     const bgs: Record<string, string> = {
-      debt: 'border-rose-500/20',
-      stock: 'border-amber-500/20',
-      expiry: 'border-orange-500/20',
-      pending: 'border-blue-500/20',
-      message: 'border-purple-500/20',
-      note: 'border-slate-500/20',
+      debt: isDark ? 'border-rose-500/30' : 'border-rose-300',
+      stock: isDark ? 'border-amber-500/30' : 'border-amber-300',
+      expiry: isDark ? 'border-yellow-500/30' : 'border-yellow-300',
+      pending: isDark ? 'border-blue-500/30' : 'border-blue-300',
+      message: isDark ? 'border-purple-500/30' : 'border-purple-300',
+      note: isDark ? 'border-slate-500/30' : 'border-slate-300',
     };
     return bgs[type] || 'border-slate-500/20';
   };
 
   const typeIconBg = (type: Notification['type']) => {
     const bgs: Record<string, string> = {
-      debt: 'bg-rose-500/10',
-      stock: 'bg-amber-500/10',
-      expiry: 'bg-orange-500/10',
-      pending: 'bg-blue-500/10',
-      message: 'bg-purple-500/10',
-      note: 'bg-slate-500/10',
+      debt: isDark ? 'bg-rose-500/18' : 'bg-rose-100',
+      stock: isDark ? 'bg-amber-500/18' : 'bg-amber-100',
+      expiry: isDark ? 'bg-yellow-500/18' : 'bg-yellow-100',
+      pending: isDark ? 'bg-blue-500/18' : 'bg-blue-100',
+      message: isDark ? 'bg-purple-500/18' : 'bg-purple-100',
+      note: isDark ? 'bg-slate-500/18' : 'bg-slate-100',
     };
     return bgs[type] || 'bg-slate-500/10';
+  };
+  const typeText = (type: Notification['type']) => {
+    const v: Record<string, string> = {
+      debt: isDark ? 'text-rose-200' : 'text-rose-700',
+      stock: isDark ? 'text-amber-200' : 'text-amber-700',
+      expiry: isDark ? 'text-yellow-200' : 'text-yellow-700',
+      pending: isDark ? 'text-blue-200' : 'text-blue-700',
+      message: isDark ? 'text-purple-200' : 'text-purple-700',
+      note: isDark ? 'text-slate-200' : 'text-slate-700',
+    };
+    return v[type] || (isDark ? 'text-slate-200' : 'text-slate-700');
   };
 
   const markAllRead = () => markAllReadStore();
@@ -127,7 +138,7 @@ export default function NotificationsPage() {
       <div className="flex gap-2 flex-wrap">
         {[
           { id: 'all', label: 'همه', count: notifications.length },
-          { id: 'debt', label: 'بدهی', count: notifications.filter(n => n.type === 'debt').length },
+          { id: 'debt', label: 'قرض', count: notifications.filter(n => n.type === 'debt').length },
           { id: 'stock', label: 'موجودی', count: notifications.filter(n => n.type === 'stock').length },
           { id: 'expiry', label: 'انقضا', count: notifications.filter(n => n.type === 'expiry').length },
           { id: 'pending', label: 'تأیید', count: notifications.filter(n => n.type === 'pending').length },
@@ -170,7 +181,7 @@ export default function NotificationsPage() {
                     </div>
                     <p className={`${subText} text-sm`}>{n.message}</p>
                     <div className="flex items-center gap-2 mt-2">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'badge-blue' : 'bg-indigo-50 text-indigo-600 border border-indigo-200'}`}>{typeLabel(n.type)}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${typeBg(n.type)} ${typeText(n.type)}`}>{typeLabel(n.type)}</span>
                     </div>
                   </div>
                   <div className="flex gap-1 flex-shrink-0">
@@ -200,8 +211,8 @@ export default function NotificationsPage() {
               {[
                 { label: 'کل', value: notifications.length, color: textColor },
                 { label: 'خوانده نشده', value: unread, color: 'text-rose-400' },
-                { label: 'بدهی', value: notifications.filter(n => n.type === 'debt').length, color: 'text-rose-400' },
-                { label: 'موجودی', value: notifications.filter(n => n.type === 'stock').length, color: 'text-amber-400' },
+                { label: 'قرض', value: notifications.filter(n => n.type === 'debt').length, color: 'text-rose-400' },
+                { label: 'موجودی', value: notifications.filter(n => n.type === 'stock').length, color: 'text-yellow-400' },
               ].map(s => (
                 <div key={s.label} className={`${isDark ? 'bg-slate-800/50' : 'bg-slate-50 border border-slate-100'} rounded-xl p-3 text-center`}>
                   <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
@@ -253,9 +264,9 @@ export default function NotificationsPage() {
           <div className={`${cardBg} p-5 space-y-3`}>
             <h3 className={`${textColor} font-semibold`}>انواع اعلان‌ها</h3>
             {[
-              { label: 'بدهی‌های معوق', state: notifyDebt, setState: setNotifyDebt, color: 'bg-rose-500', icon: CreditCard },
-              { label: 'تاریخ انقضا', state: notifyExpiry, setState: setNotifyExpiry, color: 'bg-orange-500', icon: AlertTriangle },
-              { label: 'کم‌موجودی', state: notifyStock, setState: setNotifyStock, color: 'bg-amber-500', icon: Package },
+              { label: 'قرضداران معوق', state: notifyDebt, setState: setNotifyDebt, color: 'bg-rose-500', icon: CreditCard },
+              { label: 'تاریخ انقضا', state: notifyExpiry, setState: setNotifyExpiry, color: 'bg-yellow-500', icon: AlertTriangle },
+              { label: 'کم‌موجودی', state: notifyStock, setState: setNotifyStock, color: 'bg-yellow-500', icon: Package },
               { label: 'فروش در انتظار', state: notifyPending, setState: setNotifyPending, color: 'bg-blue-500', icon: Clock },
             ].map(item => (
               <div key={item.label} className="flex items-center justify-between">

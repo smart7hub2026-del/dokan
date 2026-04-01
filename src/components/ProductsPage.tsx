@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, Search, Edit2, Trash2, X, Package, AlertTriangle, Barcode, Hash, Calendar, Printer, RefreshCw, Camera, Mic, MicOff, Download, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, X, Package, AlertTriangle, Barcode, Hash, Calendar, Printer, RefreshCw, Camera, Mic, MicOff, Download, ChevronRight, ChevronLeft, Info, ShoppingCart } from 'lucide-react';
 import { Product, type CurrencyCode } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import { useStore } from '../store/useStore';
@@ -7,6 +7,7 @@ import { useVoiceSearch } from '../hooks/useVoiceSearch';
 import { BrowserMultiFormatReader } from '@zxing/library';
 import FormModal from './ui/FormModal';
 import { compressImageToDataUrl } from '../utils/compressImage';
+import { useNavigate } from 'react-router-dom';
 
 const ITEMS_PER_PAGE = 10;
 
@@ -170,11 +171,13 @@ function DeleteConfirmModal({ name, onConfirm, onClose }: { name: string; onConf
 }
 
 export default function ProductsPage() {
+  const navigate = useNavigate();
   const { isDark, t, currencies, formatPrice } = useApp();
   const products = useStore(s => s.products);
   const categories = useStore(s => s.categories);
   const serials = useStore(s => s.serialNumbers);
   const expiryRecords = useStore(s => s.expiryRecords);
+  const invoices = useStore(s => s.invoices);
   const currentUser = useStore(s => s.currentUser);
   const addProduct = useStore(s => s.addProduct);
   const updateProduct = useStore(s => s.updateProduct);
@@ -191,6 +194,13 @@ export default function ProductsPage() {
   const [editItem, setEditItem] = useState<Product | null>(null);
   const [printProduct, setPrintProduct] = useState<Product | null>(null);
   const [deleteItem, setDeleteItem] = useState<Product | null>(null);
+  const [profitDetailItem, setProfitDetailItem] = useState<Product | null>(null);
+  const [profitDateFrom, setProfitDateFrom] = useState(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return d.toISOString().slice(0, 10);
+  });
+  const [profitDateTo, setProfitDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [showSerialModal, setShowSerialModal] = useState(false);
   const [serialProductId, setSerialProductId] = useState<number | null>(null);
   const [newSerial, setNewSerial] = useState({ serial_number: '', warranty_months: 12 });
@@ -206,6 +216,19 @@ export default function ProductsPage() {
 
   type NumField = number | '';
   const parseFormNum = (v: NumField) => (v === '' ? 0 : Number(v) || 0);
+  const parseMoneyNum = (v: NumField) => {
+    if (v === '') return 0;
+    const n = Number.parseFloat(String(v));
+    if (!Number.isFinite(n) || n < 0) return 0;
+    return Math.round(n * 100) / 100;
+  };
+  const formatPriceWithOriginal = (amount: number, from: CurrencyCode = 'AFN') => {
+    const converted = formatPrice(amount, from);
+    if (from === 'AFN') return converted;
+    const sym = currencies.find((c) => c.code === from)?.symbol || from;
+    const original = `${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${sym}`;
+    return `${converted} (${original})`;
+  };
 
   const [form, setForm] = useState({
     product_code: '', barcode: '', name: '', category_id: 1,
@@ -314,8 +337,8 @@ export default function ProductsPage() {
     if (!form.barcode) { alert('بارکد اجباری است'); return; }
     const cat = categories.find(c => c.id === form.category_id);
     const tenantId = currentUser?.tenant_id ?? 1;
-    const purchase_price = parseFormNum(form.purchase_price);
-    const sale_price = parseFormNum(form.sale_price);
+    const purchase_price = parseMoneyNum(form.purchase_price);
+    const sale_price = parseMoneyNum(form.sale_price);
     const stock_shop = parseFormNum(form.stock_shop);
     const stock_warehouse = parseFormNum(form.stock_warehouse);
     const min_stock = parseFormNum(form.min_stock);
@@ -377,6 +400,37 @@ export default function ProductsPage() {
       setDeleteItem(null);
     }
   };
+
+  const sendToSales = (p: Product) => {
+    navigate(`/sales?productId=${encodeURIComponent(String(p.id))}&q=${encodeURIComponent(p.barcode || p.name)}`);
+  };
+
+  const profitDetails = useMemo(() => {
+    if (!profitDetailItem) return null;
+    const from = profitDateFrom;
+    const to = profitDateTo;
+    const currency = profitDetailItem.currency_code ?? 'AFN';
+    const unitProfit = Number(profitDetailItem.sale_price || 0) - Number(profitDetailItem.purchase_price || 0);
+    const productInvoices = invoices
+      .filter((inv) => inv.invoice_date >= from && inv.invoice_date <= to)
+      .flatMap((inv) =>
+        inv.items
+          .filter((it) => it.product_id === profitDetailItem.id)
+          .map((it) => ({
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            qty: Number(it.quantity || 0),
+            unit_price: Number(it.unit_price || 0),
+            total: Number(it.total_price || 0),
+          }))
+      )
+      .sort((a, b) => String(b.invoice_date).localeCompare(String(a.invoice_date)));
+    const soldQty = productInvoices.reduce((s, r) => s + r.qty, 0);
+    const grossSales = productInvoices.reduce((s, r) => s + r.total, 0);
+    const cogs = soldQty * Number(profitDetailItem.purchase_price || 0);
+    const realizedProfit = grossSales - cogs;
+    return { currency, unitProfit, soldQty, grossSales, cogs, realizedProfit, rows: productInvoices };
+  }, [profitDetailItem, invoices, profitDateFrom, profitDateTo]);
 
   // Scan removed from products list - use global search instead
 
@@ -544,7 +598,7 @@ export default function ProductsPage() {
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
+              {[
               { label: 'کل محصولات', value: products.length, color: textColor },
               { label: 'فعال', value: products.filter(p => p.is_active).length, color: 'text-emerald-400' },
               { label: 'کم‌موجودی', value: products.filter(p => p.stock_shop <= p.min_stock && p.stock_shop > 0).length, color: 'text-amber-400' },
@@ -599,8 +653,8 @@ export default function ProductsPage() {
                         </div>
                       </td>
                       <td className={`py-3 px-4 ${subText} text-xs`}>{p.category_name}</td>
-                      <td className="py-3 px-4 text-amber-400 font-medium">{formatPrice(p.purchase_price, p.currency_code ?? 'AFN')}</td>
-                      <td className="py-3 px-4 text-emerald-400 font-medium">{formatPrice(p.sale_price, p.currency_code ?? 'AFN')}</td>
+                      <td className="py-3 px-4 text-amber-400 font-medium">{formatPriceWithOriginal(p.purchase_price, p.currency_code ?? 'AFN')}</td>
+                      <td className="py-3 px-4 text-emerald-400 font-medium">{formatPriceWithOriginal(p.sale_price, p.currency_code ?? 'AFN')}</td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1">
                           <span className={`font-bold ${p.stock_shop === 0 ? 'text-rose-400' : p.stock_shop <= p.min_stock ? 'text-amber-400' : textColor}`}>{p.stock_shop}</span>
@@ -621,6 +675,8 @@ export default function ProductsPage() {
                           {p.has_serial && (
                             <button onClick={() => openSerialManager(p.id)} title="سریال‌ها" className="p-1.5 rounded-lg glass text-slate-400 hover:text-emerald-400 transition-colors"><Hash size={14} /></button>
                           )}
+                          <button onClick={() => sendToSales(p)} title="ارسال به فروش" className="p-1.5 rounded-lg glass text-slate-400 hover:text-emerald-400 transition-colors"><ShoppingCart size={14} /></button>
+                          <button onClick={() => setProfitDetailItem(p)} title="جزئیات مفاد" className="p-1.5 rounded-lg glass text-slate-400 hover:text-cyan-400 transition-colors"><Info size={14} /></button>
                           <button onClick={() => confirmDelete(p)} title="حذف" className="p-1.5 rounded-lg glass text-slate-400 hover:text-rose-400 transition-colors"><Trash2 size={14} /></button>
                         </div>
                       </td>
@@ -697,13 +753,13 @@ export default function ProductsPage() {
                     <div>
                       <p className={`text-[10px] ${subText}`}>فروش</p>
                       <p className={`text-sm font-bold tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
-                        {formatPrice(p.sale_price, p.currency_code ?? 'AFN')}
+                        {formatPriceWithOriginal(p.sale_price, p.currency_code ?? 'AFN')}
                       </p>
                     </div>
                     <div>
                       <p className={`text-[10px] ${subText}`}>خرید</p>
                       <p className={`text-sm font-medium tabular-nums ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>
-                        {formatPrice(p.purchase_price, p.currency_code ?? 'AFN')}
+                        {formatPriceWithOriginal(p.purchase_price, p.currency_code ?? 'AFN')}
                       </p>
                     </div>
                     <span className={`text-[11px] px-2 py-1 rounded-full shrink-0 ${p.is_active ? 'badge-green' : 'badge-red'}`}>
@@ -737,6 +793,22 @@ export default function ProductsPage() {
                         <Hash size={16} />
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => sendToSales(p)}
+                      title="ارسال به فروش"
+                      className={`p-2 rounded-xl ${isDark ? 'glass' : 'bg-white border border-slate-200'} text-slate-500 hover:text-emerald-500`}
+                    >
+                      <ShoppingCart size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setProfitDetailItem(p)}
+                      title="جزئیات مفاد"
+                      className={`p-2 rounded-xl ${isDark ? 'glass' : 'bg-white border border-slate-200'} text-slate-500 hover:text-cyan-500`}
+                    >
+                      <Info size={16} />
+                    </button>
                     <button
                       type="button"
                       onClick={() => confirmDelete(p)}
@@ -921,7 +993,7 @@ export default function ProductsPage() {
                     </button>
                   </div>
                   {showAddCategory && (
-                    <div className="mt-2 flex gap-2 fade-in">
+                    <div className="mt-2 grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2 fade-in">
                       <input
                         value={newCategoryName}
                         onChange={e => setNewCategoryName(e.target.value)}
@@ -931,11 +1003,11 @@ export default function ProductsPage() {
                         autoFocus
                       />
                       <button type="button" onClick={handleAddCategory}
-                        className="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-xs transition-colors">
+                        className="px-3 py-2 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 text-xs transition-colors w-full sm:w-auto">
                         افزودن
                       </button>
                       <button type="button" onClick={() => setShowAddCategory(false)}
-                        className="px-3 py-2 rounded-xl glass text-slate-400 hover:text-white text-xs">
+                        className="px-3 py-2 rounded-xl glass text-slate-400 hover:text-white text-xs w-full sm:w-auto">
                         <X size={14} />
                       </button>
                     </div>
@@ -980,6 +1052,7 @@ export default function ProductsPage() {
                         const v = e.target.value;
                         setForm({ ...form, [field]: v === '' ? '' : Number(v) });
                       }}
+                      step={field === 'purchase_price' || field === 'sale_price' ? '0.01' : '1'}
                       className={inputClass} min="0" />
                   </div>
                 ))}
@@ -1112,6 +1185,92 @@ export default function ProductsPage() {
 
       {/* DELETE CONFIRM MODAL */}
       {deleteItem && <DeleteConfirmModal name={deleteItem.name} onConfirm={doDelete} onClose={() => setDeleteItem(null)} />}
+
+      <FormModal
+        open={!!profitDetailItem}
+        onClose={() => setProfitDetailItem(null)}
+        size="sm"
+        title={
+          <span className="flex items-center gap-2">
+            <Info size={16} className="text-cyan-400" /> جزئیات مفاد محصول
+          </span>
+        }
+        footer={
+          <button type="button" onClick={() => setProfitDetailItem(null)} className="w-full btn-primary text-white py-2.5 rounded-xl text-sm">
+            بستن
+          </button>
+        }
+      >
+        {profitDetailItem ? (
+          <div className="space-y-3 text-sm">
+            <p className={`${textColor} font-bold`}>{profitDetailItem.name}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-2.5">
+                <p className={`${subText} text-xs`}>قیمت خرید</p>
+                <p className="text-amber-400 font-bold">{formatPriceWithOriginal(profitDetailItem.purchase_price, profitDetailItem.currency_code ?? 'AFN')}</p>
+              </div>
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2.5">
+                <p className={`${subText} text-xs`}>قیمت فروش</p>
+                <p className="text-emerald-400 font-bold">{formatPriceWithOriginal(profitDetailItem.sale_price, profitDetailItem.currency_code ?? 'AFN')}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className={`${subText} text-xs mb-1 block`}>از تاریخ</label>
+                <input type="date" value={profitDateFrom} onChange={(e) => setProfitDateFrom(e.target.value)} className={inputClass} />
+              </div>
+              <div>
+                <label className={`${subText} text-xs mb-1 block`}>تا تاریخ</label>
+                <input type="date" value={profitDateTo} onChange={(e) => setProfitDateTo(e.target.value)} className={inputClass} />
+              </div>
+            </div>
+            <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-2.5">
+              <p className={`${subText} text-xs`}>مفاد هر واحد</p>
+              <p className="text-cyan-300 font-black">
+                {formatPriceWithOriginal(profitDetailItem.sale_price - profitDetailItem.purchase_price, profitDetailItem.currency_code ?? 'AFN')}
+              </p>
+            </div>
+            <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/10 p-2.5">
+              <p className={`${subText} text-xs`}>مفاد تقریبی موجودی دکان</p>
+              <p className="text-indigo-300 font-black">
+                {formatPriceWithOriginal((profitDetailItem.sale_price - profitDetailItem.purchase_price) * Math.max(0, Number(profitDetailItem.stock_shop || 0)), profitDetailItem.currency_code ?? 'AFN')}
+              </p>
+            </div>
+            <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-2.5">
+              <p className={`${subText} text-xs`}>فروش در بازه</p>
+              <p className="text-emerald-300 font-black">{profitDetails?.soldQty ?? 0} عدد</p>
+              <p className="text-emerald-400 text-xs mt-1">جمع فروش: {formatPriceWithOriginal(profitDetails?.grossSales ?? 0, profitDetails?.currency ?? (profitDetailItem.currency_code ?? 'AFN'))}</p>
+              <p className="text-cyan-300 text-xs mt-1">مفاد تحقق‌یافته: {formatPriceWithOriginal(profitDetails?.realizedProfit ?? 0, profitDetails?.currency ?? (profitDetailItem.currency_code ?? 'AFN'))}</p>
+            </div>
+            <div className="max-h-44 overflow-auto rounded-xl border border-white/10">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-800/40">
+                  <tr>
+                    <th className={`text-right p-2 ${subText}`}>تاریخ</th>
+                    <th className={`text-right p-2 ${subText}`}>فاکتور</th>
+                    <th className={`text-right p-2 ${subText}`}>تعداد</th>
+                    <th className={`text-right p-2 ${subText}`}>مبلغ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(profitDetails?.rows || []).length === 0 ? (
+                    <tr><td colSpan={4} className={`p-3 text-center ${subText}`}>در این بازه فروش ثبت نشده</td></tr>
+                  ) : (
+                    (profitDetails?.rows || []).map((r, idx) => (
+                      <tr key={`${r.invoice_number}-${idx}`} className="border-t border-white/5">
+                        <td className={`p-2 ${textColor}`}>{r.invoice_date}</td>
+                        <td className={`p-2 ${textColor}`}>{r.invoice_number}</td>
+                        <td className={`p-2 ${textColor}`}>{r.qty}</td>
+                        <td className="p-2 text-emerald-300">{formatPriceWithOriginal(r.total, profitDetails?.currency ?? (profitDetailItem.currency_code ?? 'AFN'))}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+      </FormModal>
 
       {/* CAMERA SCANNER MODAL */}
       {showScanner && (

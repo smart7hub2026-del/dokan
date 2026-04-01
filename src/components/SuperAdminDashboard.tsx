@@ -69,7 +69,7 @@ export default function SuperAdminDashboard() {
         if (canceled) return;
         setTenants(tr.tenants || []);
         setPayments((pr.payments as SubPayment[]) || []);
-        setAdminPayments((ap.payments as Record<string, unknown>[]) || []);
+        setAdminPayments((ap.payments as unknown as Record<string, unknown>[]) || []);
         setLoadError('');
       } catch (e) {
         if (!canceled) setLoadError(e instanceof Error ? e.message : 'خطا در دریافت داده');
@@ -125,7 +125,9 @@ export default function SuperAdminDashboard() {
     setPayOpsBusy(true);
     try {
       const res = await apiVerifyAdminPayment(id, decision, '', authToken);
-      setAdminPayments((prev) => prev.map((p) => (Number(p.id) === id ? (res.payment as Record<string, unknown>) : p)));
+      setAdminPayments((prev) =>
+        prev.map((p) => (Number(p.id) === id ? (res.payment as unknown as Record<string, unknown>) : p))
+      );
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : 'خطا در تایید پرداخت');
     } finally {

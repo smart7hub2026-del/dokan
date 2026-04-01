@@ -35,9 +35,13 @@ export default function FormModal({
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
+    const prevPad = document.body.style.paddingRight;
+    const scrollbarW = Math.max(0, window.innerWidth - document.documentElement.clientWidth);
     document.body.style.overflow = 'hidden';
+    if (scrollbarW > 0) document.body.style.paddingRight = `${scrollbarW}px`;
     return () => {
       document.body.style.overflow = prev;
+      document.body.style.paddingRight = prevPad;
     };
   }, [open]);
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
-  Product, Customer, Invoice, Debt, Supplier, PersonalReminder,
+  Product, Book, Customer, Invoice, Debt, Supplier, PersonalReminder,
   Notification, Category, User, InvoiceItem, ProductExpiry, SerialNumber
 } from '../data/mockData';
 
@@ -785,7 +785,7 @@ export const useStore = create<AppStore>()(
           });
           get().reportStaffActivityToAdmins(
             'فاکتور فروش ثبت شد',
-            `فاکتور ${newInv.invoice_number} به مبلغ ${newInv.total.toLocaleString()} ؋ — ${newInv.customer_name}. در «تأیید فروش» بررسی کنید.`,
+            `فاکتور ${newInv.invoice_number} به مبلغ ${newInv.total.toLocaleString()} ؋ — ${newInv.customer_name}. در «تأیید فعالیت» بررسی کنید.`,
             user.id,
             user.full_name
           );
@@ -1039,12 +1039,12 @@ export const useStore = create<AppStore>()(
 
       reportStaffActivityToAdmins: (title, message, actorUserId, actorName) => {
         const admins = get().users.filter(u => u.role === 'admin' && u.status === 'active');
-        const body = `${actorName}: ${message}`;
+        const body = `${actorName}: ${message} — برای بررسی و تأیید به صفحه «تأیید فعالیت» بروید.`;
         for (const a of admins) {
           get().addNotification({
             user_id: actorUserId,
             recipient_user_id: a.id,
-            type: 'pending',
+            type: 'message',
             title,
             message: body,
             link: '/pending',
@@ -1101,9 +1101,9 @@ export const useStore = create<AppStore>()(
         get().addNotification({
           user_id: managerId,
           recipient_user_id: assignee.id,
-          type: 'pending',
+          type: 'message',
           title: 'لیست خرید برای شماست',
-          message: `${managerName} فاکتور خرید ${invoiceNumber} (${supplierName}) را برای برداشتن کالا فرستاد. از «تأیید فروش / لیست خرید» اقدام کنید.`,
+          message: `${managerName} فاکتور خرید ${invoiceNumber} (${supplierName}) را برای برداشتن کالا فرستاد. از صفحه «تأیید فعالیت» همان لیست را باز کنید.`,
           link: '/pending',
           is_read: false,
           is_heard: false,
@@ -1125,6 +1125,7 @@ export const useStore = create<AppStore>()(
 
           let nextInvoices = s.invoices;
           let nextProducts = s.products;
+          let nextBooks = s.books;
           let nextDebts = s.debts;
           let nextCustomers = s.customers;
           let nextExpenses = s.expenses;
@@ -1183,13 +1184,33 @@ export const useStore = create<AppStore>()(
           }
 
           if (item.type === 'warehouse_transfer') {
-            const d = item.data as { product_id: number; quantity: number };
-            nextProducts = s.products.map(p => {
-              if (p.id !== d.product_id) return p;
-              const q = d.quantity;
-              if (q > p.stock_warehouse) return p;
-              return { ...p, stock_warehouse: p.stock_warehouse - q, stock_shop: p.stock_shop + q };
-            });
+            const d = item.data as {
+              product_id: number;
+              quantity: number;
+              direction?: 'to_shop' | 'to_warehouse';
+            };
+            const dir = d.direction ?? 'to_shop';
+            const pid = d.product_id;
+            const q = d.quantity;
+            const applyStock = <T extends { id: number; stock_shop: number; stock_warehouse: number }>(row: T): T => {
+              if (row.id !== pid) return row;
+              if (dir === 'to_shop') {
+                if (q > row.stock_warehouse) return row;
+                return {
+                  ...row,
+                  stock_warehouse: row.stock_warehouse - q,
+                  stock_shop: row.stock_shop + q,
+                };
+              }
+              if (q > row.stock_shop) return row;
+              return {
+                ...row,
+                stock_shop: row.stock_shop - q,
+                stock_warehouse: row.stock_warehouse + q,
+              };
+            };
+            nextProducts = s.products.map(applyStock);
+            nextBooks = s.books.map(applyStock);
           }
 
           if (item.type === 'staff_expense') {
@@ -1230,6 +1251,7 @@ export const useStore = create<AppStore>()(
             ...s,
             invoices: nextInvoices,
             products: nextProducts,
+            books: nextBooks,
             debts: nextDebts,
             customers: nextCustomers,
             expenses: nextExpenses,

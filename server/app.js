@@ -233,6 +233,7 @@ function mergeShopStatePayload(existing, incoming) {
 /** ده صنف اولویت‌دار افغانستان — کد پایدار برای tenant / shopSettings.business_type */
 const AF_TENANT_BUSINESS_CODES = [
   'supermarket',
+  'bookstore',
   'pharmacy',
   'mobile_accessories',
   'restaurant',
@@ -1428,10 +1429,11 @@ const handleDemoLogin = async (req, res) => {
     const trialEnds = new Date(Date.now() + DEMO_TRIAL_MS).toISOString();
     const inactiveRolePwHash = await bcrypt.hash(generateCode('RP', 14), 10);
     const businessType = normalizeDemoBusinessType(req.body?.businessType);
-    if (businessType !== 'supermarket') {
+    const demoDbAllowed = businessType === 'supermarket' || businessType === 'bookstore';
+    if (!demoDbAllowed) {
       return res.status(400).json({
         message:
-          'ثبت‌نام آزمایشی با دیتابیس فعلاً فقط برای سوپرمارکت فعال است. برای سایر صنوف از طرح‌های پولی و تأیید ادمین استفاده کنید.',
+          'ثبت‌نام آزمایشی با دیتابیس فقط برای «فروشگاه عمومی» یا «کتابفروشی» است؛ هر کدام دیتای جدا دارد. سایر صنوف از طرح‌های پولی و تأیید ادمین.',
       });
     }
     const shop = {
@@ -3575,9 +3577,9 @@ app.post('/api/sales/invoices', authMiddleware, async (req, res) => {
       {
         id: nextId(nextNotifications),
         user_id: 1,
-        type: 'pending',
+        type: 'message',
         title: 'فاکتور جدید',
-        message: `فاکتور ${invoice.invoice_number} به مبلغ ${Number(invoice.total || 0).toLocaleString()} افغانی ثبت شد`,
+        message: `فاکتور ${invoice.invoice_number} به مبلغ ${Number(invoice.total || 0).toLocaleString()} افغانی ثبت شد (ثبت توسط مدیر — بدون نیاز به تأیید).`,
         link: '/invoices',
         is_read: false,
         is_heard: false,
@@ -3592,9 +3594,9 @@ app.post('/api/sales/invoices', authMiddleware, async (req, res) => {
           id: nextId(nextNotifications),
           user_id: req.auth.sub,
           recipient_user_id: adminUser.id,
-          type: 'pending',
+          type: 'message',
           title: 'فاکتور فروش در انتظار تأیید',
-          message: `${sellerName} فاکتور ${invoice.invoice_number} به مبلغ ${Number(invoice.total || 0).toLocaleString()} ؋ ثبت کرد — در «تأیید فروش» بررسی کنید.`,
+          message: `${sellerName} فاکتور ${invoice.invoice_number} به مبلغ ${Number(invoice.total || 0).toLocaleString()} ؋ ثبت کرد. برای تأیید یا رد به صفحه «تأیید فعالیت» بروید.`,
           link: '/pending',
           is_read: false,
           is_heard: false,

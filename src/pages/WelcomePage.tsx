@@ -5,9 +5,9 @@ import {
   Smartphone, CheckCircle, Lock,
   AlertTriangle,
   CreditCard, Banknote, LogIn, Crown,
-  Facebook, Shield, ArrowRightLeft, Wallet,
+  Facebook, Shield, ArrowRightLeft, Wallet, Github, Linkedin, Instagram,
   Gem, Shirt, ShoppingCart, Pill, UtensilsCrossed, Refrigerator,
-  Croissant, Car, BrickWall,
+  Croissant, Car, BrickWall, BookOpen,
   LifeBuoy, KeyRound, Headphones,
   type LucideIcon,
 } from 'lucide-react';
@@ -17,6 +17,7 @@ import { useApp } from '../context/AppContext';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import ShopGateModal from '../components/ShopGateModal';
 import WelcomeDownloadPage from '../components/WelcomeDownloadPage';
+import BrandLogo from '../components/BrandLogo';
 import {
   ONBOARDING_BUSINESS_TYPES,
   DEFAULT_BUSINESS_TYPE,
@@ -30,6 +31,7 @@ import { validatePasswordPolicy } from '../utils/passwordPolicy';
 
 const ONBOARDING_LUCIDE: Record<OnboardingLucideIconName, LucideIcon> = {
   ShoppingCart,
+  BookOpen,
   Pill,
   Smartphone,
   UtensilsCrossed,
@@ -116,53 +118,19 @@ const PAYMENT_INFO: Record<string, { image: string; description: string; steps: 
   },
 };
 
-/** قالب اولیهٔ داده پس از تأیید پرداخت — در متای درخواست ذخیره می‌شود */
-const AppLogo: React.FC<{ size?: number; light?: boolean }> = ({ size = 48, light = false }) => {
-  return (
-    <div className="relative inline-flex items-center justify-center group" style={{ width: size, height: size }}>
-      <div className={`absolute inset-0 bg-gradient-to-tr from-indigo-600 to-blue-500 rounded-xl blur-lg opacity-40 group-hover:opacity-60 transition-opacity duration-500`}></div>
-      <svg width={size} height={size} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="relative z-10 drop-shadow-xl">
-        <defs>
-          <linearGradient id="logoGrad" x1="0" y1="0" x2="100" y2="100" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="#6366f1" />
-            <stop offset="100%" stopColor="#3b82f6" />
-          </linearGradient>
-        </defs>
-        {/* Modern Shop/Store Icon for Business Management */}
-        <rect x="20" y="35" width="60" height="45" rx="8" fill={light ? "white" : "url(#logoGrad)"} />
-        <path d="M20 35 L50 15 L80 35" stroke={light ? "white" : "url(#logoGrad)"} strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" />
-        <rect x="42" y="55" width="16" height="25" rx="2" fill={light ? "#4f46e5" : "white"} />
-        <circle cx="50" cy="40" r="5" fill={light ? "#4f46e5" : "white"} />
-      </svg>
-    </div>
-  );
-};
-
 const SCENE_IMAGE: Record<AuthScene, string> = {
-  landing: 'https://images.unsplash.com/photo-1556740738-b6a63e27c4df?q=80&w=2070&auto=format&fit=crop',
-  info: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?q=80&w=1887&auto=format&fit=crop',
-  creator: 'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?q=80&w=1887&auto=format&fit=crop',
-  login: 'https://images.unsplash.com/photo-1554224155-1696413565d3?q=80&w=1887&auto=format&fit=crop',
-  register: 'https://images.unsplash.com/photo-1553729784-e91953dec042?q=80&w=1887&auto=format&fit=crop',
-  'payment-pending': 'https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?q=80&w=1887&auto=format&fit=crop',
-  'demo-limit': 'https://images.unsplash.com/photo-1556741533-f6acd647d2fb?q=80&w=1887&auto=format&fit=crop',
+  landing: 'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?q=75&w=1280&auto=format&fit=crop',
+  info: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?q=75&w=1280&auto=format&fit=crop',
+  creator: 'https://images.unsplash.com/photo-1542744095-fcf48d80b0fd?q=75&w=1280&auto=format&fit=crop',
+  login: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?q=75&w=1280&auto=format&fit=crop',
+  register: 'https://images.unsplash.com/photo-1553729784-e91953dec042?q=75&w=1280&auto=format&fit=crop',
+  'payment-pending': 'https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?q=75&w=1280&auto=format&fit=crop',
+  'demo-limit': 'https://images.unsplash.com/photo-1556741533-f6acd647d2fb?q=75&w=1280&auto=format&fit=crop',
 };
 
-const AnimatedBg: React.FC<{ full?: boolean; scene?: AuthScene }> = ({ full = false, scene = 'login' }) => (
+const AnimatedBg: React.FC<{ full?: boolean; scene?: AuthScene }> = ({ full = false, scene = 'login' }) => {
+  return (
   <div className="absolute inset-0 z-0 pointer-events-none">
-    {/* Video Background (Opacity 0.08 max) */}
-    <div className="absolute inset-0 z-10 opacity-[0.08] mix-blend-overlay overflow-hidden">
-      <video
-        autoPlay
-        loop
-        muted
-        playsInline
-        className="w-full h-full object-cover grayscale brightness-150"
-      >
-        <source src="https://assets.mixkit.co/videos/preview/mixkit-accountant-calculating-data-on-laptop-23315-large.mp4" type="video/mp4" />
-      </video>
-    </div>
-
     <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 animate-fade-in" />
     <div 
       className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCI+PHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSJub25lIiBzdHJva2U9IiMyYTM0NTciIHN0cm9rZS13aWR0aD0iMC41IiBvcGFjaXR5PSIwLjMiLz48L3N2Zz4=')] bg-repeat animate-pan-slow animation-delay-500 opacity-0 animate-fade-in-late"
@@ -183,7 +151,8 @@ const AnimatedBg: React.FC<{ full?: boolean; scene?: AuthScene }> = ({ full = fa
     <div className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 bg-indigo-500/30 rounded-full blur-3xl opacity-0 animate-glow animation-delay-3000" />
     <div className="absolute -bottom-1/4 -left-1/4 w-1/2 h-1/2 bg-emerald-500/20 rounded-full blur-3xl opacity-0 animate-glow animation-delay-3500" />
   </div>
-);
+  );
+};
 
 const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDemoLogin, onTwoFactorVerify }) => {
   const { t } = useApp();
@@ -193,7 +162,6 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   const [view, setView] = useState<ViewType | 'creator'>('landing');
   const [registerStep, setRegisterStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
-
   useEffect(() => {
     if (searchParams.get('renew') === '1') {
       setView('register');
@@ -272,7 +240,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   const handleDemoRegisterApi = async () => {
     setDemoError('');
     if (!DEMO_DATABASE_BUSINESS_TYPE_IDS.has(demoBusinessType)) {
-      setDemoError('ثبت‌نام آزمایشی با دیتابیس فقط برای سوپرمارکت فعال است؛ سایر صنوف را از طرح‌های پولی انتخاب کنید.');
+      setDemoError('ثبت‌نام آزمایشی با دیتابیس فقط برای «فروشگاه عمومی» یا «کتابفروشی» است؛ سایر صنوف از طرح‌های پولی.');
       return;
     }
     if (!validateDemoFormFields()) {
@@ -625,7 +593,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         try {
           const init = await apiInitHesabPay(res.payment.id);
           checkoutUrl = init.checkoutUrl;
-        } catch {}
+        } catch {
+          void 0;
+        }
       }
       setCreatedPayment({ id: res.payment.id, status: res.payment.pay_status, checkoutUrl });
       setView('payment-pending');
@@ -905,8 +875,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                 <h2 className="text-xl font-black text-white">ثبت‌نام آزمایشی رایگان — ۳ روز</h2>
                 <p className="text-indigo-100 text-xs mt-2 opacity-90 leading-relaxed">
                   {demoRegPhase === 'business'
-                    ? 'همهٔ صنوف قابل انتخاب‌اند؛ حساب آزمایشی با دیتابیس خالی فقط برای سوپرمارکت ساخته می‌شود.'
-                    : 'ابتدا مشخصات را وارد کنید؛ در مرحله بعد صنف را بزنید — دمو ۳ روزه فقط با سوپرمارکت.'}
+                    ? 'فروشگاه عمومی و کتابفروشی هر کدام دیتابیس جدا دارند (کالاها در عمومی، کتاب‌ها در کتابفروشی) — قاطی نمی‌شوند.'
+                    : 'ابتدا مشخصات را وارد کنید؛ سپس «فروشگاه عمومی» یا «کتابفروشی» را برای دمو ۳ روزه انتخاب کنید.'}
                 </p>
               </div>
             </div>
@@ -1312,14 +1282,16 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         {suspendedGateModal}
       <div className={`min-h-screen font-vazir selection:bg-indigo-100 selection:text-indigo-900 relative flex flex-col overflow-hidden`} dir="rtl">
         <AnimatedBg full scene="landing" />
+        <div className="absolute inset-0 pointer-events-none opacity-70" aria-hidden>
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(239,68,68,.10)_1px,transparent_1px)] bg-[size:72px_100%]" />
+        </div>
 
         <header className="relative z-50 w-full">
           <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 md:py-8">
             {/* موبایل: لوگو + نام دکان‌یار گوشه راست؛ ورود / درباره در وسط؛ ثبت‌نام */}
             <div className="flex md:hidden flex-col gap-4 pt-1">
-              <div className="flex items-center justify-end gap-2 pr-0.5">
-                <span className="text-[13px] font-black text-white tracking-tight">{t('app_name')}</span>
-                <AppLogo size={32} light />
+              <div className="flex items-center justify-end pr-0.5">
+                <BrandLogo size={40} variant="header" className="drop-shadow-lg" />
               </div>
               <div className="flex flex-col items-center gap-3">
                 <div className="flex items-center justify-center gap-4 sm:gap-6 text-xs sm:text-sm font-bold text-white flex-wrap">
@@ -1347,10 +1319,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
 
             <div className="hidden md:flex items-center justify-between">
               <div className="flex items-center gap-4 group cursor-pointer">
-                <AppLogo size={56} light />
-                <div className="flex flex-col">
-                  <h1 className="text-3xl font-black text-white tracking-tighter">{t('app_name')}</h1>
-                </div>
+                <BrandLogo size={56} variant="header" className="drop-shadow-lg" />
               </div>
               <div className="flex items-center gap-8">
                 <nav className="flex items-center gap-6">
@@ -1381,21 +1350,18 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         </header>
 
         {/* Hero Section */}
-        <main className="relative z-10 flex-1 flex flex-col justify-center items-center text-center px-6 pt-10 pb-20">
+        <main className="relative z-10 flex-1 flex flex-col justify-center items-center text-center px-4 sm:px-6 pt-8 sm:pt-10 pb-16 sm:pb-20">
           <div className="max-w-5xl">
             {/* Trust badge removed as per request */}
 
-            <h2 className="text-6xl sm:text-8xl font-black text-white mb-10 tracking-tight leading-[1.1] animate-fade-in-up animation-delay-200">
+            <h2 className="text-4xl sm:text-7xl md:text-8xl font-black text-white mb-8 sm:mb-10 tracking-tight leading-[1.15] animate-fade-in-up animation-delay-200">
               {t('app_name')}
             </h2>
 
-            <p className="text-xl sm:text-2xl text-slate-200/90 max-w-3xl mx-auto mb-14 leading-relaxed font-medium animate-fade-in-up animation-delay-400">
+            <p className="text-base sm:text-2xl text-slate-200/90 max-w-3xl mx-auto mb-10 sm:mb-14 leading-relaxed font-medium animate-fade-in-up animation-delay-400">
               {t('welcome_hero_body')}
             </p>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-6 animate-fade-in-up animation-delay-600">
-              {/* Buttons removed as per request */}
-            </div>
             <div className="mt-14 flex flex-wrap items-center justify-center gap-3 text-xs text-slate-400">
               <Link to="/privacy" className="hover:text-white font-bold transition-colors">{t('legal_privacy')}</Link>
               <span className="text-white/20" aria-hidden>|</span>
@@ -1432,7 +1398,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
               <button onClick={() => setView('landing')} className="p-2 rounded-xl bg-white/10 text-white hover:bg-white/20 transition-colors border border-white/20">
                 <ChevronRight size={20} />
               </button>
-              <AppLogo size={36} light />
+              <BrandLogo size={40} variant="header" />
               <span className="font-extrabold text-xl text-white">{t('welcome_about_title')}</span>
             </div>
             <button onClick={() => setView('login')} className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20">
@@ -1464,7 +1430,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
           {/* Continuous feature text */}
           <div className="p-8 rounded-3xl bg-black/30 backdrop-blur-sm border border-white/10 mb-8 leading-loose text-slate-200 text-sm space-y-4 text-justify">
             <p>
-              <strong className="text-white">مدیریت فروش:</strong> ثبت فاکتور، پرداخت نسیه، مدیریت تخفیف و گزارش‌گیری جامع. تمامی تراکنش‌های ثبت‌شده پیش از نهایی‌شدن، وارد بخش تأیید فروش می‌شوند تا مدیر آن‌ها را بررسی کرده و در صورت صحت تأیید نماید. در صورت وجود مغایرت، امکان رد یا ویرایش تراکنش‌ها فراهم است.
+              <strong className="text-white">مدیریت فروش:</strong> ثبت فاکتور، پرداخت نسیه، مدیریت تخفیف و گزارش‌گیری جامع. تراکنش‌ها و اقدامات کارکنان (فروش، انبار، حسابداری و …) تا تأیید مدیر در بخش «تأیید فعالیت» نهایی می‌شوند؛ در صورت مغایرت امکان رد یا پیگیری وجود دارد.
             </p>
             <p>
               <strong className="text-white">مدیریت مشتریان:</strong> سوابق خرید، بدهی‌ها، یادآوری خودکار و سیستم کارت وفاداری. ابزارهای هوشمند یادآوری به شما کمک می‌کند تا اعلان‌های مربوط به بدهی‌ها را در زمان مناسب دریافت کنید و پیگیری موثری داشته باشید.
@@ -1530,9 +1496,10 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
               <div className="text-center mb-8">
                 <div className="mx-auto mb-4 h-24 w-24 sm:h-28 sm:w-28 rounded-full overflow-hidden ring-2 ring-white/25 shadow-xl bg-slate-900">
                   <img
-                    src="/creator-mohibullah.png"
+                    src={(creatorConfig as { profile_image?: string }).profile_image || '/creator-profile.png'}
                     alt={creatorConfig.name}
                     className="h-full w-full object-cover object-center"
+                    loading="lazy"
                   />
                 </div>
                 <h1 className="text-xl sm:text-2xl font-black text-white mb-1">{creatorConfig.name}</h1>
@@ -1553,7 +1520,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
 
               <div className="mt-10 pt-6">
                 <p className="text-slate-500 text-[10px] text-center mb-4 font-bold tracking-widest">تماس</p>
-                <div className="flex justify-center gap-6">
+                <div className="flex flex-wrap justify-center gap-4 sm:gap-5">
                   <a
                     href="tel:+93795074175"
                     title="تلفن"
@@ -1581,6 +1548,33 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                   >
                     <Facebook size={22} />
                   </a>
+                  <a
+                    href={(creatorConfig as { social?: { instagram?: string } }).social?.instagram || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Instagram"
+                    className="text-slate-400 hover:text-pink-400 transition-colors p-2"
+                  >
+                    <Instagram size={22} />
+                  </a>
+                  <a
+                    href={(creatorConfig as { social?: { linkedin?: string } }).social?.linkedin || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="LinkedIn"
+                    className="text-slate-400 hover:text-sky-400 transition-colors p-2"
+                  >
+                    <Linkedin size={22} />
+                  </a>
+                  <a
+                    href={(creatorConfig as { social?: { github?: string } }).social?.github || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="GitHub"
+                    className="text-slate-400 hover:text-slate-200 transition-colors p-2"
+                  >
+                    <Github size={22} />
+                  </a>
                 </div>
               </div>
             </div>
@@ -1590,26 +1584,26 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
     );
   }
 
-  // DOWNLOAD PAGE (اندروید / iOS / ویندوز — جدا از لندینگ)
+  // DOWNLOAD PAGE (اندروید / iOS / ویندوز — تمام‌قد روی viewport، بدون نوار سفید پایین)
   if (view === 'download') {
     return (
       <>
         {suspendedGateModal}
-        <div className="relative min-h-screen font-vazir" dir="rtl">
-          <AnimatedBg full scene="landing" />
-          <div className="relative z-10">
-            <WelcomeDownloadPage
-              onBack={() => setView('landing')}
-              onLogin={() => {
-                setView('login');
-                setLoginStep(1);
-              }}
-              onRegister={() => {
-                setRegisterStep(1);
-                setView('register');
-              }}
-            />
-          </div>
+        <div
+          className="fixed inset-0 z-[20] flex min-h-0 flex-col overflow-hidden bg-slate-950 font-vazir overscroll-none"
+          dir="rtl"
+        >
+          <WelcomeDownloadPage
+            onBack={() => setView('landing')}
+            onLogin={() => {
+              setView('login');
+              setLoginStep(1);
+            }}
+            onRegister={() => {
+              setRegisterStep(1);
+              setView('register');
+            }}
+          />
         </div>
         {googleModal}
       </>
@@ -1639,16 +1633,15 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
       <div className="min-h-screen font-vazir relative flex items-center justify-center p-4 overflow-hidden" dir="rtl">
         <AnimatedBg scene="login" />
         {/* موبایل: برند گوشه روی صفحه (راست) */}
-        <div className="md:hidden absolute top-4 right-4 z-20 flex items-center gap-2 pointer-events-none">
-          <span className="text-[11px] font-black text-white/95 tracking-tight drop-shadow-md">{t('app_name')}</span>
-          <AppLogo size={34} light />
+        <div className="md:hidden absolute top-4 right-4 z-20 flex items-center pointer-events-none">
+          <BrandLogo size={36} variant="header" className="drop-shadow-md" />
         </div>
         <div className="relative z-10 w-full max-w-md mt-8 md:mt-0 space-y-4">
           <div className="bg-black/40 backdrop-blur-lg border border-white/10 rounded-3xl shadow-2xl shadow-black/20">
             <div className="p-8 sm:p-10">
               <div className="text-center mb-6 sm:mb-8">
                 <div className="hidden md:inline-flex mb-3 sm:mb-4 transform scale-[0.82] sm:scale-100 origin-center">
-                  <AppLogo size={56} light />
+                  <BrandLogo size={56} variant="header" />
                 </div>
                 <h2 className="text-lg sm:text-2xl font-black text-white">ورود به دکان یار</h2>
                 {/* Step indicator */}
@@ -2050,7 +2043,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                       value={regData.shopName}
                       onChange={(e) => setRegData({ ...regData, shopName: e.target.value })}
                       className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder-slate-500 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 transition-all ${formErrors.shopName ? 'border-rose-500/50' : ''}`}
-                      placeholder="مثال: سوپرمارکت رحیمی"
+                      placeholder="مثال: فروشگاه رحیمی"
                     />
                     {formErrors.shopName && <p className="text-xs text-rose-400 mt-1.5">{formErrors.shopName}</p>}
                   </div>

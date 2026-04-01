@@ -1,34 +1,70 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Wifi, WifiOff, RefreshCw, CheckCircle, XCircle, Clock, AlertTriangle, Database, Trash2 } from 'lucide-react';
 import type { OfflineQueue } from '../data/mockData';
 import { useApp } from '../context/AppContext';
+import { useStore } from '../store/useStore';
+import { apiCreateSaleInvoice } from '../services/api';
 
 export default function OfflinePage() {
   const { isOnline } = useApp();
-  const [queue, setQueue] = useState<OfflineQueue[]>([]);
+  const authToken = useStore((s) => s.authToken);
+  const hydrateFromServer = useStore((s) => s.hydrateFromServer);
+  const [queue, setQueue] = useState<OfflineQueue[]>(() => {
+    try {
+      const raw = localStorage.getItem('offline_queue_v1');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw) as OfflineQueue[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState(0);
+
+  useEffect(() => {
+    localStorage.setItem('offline_queue_v1', JSON.stringify(queue));
+  }, [queue]);
+
+  useEffect(() => {
+    if (isOnline && queue.some((q) => q.status === 'pending')) {
+      startSync();
+    }
+  }, [isOnline]);
 
   const pendingCount = queue.filter(q => q.status === 'pending').length;
   const syncedCount = queue.filter(q => q.status === 'synced').length;
   const failedCount = queue.filter(q => q.status === 'failed').length;
 
-  const startSync = () => {
+  const startSync = async () => {
     if (!isOnline) return;
     setSyncing(true);
     setSyncProgress(0);
     const pending = queue.filter(q => q.status === 'pending');
-    let done = 0;
-    const interval = setInterval(() => {
-      done++;
-      setSyncProgress(Math.round((done / Math.max(pending.length, 1)) * 100));
-      if (done >= pending.length) {
-        clearInterval(interval);
-        setQueue(queue.map(q => q.status === 'pending' ? { ...q, status: 'synced' as const } : q));
-        setSyncing(false);
-        setSyncProgress(0);
+    if (pending.length === 0) {
+      setSyncing(false);
+      return;
+    }
+    const next = [...queue];
+    for (let i = 0; i < pending.length; i += 1) {
+      const item = pending[i];
+      try {
+        const payload = JSON.parse(item.data || '{}') as { action?: string; invoice?: Record<string, unknown> };
+        if (item.table_name === 'sales_invoices' && payload.action === 'create_sale_invoice' && payload.invoice) {
+          const res = await apiCreateSaleInvoice(authToken || undefined, payload.invoice);
+          if (res.state) hydrateFromServer(res.state);
+        }
+        const idx = next.findIndex((x) => x.id === item.id);
+        if (idx >= 0) next[idx] = { ...next[idx], status: 'synced' };
+      } catch {
+        const idx = next.findIndex((x) => x.id === item.id);
+        if (idx >= 0) next[idx] = { ...next[idx], status: 'failed' };
       }
-    }, 600);
+      setSyncProgress(Math.round(((i + 1) / pending.length) * 100));
+      setQueue([...next]);
+    }
+    setSyncing(false);
+    setSyncProgress(0);
   };
 
   const removeItem = (id: string) => {
@@ -218,9 +254,9 @@ export default function OfflinePage() {
           <div>
             <p className="text-amber-300 font-medium text-sm mb-2">نکات مهم حالت آفلاین</p>
             <ul className="space-y-1.5 text-slate-400 text-xs">
-              <li>• Service Worker در این نسخه فعال نیست؛ صف زیر فقط نمونه/دستی است.</li>
-              <li>• دادهٔ اصلی فروشگاه با Zustand و PUT /api/state همگام می‌شود وقتی آنلاین هستید.</li>
-              <li>• برای آفلاین واقعی باید SW و استراتژی کش اضافه شود.</li>
+              <li>• صف آفلاین به صورت محلی ذخیره می‌شود و بعد از باز کردن مجدد برنامه باقی می‌ماند.</li>
+              <li>• با اتصال اینترنت، عملیات pending به صورت خودکار همگام می‌شوند.</li>
+              <li>• اگر موردی failed شد، با دکمه تلاش مجدد دوباره به pending برمی‌گردد.</li>
             </ul>
           </div>
         </div>

@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import {
   Database, Download, Upload, CheckCircle, AlertCircle, Clock,
-  RefreshCw, FileJson, FileText, ShieldCheck, Info, Trash2,
-  Package, Users, Receipt, Wallet, Terminal,
+  RefreshCw, FileJson, FileText, Info, Trash2,
+  Package, Users, Receipt, Wallet,
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { getApiBaseUrl } from '../services/api';
@@ -42,7 +42,9 @@ export default function BackupPage() {
         const data = await res.json();
         setHistory(data.logs || []);
       }
-    } catch {}
+    } catch {
+      void 0;
+    }
     setLoadingHistory(false);
   };
 
@@ -319,32 +321,6 @@ export default function BackupPage() {
         </div>
       </div>
 
-      {/* Python backup on server */}
-      {isSuperAdmin && (
-        <div className="glass rounded-2xl p-6 space-y-3">
-          <h3 className="font-bold text-lg flex items-center gap-2">
-            <Terminal size={18} className="text-slate-400" /> بکاپ با پایتون روی سرور
-          </h3>
-          <p className="text-slate-400 text-sm">
-            اسکریپت زیر را از این آدرس ذخیره کنید و روی ماشینی که سرور Node اجرا می‌کند، با همان{' '}
-            <code className="text-indigo-300 text-xs bg-white/5 px-1 rounded">DATABASE_URL</code> اجرا کنید؛ یک کپی در پوشه{' '}
-            <code className="text-indigo-300 text-xs bg-white/5 px-1 rounded">backups/</code> می‌سازد.
-          </p>
-          <a
-            href={`${import.meta.env.BASE_URL}scripts/backup_platform_db.py`.replace(/\/{2,}/g, '/').replace(':/', '://')}
-            download="backup_platform_db.py"
-            className="inline-flex items-center gap-2 text-sm font-bold text-indigo-300 hover:text-indigo-200"
-          >
-            <Download size={14} /> دانلود اسکریپت backup_platform_db.py
-          </a>
-          <pre className="text-[11px] leading-5 p-3 rounded-xl bg-black/40 border border-white/10 text-slate-300 overflow-x-auto" dir="ltr">
-{`cd /path/to/project
-set DATABASE_URL=file:./server/prisma/dev.db
-python public/scripts/backup_platform_db.py`}
-          </pre>
-        </div>
-      )}
-
       {/* Backup History */}
       <div className="glass rounded-2xl p-6">
         <h3 className="font-bold text-lg flex items-center gap-2 mb-5">
@@ -392,16 +368,7 @@ python public/scripts/backup_platform_db.py`}
         )}
       </div>
 
-      {/* Security info */}
-      <div className="glass rounded-2xl p-5 flex items-start gap-4">
-        <ShieldCheck size={22} className="text-emerald-400 shrink-0 mt-0.5" />
-        <div>
-          <p className="font-bold text-sm mb-1">امنیت بکاپ</p>
-          <p className="text-slate-400 text-xs leading-6">
-            بکاپ‌های JSON شامل تمام داده‌های فروشگاه هستند. فایل‌های بکاپ را در مکان امن نگهداری کنید و با دیگران به اشتراک نگذارید. توصیه می‌شود هر هفته یک بار بکاپ دستی بگیرید.
-          </p>
-        </div>
-      </div>
+      
 
       {/* Restore Confirm Modal */}
       {showConfirmRestore && restorePreview && (
