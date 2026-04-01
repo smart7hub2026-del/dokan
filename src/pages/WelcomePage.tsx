@@ -78,6 +78,7 @@ type ViewType = 'landing' | 'download' | 'login' | 'register' | 'info' | 'paymen
 type AuthScene = 'landing' | 'info' | 'creator' | 'login' | 'register' | 'payment-pending' | 'demo-limit';
 
 const REMEMBER_SHOP_CODE_KEY = 'dokanyar_remember_shop_code';
+const REMEMBER_SHOP_PASSWORD_KEY = 'dokanyar_remember_shop_password';
 const RECAPTCHA_SITE_KEY = String(import.meta.env.VITE_RECAPTCHA_SITE_KEY || '').trim();
 
 const PAYMENT_INFO: Record<string, { image: string; description: string; steps: string[] }> = {
@@ -331,14 +332,33 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
     setAdminRoleTitleFromShop('admin');
     try {
       const c = localStorage.getItem(REMEMBER_SHOP_CODE_KEY);
+      const p = localStorage.getItem(REMEMBER_SHOP_PASSWORD_KEY);
       if (c) {
         setShopCodeInput((prev) => (prev.trim() ? prev : c));
         setRememberShopCode(true);
+      }
+      if (p && c) {
+        setShopPassInput((prev) => (prev.trim() ? prev : p));
       }
     } catch {
       /* ignore */
     }
   }, [view]);
+
+  /** با تیک «مرا به خاطر بسپار»، کد و رمز فروشگاه در localStorage نگه داشته می‌شود */
+  useEffect(() => {
+    if (view !== 'login' || !rememberShopCode) return;
+    const t = window.setTimeout(() => {
+      try {
+        const code = shopCodeInput.trim();
+        if (code) localStorage.setItem(REMEMBER_SHOP_CODE_KEY, code.toUpperCase());
+        if (shopPassInput) localStorage.setItem(REMEMBER_SHOP_PASSWORD_KEY, shopPassInput);
+      } catch {
+        /* ignore */
+      }
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [view, rememberShopCode, shopCodeInput, shopPassInput]);
 
   const handleCheckShop = async () => {
     if (!shopCodeInput.trim() || !shopPassInput.trim()) {
@@ -355,8 +375,13 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
 
       const normalizedCode = shopCodeInput.trim().toUpperCase();
       try {
-        if (rememberShopCode) localStorage.setItem(REMEMBER_SHOP_CODE_KEY, normalizedCode);
-        else localStorage.removeItem(REMEMBER_SHOP_CODE_KEY);
+        if (rememberShopCode) {
+          localStorage.setItem(REMEMBER_SHOP_CODE_KEY, normalizedCode);
+          localStorage.setItem(REMEMBER_SHOP_PASSWORD_KEY, shopPassInput.trim());
+        } else {
+          localStorage.removeItem(REMEMBER_SHOP_CODE_KEY);
+          localStorage.removeItem(REMEMBER_SHOP_PASSWORD_KEY);
+        }
       } catch {
         /* ignore */
       }
@@ -1723,10 +1748,21 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     <input
                       type="checkbox"
                       checked={rememberShopCode}
-                      onChange={(e) => setRememberShopCode(e.target.checked)}
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setRememberShopCode(on);
+                        if (!on) {
+                          try {
+                            localStorage.removeItem(REMEMBER_SHOP_CODE_KEY);
+                            localStorage.removeItem(REMEMBER_SHOP_PASSWORD_KEY);
+                          } catch {
+                            /* ignore */
+                          }
+                        }
+                      }}
                       className="rounded border-white/25 bg-white/10 text-indigo-600 focus:ring-indigo-500/40 w-4 h-4"
                     />
-                    مرا به خاطر بسپار (فقط کد فروشگاه؛ رمز را هر بار وارد کنید)
+                    مرا به خاطر بسپار (کد و رمز عبور فروشگاه روی این دستگاه)
                   </label>
                   <div className="flex items-center justify-center gap-5 text-xs flex-wrap">
                     <button type="button" onClick={() => setShowForgotModal(true)} className="text-indigo-300 hover:text-indigo-200 font-bold flex items-center gap-1.5 transition-colors">

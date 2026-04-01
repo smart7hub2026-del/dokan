@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Monitor, Trash2, ShieldAlert } from 'lucide-react';
+import { Monitor, Trash2, ShieldAlert, LogOut } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { apiDeleteAllUserSessions, apiDeleteUserSession, apiGetUserSessions, type UserSessionRow } from '../services/api';
 
@@ -58,8 +58,8 @@ export default function ActiveSessionsPage({ embedded = false }: { embedded?: bo
 
   return (
     <div className="space-y-5 fade-in">
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           {embedded ? (
             <>
               <h2 className="text-lg font-bold text-white">نشست‌های فعال</h2>
@@ -76,9 +76,10 @@ export default function ActiveSessionsPage({ embedded = false }: { embedded?: bo
           type="button"
           disabled={busy || loading || rows.length === 0}
           onClick={() => void logoutAll()}
-          className="px-4 py-2.5 rounded-xl bg-rose-600/80 hover:bg-rose-500 text-white text-sm font-bold disabled:opacity-60"
+          className="flex w-full shrink-0 items-center justify-center gap-2 rounded-xl bg-rose-600/80 px-4 py-3 text-sm font-bold text-white hover:bg-rose-500 disabled:opacity-60 sm:w-auto sm:py-2.5"
         >
-          Logout All
+          <LogOut size={18} className="shrink-0" />
+          خروج از همه دستگاه‌ها
         </button>
       </div>
       {err ? (
@@ -92,25 +93,30 @@ export default function ActiveSessionsPage({ embedded = false }: { embedded?: bo
         ) : (
           <div className="divide-y divide-white/5">
             {rows.map((s) => (
-              <div key={s.id} className="p-4 flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-white text-sm font-bold flex items-center gap-2">
-                    <Monitor size={14} className="text-indigo-300" />
+              <div
+                key={s.id}
+                className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-white text-sm font-bold flex flex-wrap items-center gap-2">
+                    <Monitor size={14} className="text-indigo-300 shrink-0" />
                     {s.device_name || 'Unknown device'}
                     {s.is_current ? <span className="text-[10px] px-2 py-0.5 rounded-full badge-green">این دستگاه</span> : null}
                   </p>
-                  <p className="text-slate-400 text-xs mt-1 truncate">
+                  <p className="text-slate-400 text-xs mt-1 break-all">
                     IP: {s.ip_address || '—'} | آخرین فعالیت: {String(s.last_activity_at || '').slice(0, 19).replace('T', ' ')}
                   </p>
-                  <p className="text-slate-500 text-[11px] mt-1 truncate">{s.user_agent || ''}</p>
+                  <p className="text-slate-500 text-[11px] mt-1 break-all line-clamp-2">{s.user_agent || ''}</p>
                 </div>
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => void removeOne(s.id, s.is_current)}
-                  className="px-3 py-2 rounded-lg border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20 text-xs font-bold disabled:opacity-60 shrink-0"
+                  className="w-full shrink-0 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-3 text-rose-300 hover:bg-rose-500/20 text-xs font-bold disabled:opacity-60 sm:w-auto sm:py-2"
                 >
-                  <span className="inline-flex items-center gap-1"><Trash2 size={13} /> خروج</span>
+                  <span className="inline-flex items-center justify-center gap-1.5 w-full">
+                    <Trash2 size={13} /> خروج از این نشست
+                  </span>
                 </button>
               </div>
             ))}

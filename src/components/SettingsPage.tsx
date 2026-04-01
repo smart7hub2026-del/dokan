@@ -130,7 +130,7 @@ export default function SettingsPage({
   ];
 
   return (
-    <div className="space-y-6 fade-in max-w-5xl mx-auto">
+    <div className="space-y-6 fade-in max-w-5xl mx-auto pb-4 md:pb-0 min-h-0">
       <div>
         <h1 className="text-2xl font-bold text-white">{t('settings')}</h1>
         <p className="text-slate-400 text-sm mt-1">{t('manage_account_settings')}</p>
@@ -457,7 +457,7 @@ export default function SettingsPage({
 
         {activeTab === 'security' && <SecurityPage twoFactorEnabled={currentUser.two_factor_enabled} />}
         {activeTab === 'sessions' && (
-          <div className="max-w-5xl">
+          <div className="max-w-5xl pb-6 md:pb-0">
             <ActiveSessionsPage embedded />
           </div>
         )}

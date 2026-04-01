@@ -748,8 +748,8 @@ function AppContent() {
           </div>
         )}
 
-        <main className="mobile-shell-main flex-1 overflow-y-auto p-3 sm:p-5 pb-[5.25rem] md:pb-5">
-          <div className="max-w-7xl mx-auto pb-6 md:pb-6">
+        <main className="mobile-shell-main flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 pb-40 md:pb-5">
+          <div className="max-w-7xl mx-auto pb-8 md:pb-6">
             {renderPage()}
           </div>
         </main>

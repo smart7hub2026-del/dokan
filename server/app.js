@@ -81,12 +81,12 @@ const RECAPTCHA_SECRET_KEY = String(process.env.RECAPTCHA_SECRET_KEY || '').trim
 const RECAPTCHA_REQUIRED_IN_PROD =
   String(process.env.RECAPTCHA_REQUIRED_IN_PROD || '').toLowerCase() === 'true';
 
-/** در production پیش‌فرض خاموش؛ با ALLOW_TRIAL_QUICK_SIGNUP=true فعال شود */
+/** پیش‌فرض روشن (شامل production / Render). خاموش: ALLOW_TRIAL_QUICK_SIGNUP=false */
 const trialQuickSignupEnabled = () => {
   const v = process.env.ALLOW_TRIAL_QUICK_SIGNUP;
   if (v === 'false' || v === '0') return false;
   if (v === 'true' || v === '1') return true;
-  return !IS_PROD;
+  return true;
 };
 
 const normalizeDemoPhone = (raw) => {
