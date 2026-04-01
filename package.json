@@ -4,12 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": "20.x"
   },
   "scripts": {
     "dev": "vite",
     "server": "node --no-warnings server/index.js",
-    "server:render": "npx prisma db push && node --no-warnings server/index.js",
+    "server:render": "node scripts/render-start.mjs",
     "start": "concurrently \"npm run server\" \"npm run dev\"",
     "build": "vite build",
     "cap:sync": "npm run build && npx cap sync android",
