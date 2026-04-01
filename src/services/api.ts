@@ -222,12 +222,21 @@ interface TwoFactorRequiredResponse {
 
 export type LoginResult = ShopSessionPayload | TwoFactorRequiredResponse;
 
-const REMOTE_PROD_API = 'https://dokanyarshopi-backend-1.onrender.com';
+/** آدرس بک‌اند (Render و غیره) — در Vercel حتماً در Build تنظیم کنید: VITE_API_BASE_URL=https://xxx.onrender.com */
 const ENV_API_BASE = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
-const IS_VERCEL_PROD =
-  typeof window !== 'undefined' && window.location.hostname === 'dokanyarshopi.vercel.app';
-const API_BASE = ENV_API_BASE || (IS_VERCEL_PROD ? REMOTE_PROD_API : '');
+const API_BASE = ENV_API_BASE;
 const DEV_FALLBACK_BASE = '';
+
+if (import.meta.env.PROD && typeof window !== 'undefined' && !ENV_API_BASE) {
+  const h = window.location.hostname;
+  if (h === 'localhost' || h === '127.0.0.1') {
+    /* preview لوکال */
+  } else {
+    console.warn(
+      '[dokanyar] VITE_API_BASE_URL خالی است — در Vercel → Settings → Environment Variables مقدار URL بک‌اند Render را بگذارید و دوباره Deploy کنید.',
+    );
+  }
+}
 
 export const getApiBaseUrl = (): string => API_BASE;
 

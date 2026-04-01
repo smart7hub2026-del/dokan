@@ -117,7 +117,9 @@ if (IS_PROD) {
     throw new Error('JWT_SECRET must be at least 32 characters in production.');
   }
   if (!HESABPAY_WEBHOOK_SECRET) {
-    throw new Error('HESABPAY_WEBHOOK_SECRET is required in production.');
+    console.warn(
+      '[config] HESABPAY_WEBHOOK_SECRET is empty — HesabPay webhooks stay disabled until you set it.',
+    );
   }
   if (RECAPTCHA_REQUIRED_IN_PROD && !RECAPTCHA_SECRET_KEY) {
     throw new Error('RECAPTCHA_SECRET_KEY is required in production when RECAPTCHA_REQUIRED_IN_PROD is enabled.');
@@ -128,6 +130,12 @@ const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((x) => x.trim())
   .filter(Boolean);
+
+if (IS_PROD && ALLOWED_ORIGINS.length === 0) {
+  console.warn(
+    '[config] ALLOWED_ORIGINS is empty — browsers will get CORS errors. Set comma-separated front-end URLs (e.g. https://your-app.onrender.com).',
+  );
+}
 
 const authAttemptStore = new Map();
 const lockoutStore = new Map();

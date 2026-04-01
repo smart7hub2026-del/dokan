@@ -23,6 +23,6 @@ if (autoBackupHours > 0) {
   void tick();
 }
 
-app.listen(port, () => {
-  console.log(`API server running on http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`API server listening on 0.0.0.0:${port} (PORT from env)`);
 });

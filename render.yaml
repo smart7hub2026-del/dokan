@@ -1,13 +1,17 @@
+# Render: New Web Service از ریشه همین repo
+# متغیرهای اجباری را در Dashboard → Environment اضافه کنید (مقادیر مخفی را اینجا ننویسید).
+
 services:
   - type: web
-    name: dokanyarshopi-backend
+    name: dokanyar-api
     env: node
     plan: free
-    buildCommand: npm install
-    startCommand: npm run server
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm run server:render
+    healthCheckPath: /api/health
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
-        value: 22
-      - key: JWT_SECRET
-        sync: false
+        value: "22"
+      - key: DATABASE_URL
+        value: file:./server/prisma/dev.db
