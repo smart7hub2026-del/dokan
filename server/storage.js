@@ -15,11 +15,23 @@ let writeQueue = Promise.resolve();
 
 const PLATFORM_STATE_ID = 1;
 const USE_DEV_DEFAULTS = process.env.NODE_ENV !== 'production';
+
+/** یک رمز برای هر سه: سوپرادمین، کد ریست، pending — روی Render فقط همین را بگذار اگر سه متغیر جدا سخت است */
+const seedBootstrap = String(process.env.SEED_BOOTSTRAP || '').trim();
+const SEED_KEYS_FROM_BOOTSTRAP = new Set([
+  'SEED_SUPERADMIN_PASSWORD',
+  'SEED_RESET_CODE',
+  'SEED_PENDING_USER_PASSWORD',
+]);
+
 const envOrDefault = (key, defaultValue) => {
-  const val = process.env[key];
-  if (val) return val;
+  const raw = process.env[key];
+  if (raw != null && String(raw).trim() !== '') return String(raw).trim();
   if (USE_DEV_DEFAULTS) return defaultValue;
-  throw new Error(`${key} is required in production environment`);
+  if (seedBootstrap && SEED_KEYS_FROM_BOOTSTRAP.has(key)) return seedBootstrap;
+  throw new Error(
+    `${key} is required in production. Render → Environment: set ${key} (no empty value) OR set SEED_BOOTSTRAP to one strong password for superadmin + reset + pending.`,
+  );
 };
 
 const seedDatabase = () => {
