@@ -66,6 +66,7 @@ export default function FormModal({
         onClick={onClose}
       />
       <div
+        data-cf-app-modal
         className={`relative z-[1] my-auto flex w-full ${maxW[size]} max-h-[min(92dvh,calc(100dvh-2rem))] flex-col overflow-hidden rounded-2xl ${panel}`}
         onClick={(e) => e.stopPropagation()}
       >

@@ -3,15 +3,214 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
 }
 
-// We keep the existing app logic (which manipulates a big nested object)
-// by storing it as JSON in a single row. This still moves persistence
-// from a local JSON file to a real database engine (SQLite/Postgres/etc).
+/// سند سراسری بدون shops و بدون stateByShop (آن‌ها در جداول جدا).
 model PlatformState {
-  id        Int   @id
+  id        Int      @id
   state     Json
+  version   Int      @default(0)
   updatedAt DateTime @updatedAt
 }
 
+model Shop {
+  code      String     @id
+  tenantId  Int        @unique
+  payload   Json
+  users     ShopUser[]
+  updatedAt DateTime   @updatedAt
+}
+
+model ShopUser {
+  id       Int    @id
+  shopCode String
+  shop     Shop   @relation(fields: [shopCode], references: [code], onDelete: Cascade, onUpdate: Cascade)
+  payload  Json
+
+  @@index([shopCode])
+}
+
+/// بقیهٔ وضعیت هر فروشگاه (بدون products / invoices / books).
+model ShopStateRow {
+  shopCode  String   @id
+  payload   Json
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model ShopProduct {
+  shopCode       String
+  id             Int
+  name           String
+  sku            String?
+  salePrice      Float   @default(0) @map("sale_price")
+  purchasePrice  Float   @default(0) @map("purchase_price")
+  stockShop      Int     @default(0) @map("stock_shop")
+  stockWarehouse Int     @default(0) @map("stock_warehouse")
+  minStock       Int     @default(0) @map("min_stock")
+  isActive       Boolean @default(true) @map("is_active")
+  tenantId       Int     @default(0) @map("tenant_id")
+  createdAt      String? @map("created_at")
+  extra          Json?
+
+  @@id([shopCode, id])
+  @@index([shopCode])
+}
+
+model ShopInvoice {
+  shopCode       String
+  id             Int
+  invoiceNumber  String  @map("invoice_number")
+  invoiceDate    String  @map("invoice_date")
+  customerId     Int     @default(0) @map("customer_id")
+  customerName   String  @default("") @map("customer_name")
+  customerPhone  String  @default("") @map("customer_phone")
+  sellerId       Int     @default(0) @map("seller_id")
+  sellerName     String  @default("") @map("seller_name")
+  subtotal       Float   @default(0)
+  discount       Float   @default(0)
+  total          Float   @default(0)
+  paidAmount     Float   @default(0) @map("paid_amount")
+  dueAmount      Float   @default(0) @map("due_amount")
+  paymentMethod  String  @default("cash") @map("payment_method")
+  status         String  @default("pending")
+  approvalStatus String  @default("pending") @map("approval_status")
+  dueDate        String  @default("") @map("due_date")
+  notes          String  @default("")
+  tenantId       Int     @default(0) @map("tenant_id")
+  currency       String?
+  items          Json
+  extra          Json?
+
+  @@id([shopCode, id])
+  @@index([shopCode])
+  @@index([shopCode, invoiceDate])
+}
+
+/// مشتریان CRM هر فروشگاه (جدا از blob payload برای یکتا بودن شماره و گزارش‌گیری).
+model ShopCustomer {
+  shopCode           String  @map("shop_code")
+  id                 Int
+  phoneKey           String  @map("phone_key")
+  customerCode       String  @default("") @map("customer_code")
+  name               String  @default("")
+  phone              String  @default("")
+  whatsapp           String?
+  email              String?
+  address            String  @default("")
+  balance            Float   @default(0)
+  totalPurchases     Float   @default(0) @map("total_purchases")
+  status             String  @default("active")
+  reminderEnabled    Boolean @default(true) @map("reminder_enabled")
+  reminderDaysBefore Int     @default(3) @map("reminder_days_before")
+  archivedAt         String? @map("archived_at")
+  marketingConsent   Boolean @default(true) @map("marketing_consent")
+  createdAt          String? @map("created_at")
+  tenantId           Int     @default(0) @map("tenant_id")
+  extra              Json?
+
+  @@id([shopCode, id])
+  @@index([shopCode])
+  @@index([shopCode, phoneKey])
+  @@map("shop_customers")
+}
+
+/// ممیزی عملیات بکاپ ابرادمین (جدا از settingsLogs خلاصه).
+model MasterBackupAuditLog {
+  id            Int      @id @default(autoincrement())
+  createdAt     DateTime @default(now()) @map("created_at")
+  action        String
+  detail        String   @default("")
+  actorShopCode String?  @map("actor_shop_code")
+  actorSub      String?  @map("actor_sub")
+  ip            String?
+  meta          Json?
+
+  @@index([createdAt])
+  @@index([action])
+  @@map("master_backup_audit_logs")
+}
+
+/// CRM سروری — معامله / قیف فروش (افغانستان و چندزبانه در UI).
+model ShopCrmDeal {
+  id         Int      @id @default(autoincrement())
+  shopCode   String   @map("shop_code")
+  customerId Int      @map("customer_id")
+  title      String
+  stage      String   @default("lead")
+  valueAfs   Float    @default(0) @map("value_afs")
+  notes      String   @default("")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([shopCode])
+  @@index([shopCode, stage])
+  @@map("shop_crm_deals")
+}
+
+model ShopCrmTask {
+  id         Int       @id @default(autoincrement())
+  shopCode   String    @map("shop_code")
+  title      String
+  dueAt      DateTime? @map("due_at")
+  done       Boolean   @default(false)
+  customerId Int?      @map("customer_id")
+  dealId     Int?      @map("deal_id")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([shopCode])
+  @@index([shopCode, done])
+  @@map("shop_crm_tasks")
+}
+
+/// تماس / ویزیت / پیام — ثبت سروری.
+model ShopCrmContactLog {
+  id         Int      @id @default(autoincrement())
+  shopCode   String   @map("shop_code")
+  channel    String
+  customerId Int      @map("customer_id")
+  note       String   @default("")
+  at         DateTime @default(now())
+
+  @@index([shopCode])
+  @@index([shopCode, customerId])
+  @@map("shop_crm_contact_logs")
+}
+
+model ShopCrmEmailTemplate {
+  id       Int    @id @default(autoincrement())
+  shopCode String @map("shop_code")
+  name     String
+  subject  String
+  bodyHtml String @map("body_html")
+
+  @@unique([shopCode, name])
+  @@index([shopCode])
+  @@map("shop_crm_email_templates")
+}
+
+model ShopBook {
+  shopCode       String
+  id             Int
+  sku            String  @default("")
+  isbn           String  @default("")
+  title          String  @default("")
+  authorName     String  @default("") @map("author_name")
+  publisherName  String  @default("") @map("publisher_name")
+  categoryId     Int     @default(0) @map("category_id")
+  categoryName   String  @default("") @map("category_name")
+  purchasePrice  Float   @default(0) @map("purchase_price")
+  salePrice      Float   @default(0) @map("sale_price")
+  stockShop      Int     @default(0) @map("stock_shop")
+  stockWarehouse Int     @default(0) @map("stock_warehouse")
+  minStock       Int     @default(0) @map("min_stock")
+  isActive       Boolean @default(true) @map("is_active")
+  tenantId       Int     @default(0) @map("tenant_id")
+  createdAt      String? @map("created_at")
+  currencyCode   String? @map("currency_code")
+  imageUrl       String? @map("image_url")
+  extra          Json?
+
+  @@id([shopCode, id])
+  @@index([shopCode])
+}

@@ -45,6 +45,7 @@ export default function Modal({ open, onClose, title, children, maxWidth = 'max-
         onClick={onClose}
       />
       <div
+        data-cf-app-modal
         className={`relative z-[1] my-auto glass-dark border border-white/10 rounded-2xl w-full ${maxWidth} max-h-[min(92dvh,calc(100dvh-2rem))] flex flex-col overflow-hidden shadow-2xl`}
         style={{ animation: 'fadeIn 0.25s ease' }}
         onClick={e => e.stopPropagation()}

@@ -22,11 +22,10 @@ export type OnboardingBusinessTypeDef = {
   titleFa: string;
   titleEn: string;
   accent: string;
-  /**
-   * فقط سوپرمارکت: ثبت‌نام آزمایشی ۳ روزه با دیتابیس خالی ERP.
-   * سایر صنوف از مسیر پرداخت و تأیید ادمین.
-   */
+  /** صنوفی با ثبت‌نام آزمایشی ۳ روزه و دیتابیس دمو (برچسب «دمو ۳ روز» در UI) */
   demoDatabaseEnabled?: boolean;
+  /** تصویر بالای کارت انتخاب صنف (ثبت‌نام / دمو) */
+  cardCoverImage?: string;
 };
 
 export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
@@ -38,6 +37,8 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
     titleFa: 'فروشگاه عمومی',
     titleEn: 'General retail',
     accent: 'from-emerald-600/90 to-teal-900/90',
+    cardCoverImage:
+      'https://images.unsplash.com/photo-1542838132-92c53300491e?q=80&w=800&auto=format&fit=crop',
   },
   {
     id: 'bookstore',
@@ -48,6 +49,8 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
     titleFa: 'کتابفروشی',
     titleEn: 'Bookstore',
     accent: 'from-indigo-600/90 to-slate-900/90',
+    cardCoverImage:
+      'https://images.unsplash.com/photo-1524995997946-a7c3e46b3170?q=80&w=800&auto=format&fit=crop',
   },
   {
     id: 'pharmacy',
@@ -76,10 +79,13 @@ export const ONBOARDING_BUSINESS_TYPES: OnboardingBusinessTypeDef[] = [
   {
     id: 'gold_jewelry',
     lucideIcon: 'Gem',
-    isActive: false,
+    isActive: true,
+    demoDatabaseEnabled: true,
     titleFa: 'زرگری و طلا',
     titleEn: 'Gold & jewelry',
     accent: 'from-amber-500/90 to-yellow-950/90',
+    cardCoverImage:
+      'https://images.unsplash.com/photo-1515562141207-7a88e7f0496b?q=80&w=800&auto=format&fit=crop',
   },
   {
     id: 'clothing',

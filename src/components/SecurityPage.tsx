@@ -1,8 +1,18 @@
-import { useState, useMemo, type FormEvent } from 'react';
-import { Shield, Smartphone, Key, Eye, EyeOff, CheckCircle, AlertTriangle, QrCode, Copy, Check } from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import {
+  Shield,
+  Smartphone,
+  Key,
+  Eye,
+  EyeOff,
+  CheckCircle,
+  AlertTriangle,
+  QrCode,
+  Copy,
+  Check,
+} from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { apiTwoFactorSetup, apiTwoFactorEnable, apiTwoFactorDisable, getApiBaseUrl } from '../services/api';
-import { SECURITY_GAPS_CATALOG, countGapsByLevel } from '../data/securityGapsCatalog';
 import PasswordStrength from './PasswordStrength';
 import { validatePasswordPolicy } from '../utils/passwordPolicy';
 
@@ -23,7 +33,6 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
   const [isVerifying, setIsVerifying] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Password change
   const [pwForm, setPwForm] = useState({ current: '', new: '', confirm: '' });
   const [showPw, setShowPw] = useState({ current: false, new: false, confirm: false });
   const [pwSuccess, setPwSuccess] = useState(false);
@@ -84,45 +93,6 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
     }
   };
 
-  const securityGaps = useMemo(() => {
-    const list: { text: string; level: 'high' | 'medium' | 'info' }[] = [];
-    if (!is2FAEnabled) {
-      list.push({
-        level: 'high',
-        text: 'احراز هویت دو مرحله‌ای (2FA) برای حساب شما فعال نیست؛ در صورت لو رفتن رمز، ورود آسان‌تر می‌شود.',
-      });
-    }
-    if (typeof window !== 'undefined') {
-      const host = window.location.hostname;
-      const isLocal = host === 'localhost' || host === '127.0.0.1';
-      if (!isLocal && window.location.protocol !== 'https:') {
-        list.push({
-          level: 'medium',
-          text: 'صفحه روی HTTPS بارگذاری نشده است؛ برای استفادهٔ جدی روی اینترنت، گواهی SSL روی سرور توصیه می‌شود.',
-        });
-      }
-    }
-    list.push({
-      level: 'info',
-      text: 'رمز عبور حداقل ۸ کاراکتر و ترکیبی از حروف و اعداد؛ رمز فروشگاه و رمز نقش‌ها را جدا نگه دارید.',
-    });
-    list.push({
-      level: 'info',
-      text: 'خروجی پشتیبان (تنظیمات → پشتیبان) را دوره‌ای بگیرید؛ دادهٔ محلی مرورگر با پاک‌سازی کش از بین می‌رود.',
-    });
-    return list;
-  }, [is2FAEnabled]);
-
-  const catalogCounts = useMemo(() => countGapsByLevel(SECURITY_GAPS_CATALOG), []);
-  const seriousGaps = useMemo(
-    () =>
-      SECURITY_GAPS_CATALOG.map((cat) => ({
-        ...cat,
-        items: cat.items.filter((item) => item.level === 'high'),
-      })).filter((cat) => cat.items.length > 0),
-    []
-  );
-
   const handleChangePassword = async (e: FormEvent) => {
     e.preventDefault();
     if (pwForm.new !== pwForm.confirm) { setPwError('رمزها یکسان نیستند'); return; }
@@ -155,51 +125,12 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
   return (
     <div className="space-y-6 fade-in">
       <div>
-        <h1 className="text-2xl font-bold text-white">امنیت پیشرفته</h1>
-        <p className="text-slate-400 text-sm mt-1">مدیریت امنیت حساب کاربری</p>
+        <h1 className="text-2xl font-bold text-white">امنیت حساب</h1>
+        <p className="text-slate-400 text-sm mt-1">تغییر رمز و احراز دو مرحله‌ای (TOTP)</p>
       </div>
 
-      <div className="glass rounded-2xl border border-amber-500/20 p-5 space-y-3">
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="text-amber-400 shrink-0" size={18} />
-          <h2 className="text-white font-semibold text-sm">وضعیت و هشدارهای فوری</h2>
-        </div>
-        <ul className="space-y-2">
-          {securityGaps.map((g, i) => (
-            <li
-              key={i}
-              className={`text-xs rounded-lg px-3 py-2 leading-relaxed ${
-                g.level === 'high'
-                  ? 'bg-rose-500/10 text-rose-100 border border-rose-500/25'
-                  : g.level === 'medium'
-                    ? 'bg-amber-500/10 text-amber-100 border border-amber-500/25'
-                    : 'bg-slate-800/60 text-slate-300 border border-white/5'
-              }`}
-            >
-              {g.text}
-            </li>
-          ))}
-        </ul>
-        <p className="text-[10px] text-slate-500 pt-2 border-t border-white/10 leading-relaxed">
-          فهرست بازبینی فنی: بحرانی {catalogCounts.high}، متوسط {catalogCounts.medium}، اطلاعاتی {catalogCounts.info} (جمع {catalogCounts.total})
-        </p>
-        {seriousGaps.length > 0 && (
-          <ul className="text-[10px] text-slate-400 space-y-1 list-disc pr-4">
-            {seriousGaps.flatMap((c) =>
-              c.items.map((it, j) => (
-                <li key={`${c.title}-${j}`}>
-                  <span className="text-slate-500">{c.title}: </span>
-                  {it.text}
-                </li>
-              ))
-            )}
-          </ul>
-        )}
-      </div>
-
-      {/* 2FA Section */}
-      <div className="glass rounded-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
+      <div className="glass rounded-2xl p-6 space-y-4" id="security-2fa">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <div className={`w-11 h-11 rounded-xl flex items-center justify-center ${is2FAEnabled ? 'bg-emerald-500/20' : 'bg-slate-700/50'}`}>
               <Smartphone size={22} className={is2FAEnabled ? 'text-emerald-400' : 'text-slate-500'} />
@@ -217,6 +148,7 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
             )}
             {!is2FAEnabled && setupStep === 'idle' && (
               <button
+                type="button"
                 onClick={startSetup}
                 className="btn-primary text-white px-4 py-2 rounded-xl text-sm font-medium"
               >
@@ -225,6 +157,7 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
             )}
             {is2FAEnabled && setupStep === 'idle' && (
               <button
+                type="button"
                 onClick={() => { setSetupStep('disabling'); setVerifyCode(''); setVerifyError(''); }}
                 className="px-4 py-2 rounded-xl text-sm font-medium bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30 transition-all"
               >
@@ -234,14 +167,12 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
           </div>
         </div>
 
-        {/* Loading */}
         {setupStep === 'loading' && (
           <div className="flex items-center justify-center py-8">
             <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
           </div>
         )}
 
-        {/* QR Code step */}
         {setupStep === 'qr' && (
           <div className="bg-slate-800/50 rounded-xl p-5 space-y-4 border border-indigo-500/20 fade-in">
             <div className="flex items-start gap-3">
@@ -260,6 +191,7 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
                     {totpSecret}
                   </code>
                   <button
+                    type="button"
                     onClick={copySecret}
                     className="p-2 rounded-lg glass text-slate-400 hover:text-indigo-300 transition-colors"
                     title="کپی"
@@ -283,6 +215,7 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
                   className="flex-1 bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 font-mono text-center tracking-widest"
                 />
                 <button
+                  type="button"
                   onClick={confirmEnable}
                   disabled={verifyCode.length < 6 || isVerifying}
                   className="btn-primary text-white px-5 rounded-xl text-sm font-medium disabled:opacity-50 flex items-center gap-2"
@@ -294,6 +227,7 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
             </div>
 
             <button
+              type="button"
               onClick={() => { setSetupStep('idle'); setVerifyCode(''); setQrDataUrl(''); setTotpSecret(''); setVerifyError(''); }}
               className="text-slate-500 hover:text-slate-300 text-xs transition-colors"
             >
@@ -302,7 +236,6 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
           </div>
         )}
 
-        {/* Disable step — confirm with current TOTP code */}
         {setupStep === 'disabling' && (
           <div className="bg-rose-900/20 rounded-xl p-5 space-y-4 border border-rose-500/20 fade-in">
             <div className="flex items-start gap-3">
@@ -320,6 +253,7 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
                 className="flex-1 bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 font-mono text-center tracking-widest"
               />
               <button
+                type="button"
                 onClick={confirmDisable}
                 disabled={verifyCode.length < 6 || isVerifying}
                 className="bg-rose-500/20 text-rose-400 border border-rose-500/30 px-5 rounded-xl text-sm font-medium disabled:opacity-50 flex items-center gap-2 hover:bg-rose-500/30 transition-all"
@@ -329,6 +263,7 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
             </div>
             {verifyError && <p className="text-rose-400 text-xs mt-1">{verifyError}</p>}
             <button
+              type="button"
               onClick={() => { setSetupStep('idle'); setVerifyCode(''); setVerifyError(''); }}
               className="text-slate-500 hover:text-slate-300 text-xs transition-colors"
             >
@@ -348,8 +283,7 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
         )}
       </div>
 
-      {/* Change Password */}
-      <div className="glass rounded-2xl p-6 space-y-4">
+      <div className="glass rounded-2xl p-6 space-y-4" id="security-password">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-11 h-11 rounded-xl bg-indigo-500/20 flex items-center justify-center">
             <Key size={20} className="text-indigo-400" />
@@ -414,25 +348,6 @@ export default function SecurityPage({ twoFactorEnabled = false }: SecurityPageP
           </div>
         </form>
       </div>
-
-      
-
-      <div className="glass rounded-2xl p-6 space-y-3 border border-slate-600/40">
-        <h2 className="text-white font-semibold flex items-center gap-2">
-          <Shield size={18} className="text-sky-400" />
-          داده، اشتراک و «یک سال استفاده»
-        </h2>
-        <p className="text-slate-300 text-sm leading-relaxed">
-          این برنامه <strong className="text-white">فیک یا نمایشی نیست</strong>؛ دادهٔ فروشگاه در پایگاه سرور / همگام‌سازی ذخیره می‌شود.
-          <strong className="text-white"> هیچ تایمر خودکاری برای حذف محصولات بعد از یک سال وجود ندارد</strong>؛ کالاها تا وقتی شما حذف یا سرور پاک نشود باقی می‌مانند.
-        </p>
-        <p className="text-slate-400 text-xs leading-relaxed">
-          برای حساب <strong className="text-slate-200">آزمایشی (دیمو)</strong>، سرور ممکن است پایان دورهٔ آزمایش (<code className="text-indigo-300">trial_ends_at</code>) را
-          اعمال کند و ورود را محدود کند — این ربطی به حذف خودکار اقلام انبار ندارد.
-          اشتراک پولی ممکن است فیلدهایی مثل <code className="text-indigo-300">subscription_end</code> داشته باشد؛ باز هم حذف خودکار کالا پیش‌فرض نیست.
-        </p>
-      </div>
     </div>
   );
 }
-

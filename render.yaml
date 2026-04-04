@@ -1,17 +1,24 @@
-# Render: New Web Service از ریشه همین repo
-# متغیرهای اجباری را در Dashboard → Environment اضافه کنید (مقادیر مخفی را اینجا ننویسید).
+# Render: Web Service — DATABASE_URL را در Dashboard به PostgreSQL واقعی ست کنید
+# (مثلاً Render Postgres، Neon، Supabase). SQLite دیگر در این پروژه استفاده نمی‌شود.
+#
+# عملیات پیشنهادی:
+# - مهاجرت: startCommand از prisma migrate deploy (scripts/render-start.mjs) استفاده می‌کند.
+# - هم‌ترازی کپی backend: بعد از تغییر migration، لوکال: npm run sync:prisma و سپس commit.
+# - بکاپ: اسکریپت scripts/pg-backup.ps1؛ اعتبار dump: scripts/pg-restore-verify.ps1
+# - RPO/RTO را برای تیم تعریف کنید (مثلاً RPO = فاصلهٔ cron بکاپ؛ RTO = زمان بازیابی + deploy).
+# - HA چندمنطقه: در صورت نیاز replica/failover جدا از این سرویس؛ Elasticsearch فقط اگر جستجو/آنالیتیکس سنگین لازم شد.
 
 services:
   - type: web
     name: dokanyar-api
     env: node
     plan: free
-    buildCommand: npm install && npx prisma generate
+    buildCommand: npm install && npm run check:prisma-drift && npx prisma generate
     startCommand: npm run server:render
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: "20"
-      - key: DATABASE_URL
-        value: file:./server/prisma/dev.db
+      # DATABASE_URL را در UI اضافه کنید؛ در repo مقدار مخفی نگذارید.
+      # اختیاری برای تست بازیابی از CI: TEST_DATABASE_URL (Postgres موقت)

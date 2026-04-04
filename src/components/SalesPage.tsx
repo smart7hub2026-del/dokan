@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Search, ShoppingCart, Trash2, X, Check, Package, User, CreditCard, Banknote, Printer, ChevronDown, ChevronUp, Mic, MicOff, Send, ScanLine, ImageIcon } from 'lucide-react';
-import { Invoice, InvoiceItem, Product, type CurrencyCode } from '../data/mockData';
+import { Invoice, InvoiceItem, Product, type Customer, type CurrencyCode } from '../data/mockData';
 import { useToast } from './Toast';
 import { useApp } from '../context/AppContext';
 import { useStore, type ShopSettings } from '../store/useStore';
@@ -22,6 +22,8 @@ interface CartItem extends InvoiceItem {
 }
 
 type PaperSize = ShopSettings['paper_size'];
+
+const LS_SALES_DEFAULT_STOCK_SOURCE = 'dokanyar_sales_default_stock_source';
 
 type PrintInvoiceOpts = {
   paper_size: PaperSize;
@@ -280,13 +282,37 @@ export default function SalesPage() {
   /** خطوطی که قیمت واحدشان دستی تغییر کرده تا با تعویض حالت فروش بازنویسی نشوند */
   const manualUnitPriceKeys = useRef<Set<string>>(new Set());
   const cartLineKey = (productId: number, source: 'shop' | 'warehouse') => `${productId}:${source}`;
+  /** با کلیک روی کارت محصول، ابتدا از دکان یا گدام برداشت شود (در سبد هر ردیف قابل عوض کردن است) */
+  const [defaultStockSource, setDefaultStockSource] = useState<'shop' | 'warehouse'>(() => {
+    if (typeof window === 'undefined') return 'shop';
+    try {
+      return localStorage.getItem(LS_SALES_DEFAULT_STOCK_SOURCE) === 'warehouse' ? 'warehouse' : 'shop';
+    } catch {
+      return 'shop';
+    }
+  });
+  const persistDefaultStockSource = (v: 'shop' | 'warehouse') => {
+    setDefaultStockSource(v);
+    try {
+      localStorage.setItem(LS_SALES_DEFAULT_STOCK_SOURCE, v);
+    } catch {
+      /* ignore */
+    }
+  };
   const [saleMode, setSaleMode] = useState<'retail' | 'wholesale'>('retail');
+  /** در فروش ویژه: قیمت پیشنهادی = بهای خرید × (۱ + این درصد/۱۰۰). اگر خرید صفر باشد از قیمت فروش عادی استفاده می‌شود. */
+  const [wholesaleMarkupPercent, setWholesaleMarkupPercent] = useState(10);
 
-  const WHOLESALE_DISCOUNT_PERCENT = 12;
-  const calcUnitPrice = (basePrice: number) =>
-    saleMode === 'wholesale'
-      ? Math.max(1, Math.round(basePrice * (1 - WHOLESALE_DISCOUNT_PERCENT / 100)))
-      : basePrice;
+  const calcWholesaleUnitPrice = (product: Product) => {
+    const buy = Number(product.purchase_price || 0);
+    if (buy > 0) {
+      return Math.max(1, Math.round(buy * (1 + wholesaleMarkupPercent / 100)));
+    }
+    return Math.max(1, Math.round(Number(product.sale_price || 0)));
+  };
+
+  const calcUnitPriceForProduct = (product: Product) =>
+    saleMode === 'wholesale' ? calcWholesaleUnitPrice(product) : product.sale_price;
 
   const staffInvoiceRecipients = useMemo(() => {
     const tid = storeCurrentUser?.tenant_id;
@@ -344,8 +370,10 @@ export default function SalesPage() {
     (p.stock_shop > 0 || p.stock_warehouse > 0) &&
     (p.name.includes(productSearch) || p.barcode.includes(productSearch) || p.product_code.includes(productSearch))
   );
-  const filteredCustomers = storeCustomers.filter((c: { status: string; name: string; phone: string }) =>
-    c.status === 'active' && (c.name.includes(customerSearch) || c.phone.includes(customerSearch))
+  const filteredCustomers = storeCustomers.filter((c: Customer) =>
+    c.status === 'active' &&
+    !c.archived_at &&
+    (c.name.includes(customerSearch) || c.phone.includes(customerSearch))
   );
   const customer = storeCustomers.find((c: { id: number }) => c.id === selectedCustomer);
 
@@ -367,7 +395,7 @@ export default function SalesPage() {
         if (manualUnitPriceKeys.current.has(cartLineKey(line.product_id, line.stock_source))) return line;
         const p = salesCatalogProducts.find((x) => x.id === line.product_id);
         if (!p) return line;
-        const nextUnit = calcUnitPrice(Number(p.sale_price || 0));
+        const nextUnit = calcUnitPriceForProduct(p);
         return {
           ...line,
           unit_price: nextUnit,
@@ -375,11 +403,25 @@ export default function SalesPage() {
         };
       })
     );
-  }, [saleMode, salesCatalogProducts]);
+  }, [saleMode, salesCatalogProducts, wholesaleMarkupPercent]);
 
   const addToCart = (product: Product) => {
-    const preferShop = product.stock_shop > 0;
-    const source: 'shop' | 'warehouse' = preferShop ? 'shop' : 'warehouse';
+    let source: 'shop' | 'warehouse';
+    if (defaultStockSource === 'warehouse') {
+      if (product.stock_warehouse > 0) source = 'warehouse';
+      else if (product.stock_shop > 0) source = 'shop';
+      else {
+        warning('اتمام موجودی', `${product.name} در دکان و گدام موجود نیست`);
+        return;
+      }
+    } else {
+      if (product.stock_shop > 0) source = 'shop';
+      else if (product.stock_warehouse > 0) source = 'warehouse';
+      else {
+        warning('اتمام موجودی', `${product.name} در دکان و گدام موجود نیست`);
+        return;
+      }
+    }
     const avail = source === 'shop' ? product.stock_shop : product.stock_warehouse;
     if (avail <= 0) { warning('اتمام موجودی', `${product.name} در دکان و گدام موجود نیست`); return; }
     const existing = cart.find(i => i.product_id === product.id && i.stock_source === source);
@@ -402,8 +444,8 @@ export default function SalesPage() {
         product_id: product.id,
         product_name: product.name,
         quantity: 1,
-        unit_price: calcUnitPrice(product.sale_price),
-        total_price: calcUnitPrice(product.sale_price),
+        unit_price: calcUnitPriceForProduct(product),
+        total_price: calcUnitPriceForProduct(product),
         stock_available: avail,
         stock_source: source,
         image_url: product.image_url,
@@ -606,7 +648,7 @@ export default function SalesPage() {
           created_at: new Date().toISOString(),
         };
         localStorage.setItem('offline_queue_v1', JSON.stringify([row, ...q]));
-        warning('ثبت آفلاین', 'فاکتور موقتاً آفلاین ذخیره شد و بعداً همگام می‌شود.');
+        success('فاکتور ثبت شد', `${localInvoice.invoice_number} — ${formatPrice(total)}`);
       } else {
         error('ثبت فروش ناموفق', msg);
         setIsSubmitting(false);
@@ -635,25 +677,49 @@ export default function SalesPage() {
           <h1 className="text-2xl font-bold text-white gradient-text">{t('new_sale_pos')}</h1>
           <p className="text-slate-400 text-sm mt-1">ثبت فروش و صدور فاکتور</p>
         </div>
-        <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 p-1">
-          <button
-            type="button"
-            onClick={() => setSaleMode('retail')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              saleMode === 'retail' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            فروش عادی
-          </button>
-          <button
-            type="button"
-            onClick={() => setSaleMode('wholesale')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              saleMode === 'wholesale' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
-            }`}
-          >
-            فروش ویژه عمده
-          </button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 p-1">
+            <button
+              type="button"
+              onClick={() => setSaleMode('retail')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                saleMode === 'retail' ? 'bg-emerald-600 text-white' : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              فروش عادی
+            </button>
+            <button
+              type="button"
+              onClick={() => setSaleMode('wholesale')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                saleMode === 'wholesale' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              فروش ویژه (نرخ خرید + مفاد)
+            </button>
+          </div>
+          {saleMode === 'wholesale' && (
+            <div className="flex items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-3 py-2">
+              <label className="text-[11px] font-bold text-indigo-200 whitespace-nowrap">مفاد روی خرید (%)</label>
+              <input
+                type="number"
+                min={0}
+                max={500}
+                step={1}
+                value={wholesaleMarkupPercent}
+                onChange={(e) => {
+                  const v = Math.max(0, Math.min(500, Math.round(Number(e.target.value) || 0)));
+                  setWholesaleMarkupPercent(v);
+                  manualUnitPriceKeys.current.clear();
+                }}
+                className="w-16 sm:w-20 rounded-lg border border-white/15 bg-slate-900/80 px-2 py-1 text-center text-xs font-black text-white"
+                dir="ltr"
+              />
+              <span className="text-[10px] text-slate-400 max-w-[200px] leading-snug hidden md:inline">
+                پیش‌فرض روی هر قلم: خرید×(۱+٪). قیمت هر ردیف در سبد قابل دستکاری است.
+              </span>
+            </div>
+          )}
         </div>
         {lastInvoice && (
           <div className="flex flex-wrap items-center gap-2">
@@ -680,7 +746,7 @@ export default function SalesPage() {
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
         {/* Products Panel */}
         <div className="lg:col-span-3 space-y-4">
-          <div className="glass rounded-2xl p-4">
+          <div className="glass rounded-2xl p-4 space-y-3">
             <div className="relative flex items-center">
               <Search size={16} className="absolute right-3 text-slate-400" />
               <input value={productSearch} onChange={e => setProductSearch(e.target.value)}
@@ -727,6 +793,36 @@ export default function SalesPage() {
                 </button>
               )}
             </div>
+            <div className="flex flex-wrap items-center gap-2 border-t border-white/10 pt-3">
+              <span className="text-[11px] font-bold text-slate-400 shrink-0">منبع پیش‌فرض با کلیک روی کالا:</span>
+              <div className="inline-flex rounded-lg border border-slate-600 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => persistDefaultStockSource('shop')}
+                  className={`px-2.5 py-1 text-[10px] font-bold transition-colors ${
+                    defaultStockSource === 'shop'
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-800/80 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  دکان (ویترین)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => persistDefaultStockSource('warehouse')}
+                  className={`px-2.5 py-1 text-[10px] font-bold transition-colors ${
+                    defaultStockSource === 'warehouse'
+                      ? 'bg-sky-600 text-white'
+                      : 'bg-slate-800/80 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  گدام (فروش مستقیم انبار)
+                </button>
+              </div>
+              <span className="text-[10px] text-slate-500 leading-snug max-w-[220px]">
+                اگر در منبع انتخاب‌شده موجودی نباشد، از منبع دیگر پر می‌شود. در سبد هر ردیف را جدا می‌توانید بین دکان و گدام عوض کنید.
+              </span>
+            </div>
           </div>
           {showVisualSearch && (
             <div className="glass rounded-2xl p-4 border border-violet-500/20">
@@ -761,10 +857,12 @@ export default function SalesPage() {
                 </div>
                 <p className="text-white text-xs font-medium leading-tight mb-1 text-center truncate">{p.name}</p>
                 <p className="text-emerald-400 font-bold text-sm text-center">
-                  {formatPrice(calcUnitPrice(p.sale_price), p.currency_code ?? 'AFN')}
+                  {formatPrice(calcUnitPriceForProduct(p), p.currency_code ?? 'AFN')}
                 </p>
                 {saleMode === 'wholesale' && (
-                  <p className="text-[10px] text-indigo-300 text-center mt-0.5">ویژه عمده ({WHOLESALE_DISCOUNT_PERCENT}% تخفیف)</p>
+                  <p className="text-[10px] text-indigo-300 text-center mt-0.5">
+                    ویژه: خرید + {wholesaleMarkupPercent}% — قیمت هر ردیف در سبد قابل تغییر است
+                  </p>
                 )}
                 <p className={`text-xs text-center mt-1 font-medium ${out ? 'text-rose-400' : low ? 'text-rose-300' : 'text-slate-500'}`}>
                   دکان: {p.stock_shop} · گدام: {p.stock_warehouse}
@@ -826,7 +924,7 @@ export default function SalesPage() {
               )}
             </div>
             {customer && customer.balance < 0 && (
-              <p className="text-rose-400 text-xs mt-1.5">⚠️ بدهی موجود: {Math.abs(customer.balance).toLocaleString()} ؋</p>
+              <p className="text-rose-400 text-xs mt-1.5">⚠️ بدهی موجود: {formatPrice(Math.abs(customer.balance))}</p>
             )}
             {saleMode === 'wholesale' && !selectedCustomer && (
               <p className="text-indigo-300 text-xs mt-1.5 font-bold">فروش ویژه: انتخاب مشتری الزامی است.</p>

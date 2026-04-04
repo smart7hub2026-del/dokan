@@ -73,6 +73,16 @@ body::before {
   animation: kenBurns 20s ease-out infinite alternate;
 }
 
+/* کارت‌های روش پرداخت — حرکت ملایم تصویر (بدون فایل جدا) */
+@keyframes payMethodCardPulse {
+  0%, 100% { transform: scale(1); opacity: 0.88; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+.pay-method-card-media {
+  animation: payMethodCardPulse 4.8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
 .animate-gradient-x {
   background-size: 200% 200%;
   animation: gradientX 3s ease infinite;
@@ -115,8 +125,9 @@ body::before {
 
 /* ============ LIGHT THEME (آبی سلطنتی — پس‌زمینه سفید خالص) ============ */
 body.light-theme {
-  --royal: #1e3a8a;
-  --royal-hover: #172554;
+  /* تم روشن: آبی روشن‌تر و خوانا روی دکمهٔ اصلی */
+  --royal: #2563eb;
+  --royal-hover: #1d4ed8;
   --royal-soft: #eff6ff;
   --royal-ring: #bfdbfe;
   --surface-card: #f4f6f9;
@@ -309,6 +320,16 @@ body.light-theme .app-shell [class*="text-purple-4"] { color: #7c3aed !important
 body.light-theme .app-shell .text-cyan-400,
 body.light-theme .app-shell [class*="text-cyan-4"] { color: #0891b2 !important; }
 
+/* روشن: متن‌های صورتی/کهربایی خیلی روشن روی پس‌زمینهٔ کم‌رنگ خوانا نمی‌شدند */
+body.light-theme .app-shell [class*="text-rose-100"],
+body.light-theme .app-shell [class*="text-rose-200"] {
+  color: #9f1239 !important;
+}
+body.light-theme .app-shell [class*="text-amber-100"],
+body.light-theme .app-shell [class*="text-amber-200"] {
+  color: #92400e !important;
+}
+
 body.light-theme .app-shell [class*="divide-slate-700"],
 body.light-theme .app-shell [class*="divide-slate-800"],
 body.light-theme .app-shell [class*="divide-gray-700"] {
@@ -333,16 +354,23 @@ body.light-theme .app-shell table tbody tr:hover {
   background-color: #f1f5f9 !important;
 }
 
-body.light-theme .app-shell input,
+/* تم روشن: فقط داخل پنل (app-shell) و مودال‌های پورتال با data-cf-app-modal.
+   صفحهٔ خوش‌آمد/لاگین زیر .app-shell نیست → فیلدها همان استایل تیرهٔ Tailwind می‌مانند. */
+body.light-theme .app-shell input:not([type='checkbox']):not([type='radio']),
 body.light-theme .app-shell select,
-body.light-theme .app-shell textarea {
+body.light-theme .app-shell textarea,
+body.light-theme [data-cf-app-modal] input:not([type='checkbox']):not([type='radio']),
+body.light-theme [data-cf-app-modal] select,
+body.light-theme [data-cf-app-modal] textarea {
   background-color: #f8fafc !important;
   color: #0f172a !important;
   border-color: #cbd5e1 !important;
 }
 
 body.light-theme .app-shell input::placeholder,
-body.light-theme .app-shell textarea::placeholder {
+body.light-theme .app-shell textarea::placeholder,
+body.light-theme [data-cf-app-modal] input::placeholder,
+body.light-theme [data-cf-app-modal] textarea::placeholder {
   color: #94a3b8 !important;
 }
 
@@ -451,14 +479,15 @@ body.light-theme .sidebar-link:hover {
 
 /* دکمه‌ها — تم روشن */
 body.light-theme .btn-primary {
-  background: var(--royal);
-  box-shadow: 0 4px 14px rgba(30, 58, 138, 0.28);
+  background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
   color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 body.light-theme .btn-primary:hover {
-  background: var(--royal-hover);
+  background: linear-gradient(180deg, #60a5fa 0%, #2563eb 100%);
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(30, 58, 138, 0.35);
+  box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
 }
 
 .btn-secondary-outline {
@@ -566,9 +595,12 @@ input:focus, select:focus, textarea:focus {
   border-color: #2d9cdb !important;
 }
 
-body.light-theme .app-shell input:focus,
+body.light-theme .app-shell input:not([type='checkbox']):not([type='radio']):focus,
 body.light-theme .app-shell select:focus,
-body.light-theme .app-shell textarea:focus {
+body.light-theme .app-shell textarea:focus,
+body.light-theme [data-cf-app-modal] input:not([type='checkbox']):not([type='radio']):focus,
+body.light-theme [data-cf-app-modal] select:focus,
+body.light-theme [data-cf-app-modal] textarea:focus {
   box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.22);
   border-color: #1e3a8a !important;
 }
@@ -1205,99 +1237,97 @@ input[type="radio"], input[type="checkbox"] {
   .login-button { font-size: 15px; }
 }
 
-/* Global replacement for amber/orange utilities across all roles/panels */
-.text-amber-300,
-.text-amber-400,
-.text-amber-500,
-.text-orange-400,
-.text-orange-500 { color: #60a5fa !important; }
+/* Amber→blue: فقط تم روشن تا تم‌های تیره خنثی نشوند */
+body.light-theme .text-amber-300,
+body.light-theme .text-amber-400,
+body.light-theme .text-amber-500,
+body.light-theme .text-orange-400,
+body.light-theme .text-orange-500 { color: #60a5fa !important; }
 
-.bg-amber-500,
-.bg-orange-500 { background-color: #3b82f6 !important; }
+body.light-theme .bg-amber-500,
+body.light-theme .bg-orange-500 { background-color: #3b82f6 !important; }
 
-.bg-amber-500\/5,
-.bg-amber-500\/10,
-.bg-amber-500\/20,
-.bg-amber-500\/30,
-.bg-orange-500\/5,
-.bg-orange-500\/10,
-.bg-orange-500\/20,
-.bg-orange-500\/30 { background-color: rgba(59, 130, 246, 0.14) !important; }
+body.light-theme .bg-amber-500\/5,
+body.light-theme .bg-amber-500\/10,
+body.light-theme .bg-amber-500\/20,
+body.light-theme .bg-amber-500\/30,
+body.light-theme .bg-orange-500\/5,
+body.light-theme .bg-orange-500\/10,
+body.light-theme .bg-orange-500\/20,
+body.light-theme .bg-orange-500\/30 { background-color: rgba(59, 130, 246, 0.14) !important; }
 
-.border-amber-500\/20,
-.border-amber-500\/30,
-.border-amber-500\/50,
-.border-orange-500\/20,
-.border-orange-500\/30,
-.border-orange-500\/50 { border-color: rgba(59, 130, 246, 0.34) !important; }
+body.light-theme .border-amber-500\/20,
+body.light-theme .border-amber-500\/30,
+body.light-theme .border-amber-500\/50,
+body.light-theme .border-orange-500\/20,
+body.light-theme .border-orange-500\/30,
+body.light-theme .border-orange-500\/50 { border-color: rgba(59, 130, 246, 0.34) !important; }
 
-.hover\:bg-amber-500\/30:hover,
-.hover\:bg-orange-500\/30:hover { background-color: rgba(59, 130, 246, 0.22) !important; }
+body.light-theme .hover\:bg-amber-500\/30:hover,
+body.light-theme .hover\:bg-orange-500\/30:hover { background-color: rgba(59, 130, 246, 0.22) !important; }
 
-.hover\:text-amber-400:hover,
-.hover\:text-orange-400:hover { color: #93c5fd !important; }
+body.light-theme .hover\:text-amber-400:hover,
+body.light-theme .hover\:text-orange-400:hover { color: #93c5fd !important; }
 
-.from-amber-500 {
+body.light-theme .from-amber-500 {
   --tw-gradient-from: #4f46e5 var(--tw-gradient-from-position) !important;
   --tw-gradient-to: rgb(79 70 229 / 0) var(--tw-gradient-to-position) !important;
   --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
 }
 
-.to-amber-600,
-.to-orange-600 {
+body.light-theme .to-amber-600,
+body.light-theme .to-orange-600 {
   --tw-gradient-to: #2563eb var(--tw-gradient-to-position) !important;
 }
 
-/* White cards + readable content in all modules */
-.glass .text-white,
-.glass-dark .text-white {
+/* تم روشن: کارت روشن + متن تیره (هرگز سراسری — تا تم تیره متن روشن بماند) */
+body.light-theme .glass .text-white,
+body.light-theme .glass-dark .text-white {
   color: #0f172a !important;
 }
 
-.glass .text-slate-200,
-.glass .text-slate-300,
-.glass .text-slate-400,
-.glass-dark .text-slate-200,
-.glass-dark .text-slate-300,
-.glass-dark .text-slate-400 {
+body.light-theme .glass .text-slate-200,
+body.light-theme .glass .text-slate-300,
+body.light-theme .glass .text-slate-400,
+body.light-theme .glass-dark .text-slate-200,
+body.light-theme .glass-dark .text-slate-300,
+body.light-theme .glass-dark .text-slate-400 {
   color: #475569 !important;
 }
 
-.glass svg,
-.glass-dark svg {
+body.light-theme .glass svg,
+body.light-theme .glass-dark svg {
   color: #334155;
 }
 
-.glass [class*="bg-white/"],
-.glass-dark [class*="bg-white/"] {
+body.light-theme .glass [class*="bg-white/"],
+body.light-theme .glass-dark [class*="bg-white/"] {
   background-color: #f8fafc !important;
 }
 
-.glass [class*="border-white/"],
-.glass-dark [class*="border-white/"] {
+body.light-theme .glass [class*="border-white/"],
+body.light-theme .glass-dark [class*="border-white/"] {
   border-color: #e2e8f0 !important;
 }
 
-/* Keep primary/action buttons readable */
-.glass button.text-white,
-.glass-dark button.text-white,
-.glass a.text-white,
-.glass-dark a.text-white {
+body.light-theme .glass button.text-white,
+body.light-theme .glass-dark button.text-white,
+body.light-theme .glass a.text-white,
+body.light-theme .glass-dark a.text-white {
   color: #ffffff !important;
 }
 
-.glass button[class*="bg-"],
-.glass-dark button[class*="bg-"] {
+body.light-theme .glass button[class*="bg-"],
+body.light-theme .glass-dark button[class*="bg-"] {
   border-color: transparent;
 }
 
-/* Header (top bar) text/icons alignment with light cards */
-header.glass-dark .text-white {
+body.light-theme header.glass-dark .text-white {
   color: #0f172a !important;
 }
 
-header.glass-dark .text-slate-300,
-header.glass-dark .text-slate-400 {
+body.light-theme header.glass-dark .text-slate-300,
+body.light-theme header.glass-dark .text-slate-400 {
   color: #475569 !important;
 }
 
@@ -1366,6 +1396,14 @@ header.glass-dark .text-slate-400 {
     border-radius: 14px;
     border: 1px solid rgba(148, 163, 184, 0.18);
     background: rgba(15, 23, 42, 0.35);
+    color: #e2e8f0;
+  }
+
+  body.light-theme .app-shell table tbody tr {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+    color: #0f172a;
   }
 
   .app-shell table tbody td {
@@ -1377,10 +1415,29 @@ header.glass-dark .text-slate-400 {
   .app-shell table tbody td + td {
     border-top: 1px dashed rgba(148, 163, 184, 0.18) !important;
   }
+
+  body.light-theme .app-shell table tbody td + td {
+    border-top: 1px dashed #e2e8f0 !important;
+  }
+
+  body.tigers-theme .app-shell table tbody tr {
+    background: linear-gradient(180deg, rgba(17, 17, 21, 0.92), rgba(10, 10, 14, 0.95));
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #e5e7eb;
+  }
+
+  body.tigers-theme .app-shell table tbody td + td {
+    border-top: 1px dashed rgba(239, 68, 68, 0.2) !important;
+  }
 }
 
-/* Dark Premium — پالت آبی عمیق (dark + deep_blue) */
-body.dark-theme,
+/* Dark classic — خاکستری عمیق (فقط theme=dark) */
+body.dark-theme {
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+
+/* Deep blue — آبی دریایی (theme=deep_blue) */
 body.deep-blue-theme {
   background-color: #0b1f3a;
   color: #c9d6e2;
@@ -1513,6 +1570,46 @@ body.deep-blue-theme .stat-card::before {
   background: radial-gradient(circle, rgba(45, 156, 219, 0.14) 0%, transparent 70%);
 }
 
+/* جدول دسکتاپ — تم تیره / آبی عمیق: پس‌زمینه تیره + متن روشن */
+body.dark-theme .app-shell table thead tr,
+body.deep-blue-theme .app-shell table thead tr {
+  background-color: #0e2747 !important;
+}
+
+body.dark-theme .app-shell table thead th,
+body.deep-blue-theme .app-shell table thead th {
+  color: #c9d6e2 !important;
+}
+
+body.dark-theme .app-shell table tbody tr,
+body.deep-blue-theme .app-shell table tbody tr {
+  background-color: #112a4d;
+  color: #c9d6e2;
+}
+
+body.dark-theme .app-shell table tbody tr:hover,
+body.deep-blue-theme .app-shell table tbody tr:hover {
+  background-color: #16345f !important;
+}
+
+body.tigers-theme .app-shell table thead tr {
+  background-color: rgba(17, 17, 21, 0.95) !important;
+}
+
+body.tigers-theme .app-shell table thead th {
+  color: #e5e7eb !important;
+}
+
+body.tigers-theme .app-shell table tbody tr {
+  background: linear-gradient(180deg, rgba(17, 17, 21, 0.88), rgba(10, 10, 14, 0.92));
+  color: #e5e7eb;
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+body.tigers-theme .app-shell table tbody tr:hover {
+  background: rgba(239, 68, 68, 0.08) !important;
+}
+
 /* خوانایی داخل پنل: خنثی‌کردن قانون «متن تیره روی glass» */
 body.dark-theme .app-shell .glass .text-white,
 body.dark-theme .app-shell .glass-dark .text-white,
@@ -1573,6 +1670,191 @@ body.dark-theme .app-shell .text-blue-400,
 body.deep-blue-theme .app-shell .text-indigo-400,
 body.deep-blue-theme .app-shell .text-blue-400 {
   color: #56ccf2 !important;
+}
+
+/* ========== Cyber-Financial (تم تیره / آبی عمیق — app shell) ========== */
+.font-num {
+  font-variant-numeric: tabular-nums;
+}
+
+body.dark-theme:not(.light-theme),
+body.deep-blue-theme:not(.light-theme) {
+  background-color: #0c0e12 !important;
+  color: #e2e8f0;
+}
+
+body.dark-theme:not(.light-theme)::before,
+body.deep-blue-theme:not(.light-theme)::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(34, 240, 137, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 240, 137, 0.028) 1px, transparent 1px),
+    radial-gradient(ellipse 85% 55% at 100% 0%, rgba(34, 240, 137, 0.07), transparent 52%),
+    radial-gradient(ellipse 70% 50% at 0% 100%, rgba(255, 59, 59, 0.06), transparent 48%);
+  background-size: 44px 44px, 44px 44px, auto, auto;
+}
+
+body.deep-blue-theme:not(.light-theme)::before {
+  background-image:
+    linear-gradient(rgba(86, 204, 242, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(86, 204, 242, 0.04) 1px, transparent 1px),
+    radial-gradient(ellipse 80% 50% at 90% 5%, rgba(45, 156, 219, 0.12), transparent 55%),
+    radial-gradient(ellipse 65% 45% at 5% 95%, rgba(255, 59, 59, 0.05), transparent 45%);
+  background-size: 44px 44px, 44px 44px, auto, auto;
+}
+
+body.dark-theme:not(.light-theme) .app-shell,
+body.deep-blue-theme:not(.light-theme) .app-shell {
+  position: relative;
+  z-index: 1;
+}
+
+body.dark-theme:not(.light-theme) .app-shell .glass,
+body.dark-theme:not(.light-theme) .app-shell .glass-dark,
+body.deep-blue-theme:not(.light-theme) .app-shell .glass,
+body.deep-blue-theme:not(.light-theme) .app-shell .glass-dark {
+  background: rgba(18, 21, 28, 0.9) !important;
+  border: 1px solid rgba(100, 116, 139, 0.22) !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35) !important;
+}
+
+body.dark-theme:not(.light-theme) .app-shell .glass:hover,
+body.dark-theme:not(.light-theme) .app-shell .glass-dark:hover,
+body.deep-blue-theme:not(.light-theme) .app-shell .glass:hover,
+body.deep-blue-theme:not(.light-theme) .app-shell .glass-dark:hover {
+  border-color: rgba(34, 240, 137, 0.35) !important;
+  box-shadow: 0 0 28px rgba(34, 240, 137, 0.06), 0 16px 44px rgba(0, 0, 0, 0.38) !important;
+}
+
+body.dark-theme:not(.light-theme) .app-shell .sidebar-shell.glass-dark,
+body.deep-blue-theme:not(.light-theme) .app-shell .sidebar-shell.glass-dark {
+  background: rgba(14, 16, 22, 0.94) !important;
+}
+
+body.dark-theme .app-shell table.cf-data-grid,
+body.deep-blue-theme .app-shell table.cf-data-grid {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+body.dark-theme .app-shell table.cf-data-grid th,
+body.dark-theme .app-shell table.cf-data-grid td,
+body.deep-blue-theme .app-shell table.cf-data-grid th,
+body.deep-blue-theme .app-shell table.cf-data-grid td {
+  border: none !important;
+}
+
+body.dark-theme .app-shell table.cf-data-grid thead th,
+body.deep-blue-theme .app-shell table.cf-data-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(16, 18, 24, 0.92) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+body.dark-theme .app-shell table.cf-data-grid tbody tr:nth-child(even) td,
+body.deep-blue-theme .app-shell table.cf-data-grid tbody tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+body.dark-theme .app-shell table.cf-data-grid tbody tr:nth-child(odd) td,
+body.deep-blue-theme .app-shell table.cf-data-grid tbody tr:nth-child(odd) td {
+  background: transparent;
+}
+
+@keyframes cf-row-glow {
+  0%, 100% {
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  40%, 60% {
+    box-shadow: inset 0 0 32px rgba(34, 240, 137, 0.12);
+    background-color: rgba(34, 240, 137, 0.05) !important;
+  }
+}
+
+.cf-row-updated td {
+  animation: cf-row-glow 1s ease-out 1;
+}
+
+@keyframes cf-row-shrink-exit {
+  to {
+    opacity: 0;
+    transform: scaleY(0.25) translateY(-14px);
+    max-height: 0;
+  }
+}
+
+.cf-row-exit td {
+  animation: cf-row-shrink-exit 0.48s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.cf-glass-card {
+  border-radius: 20px;
+  border: 1px solid rgba(100, 116, 139, 0.28);
+  background: rgba(18, 21, 28, 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+body.light-theme .cf-glass-card {
+  border-radius: 20px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  backdrop-filter: none;
+}
+
+body.dark-theme:not(.light-theme) .app-shell .cf-glass-card:hover,
+body.deep-blue-theme:not(.light-theme) .app-shell .cf-glass-card:hover {
+  border-color: rgba(34, 240, 137, 0.4);
+  box-shadow: 0 0 26px rgba(34, 240, 137, 0.07);
+}
+
+@keyframes cf-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cf-data-loader {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid rgba(148, 163, 184, 0.22);
+  border-top-color: rgba(34, 240, 137, 0.85);
+  border-right-color: rgba(125, 211, 252, 0.45);
+  animation: cf-orbit 0.95s linear infinite;
+}
+
+.cf-breach-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.cf-breach-progress > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #facc15, #fb923c, #ef4444);
+  transition: width 0.35s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cf-row-updated td,
+  .cf-row-exit td,
+  .cf-data-loader {
+    animation: none !important;
+  }
 }
 
 /* تم Tigers — مشکی + قرمز با خطوط عمودی */
@@ -1660,4 +1942,305 @@ body.tigers-theme .app-shell [class*='border-white/10'] {
 .tigers-puzzle-mask {
   clip-path: polygon(0 10%, 12% 0, 44% 0, 52% 8%, 86% 8%, 100% 20%, 100% 88%, 88% 100%, 18% 100%, 0 84%);
   overflow: hidden;
+}
+
+/* ========== Auth / Welcome — premium ambient ========== */
+.auth-premium-base {
+  background: linear-gradient(152deg, #05080f 0%, #0c1222 38%, #111827 72%, #0b1120 100%);
+}
+.auth-premium-aurora {
+  background:
+    radial-gradient(ellipse 100% 80% at 18% -8%, rgba(99, 102, 241, 0.38), transparent 55%),
+    radial-gradient(ellipse 80% 60% at 96% 102%, rgba(6, 182, 212, 0.22), transparent 50%),
+    radial-gradient(ellipse 55% 45% at 52% 48%, rgba(139, 92, 246, 0.14), transparent 58%);
+  animation: authAuroraShift 22s ease-in-out infinite alternate;
+}
+@keyframes authAuroraShift {
+  0% {
+    opacity: 0.9;
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.035) translate3d(-1.2%, 1%, 0);
+  }
+}
+.auth-premium-mesh {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: radial-gradient(ellipse 90% 80% at 50% 35%, black 15%, transparent 72%);
+}
+@keyframes authKenBurns {
+  0% {
+    transform: scale(1) translate3d(0, 0, 0);
+  }
+  100% {
+    transform: scale(1.075) translate3d(-1.1%, 0.7%, 0);
+  }
+}
+.auth-premium-kenburns {
+  animation: authKenBurns 38s ease-in-out infinite alternate;
+}
+.auth-premium-grain {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+@keyframes authOrbFloatA {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-4%, 5%, 0) scale(1.06);
+  }
+}
+@keyframes authOrbFloatB {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(5%, -4%, 0) scale(1.07);
+  }
+}
+@keyframes authOrbPulseC {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+}
+.auth-premium-orb-a {
+  animation: authOrbFloatA 26s ease-in-out infinite;
+}
+.auth-premium-orb-b {
+  animation: authOrbFloatB 30s ease-in-out infinite;
+}
+.auth-premium-orb-c {
+  animation: authOrbPulseC 19s ease-in-out infinite;
+}
+
+.auth-glass-card {
+  border-radius: 1rem;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.025) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  box-shadow:
+    0 20px 48px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(14px);
+}
+.auth-bar {
+  animation: authBarGrow 2.8s ease-in-out infinite alternate;
+  transform-origin: bottom center;
+}
+@keyframes authBarGrow {
+  from {
+    transform: scaleY(0.88);
+    opacity: 0.78;
+    filter: brightness(0.92);
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+    filter: brightness(1.1);
+  }
+}
+.auth-shine-sweep {
+  animation: authShineDrift 12s ease-in-out infinite alternate;
+  opacity: 0.55;
+}
+@keyframes authShineDrift {
+  0% {
+    opacity: 0.35;
+    transform: translateX(-6%);
+  }
+  100% {
+    opacity: 0.65;
+    transform: translateX(6%);
+  }
+}
+@keyframes authPulseSoft {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.2);
+  }
+  50% {
+    box-shadow: 0 0 14px 1px rgba(52, 211, 153, 0.18);
+  }
+}
+.auth-pulse-soft {
+  animation: authPulseSoft 3.2s ease-in-out infinite;
+}
+@keyframes authCount {
+  0%,
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.94;
+    transform: translateY(-2px);
+  }
+}
+.auth-count-up {
+  animation: authCount 4.5s ease-in-out infinite;
+}
+
+.auth-form-shell {
+  background: linear-gradient(165deg, rgba(15, 23, 42, 0.78) 0%, rgba(3, 7, 18, 0.9) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 28px 56px -12px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(22px);
+}
+
+@keyframes authHeroCardFloat {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.015);
+  }
+}
+.auth-hero-video-card {
+  animation: authHeroCardFloat 9s ease-in-out infinite;
+  transform-origin: center center;
+}
+.auth-hero-shine {
+  animation: authShineDrift 14s ease-in-out infinite alternate;
+  opacity: 0.42;
+}
+@media (prefers-reduced-motion: reduce) {
+  .auth-hero-video-card {
+    animation: none;
+  }
+  .auth-hero-shine {
+    animation: none;
+  }
+  .auth-hero-mesh,
+  .auth-hero-orb,
+  .auth-hero-spark-path {
+    animation: none !important;
+  }
+}
+
+@keyframes authHeroMeshMove {
+  0%,
+  100% {
+    background-position: 0% 50%, 100% 50%, 50% 0%;
+    filter: hue-rotate(0deg);
+  }
+  50% {
+    background-position: 100% 50%, 0% 50%, 50% 100%;
+    filter: hue-rotate(12deg);
+  }
+}
+.auth-hero-mesh {
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 30%, rgba(99, 102, 241, 0.45), transparent 55%),
+    radial-gradient(ellipse 70% 50% at 85% 70%, rgba(34, 211, 238, 0.28), transparent 50%),
+    radial-gradient(ellipse 60% 40% at 50% 90%, rgba(167, 139, 250, 0.22), transparent 45%),
+    linear-gradient(145deg, #0f172a 0%, #020617 50%, #1e1b4b 100%);
+  background-size: 120% 120%, 130% 130%, 100% 100%, 100% 100%;
+  animation: authHeroMeshMove 14s ease-in-out infinite;
+}
+.auth-hero-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(40px);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.auth-hero-orb-a {
+  width: 45%;
+  height: 45%;
+  top: -8%;
+  right: -5%;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.7), rgba(34, 211, 238, 0.35));
+  animation: authOrbA 11s ease-in-out infinite;
+}
+.auth-hero-orb-b {
+  width: 38%;
+  height: 38%;
+  bottom: -5%;
+  left: -8%;
+  background: linear-gradient(200deg, rgba(236, 72, 153, 0.35), rgba(99, 102, 241, 0.45));
+  animation: authOrbB 13s ease-in-out infinite;
+}
+.auth-hero-orb-c {
+  width: 28%;
+  height: 28%;
+  top: 40%;
+  left: 35%;
+  background: rgba(52, 211, 153, 0.25);
+  animation: authOrbC 9s ease-in-out infinite;
+}
+@keyframes authOrbA {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-12%, 8%) scale(1.08);
+  }
+}
+@keyframes authOrbB {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(10%, -10%) scale(1.12);
+  }
+}
+@keyframes authOrbC {
+  0%,
+  100% {
+    transform: translate(0, 0);
+    opacity: 0.35;
+  }
+  50% {
+    transform: translate(-6%, 12%);
+    opacity: 0.55;
+  }
+}
+@keyframes auth-hero-icon-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.auth-hero-scene-icon {
+  animation: auth-hero-icon-float 3.6s ease-in-out infinite;
+}
+
+@keyframes authSparkDraw {
+  0% {
+    stroke-dashoffset: 520;
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.95;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.5;
+  }
+}
+.auth-hero-spark-path {
+  stroke-dasharray: 520;
+  stroke-dashoffset: 520;
+  animation: authSparkDraw 5.5s ease-in-out infinite;
 }

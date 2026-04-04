@@ -77,6 +77,7 @@ export default function GlobalSearchModal({ onClose }: { onClose: () => void }) 
   const storeBooks = useStore((s) => s.books);
   const businessType = useStore((s) => s.shopSettings.business_type);
   const storeCustomers = useStore((s) => s.customers);
+  const userRole = useStore((s) => s.currentUser?.role);
 
   const typeLabel = (type: SearchResult['type']) =>
     type === 'product' ? t('result_type_product') : type === 'customer' ? t('result_type_customer') : t('result_type_page');
@@ -85,48 +86,63 @@ export default function GlobalSearchModal({ onClose }: { onClose: () => void }) 
   const q = query.trim();
   if (q.length >= 1) {
     const qq = q.toLowerCase();
-    const inventoryAsProducts: Product[] =
-      businessType === 'bookstore'
-        ? storeBooks.map(bookToProductForSale)
-        : storeProducts;
-    inventoryAsProducts
-      .filter(
-        (p: Product) =>
-          p.name.includes(q) ||
-          String(p.barcode || '').includes(q) ||
-          String(p.product_code || '').toLowerCase().includes(qq)
-      )
-      .slice(0, 5)
-      .forEach((p: Product) => {
-        results.push({
-          type: 'product',
-          title: p.name,
-          subtitle: `${t('quantity')}: ${p.stock_shop} | ${t('price')}: ${Number(p.sale_price).toLocaleString()} ؋`,
-          page: 'products',
-          icon: businessType === 'bookstore' ? '📚' : '📦',
+    if (userRole !== 'super_admin') {
+      const inventoryAsProducts: Product[] =
+        businessType === 'bookstore'
+          ? storeBooks.map(bookToProductForSale)
+          : storeProducts;
+      inventoryAsProducts
+        .filter(
+          (p: Product) =>
+            p.name.includes(q) ||
+            String(p.barcode || '').includes(q) ||
+            String(p.product_code || '').toLowerCase().includes(qq)
+        )
+        .slice(0, 5)
+        .forEach((p: Product) => {
+          results.push({
+            type: 'product',
+            title: p.name,
+            subtitle: `${t('quantity')}: ${p.stock_shop} | ${t('price')}: ${Number(p.sale_price).toLocaleString()} ؋`,
+            page: 'products',
+            icon: businessType === 'bookstore' ? '📚' : '📦',
+          });
         });
-      });
-    storeCustomers
-      .filter((c: Customer) => c.name.includes(q) || c.phone.includes(q))
-      .slice(0, 4)
-      .forEach((c: Customer) => {
-        results.push({
-          type: 'customer',
-          title: c.name,
-          subtitle: `${t('phone')}: ${c.phone}`,
-          page: 'customers',
-          icon: '👤',
+      storeCustomers
+        .filter((c: Customer) => c.name.includes(q) || c.phone.includes(q))
+        .slice(0, 4)
+        .forEach((c: Customer) => {
+          results.push({
+            type: 'customer',
+            title: c.name,
+            subtitle: `${t('phone')}: ${c.phone}`,
+            page: 'customers',
+            icon: '👤',
+          });
         });
-      });
-    const pages = [
-      { title: t('products'), page: 'products', icon: '📦' },
-      { title: t('customers'), page: 'customers', icon: '👥' },
-      { title: t('sales'), page: 'sales', icon: '🛒' },
-      { title: t('debts'), page: 'debts', icon: '💰' },
-      { title: t('reports'), page: 'reports', icon: '📊' },
-      { title: t('product_sales_ranking'), page: 'product-sales-ranking', icon: '📈' },
-      { title: t('reorder_list_title'), page: 'reorder-list', icon: '📋' },
-    ].filter((p) => p.title.toLowerCase().includes(qq) || p.page.includes(qq));
+    }
+    const pages =
+      userRole === 'super_admin'
+        ? [
+            { title: t('dashboard'), page: 'dashboard', icon: '📊' },
+            { title: t('manage_shops'), page: 'tenants', icon: '🏪' },
+            { title: t('billing'), page: 'billing', icon: '💳' },
+            { title: t('broadcast_notifications'), page: 'admin-notifications', icon: '📣' },
+            { title: t('general_reports'), page: 'reports', icon: '📄' },
+            { title: t('customers_crm_hub_title'), page: 'customers', icon: '🤝' },
+            { title: t('business_types'), page: 'business-types', icon: '🏷️' },
+            { title: t('settings'), page: 'settings', icon: '⚙️' },
+          ].filter((p) => p.title.toLowerCase().includes(qq) || p.page.includes(qq))
+        : [
+            { title: t('products'), page: 'products', icon: '📦' },
+            { title: t('customers_crm_hub_title'), page: 'customers', icon: '👥' },
+            { title: t('sales'), page: 'sales', icon: '🛒' },
+            { title: t('debts'), page: 'debts', icon: '💰' },
+            { title: t('reports'), page: 'reports', icon: '📊' },
+            { title: t('product_sales_ranking'), page: 'product-sales-ranking', icon: '📈' },
+            { title: t('reorder_list_title'), page: 'reorder-list', icon: '📋' },
+            { title: t('shop_journal'), page: 'journal', icon: '📰' },
+          ].filter((p) => p.title.toLowerCase().includes(qq) || p.page.includes(qq));
     pages.forEach((p) => results.push({ ...p, type: 'page', subtitle: '' }));
   }
 
@@ -181,7 +197,11 @@ export default function GlobalSearchModal({ onClose }: { onClose: () => void }) 
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={t('search_products_customers_pages')}
+            placeholder={
+              userRole === 'super_admin'
+                ? 'جستجوی بخش‌های پنل مادر (دکان‌ها، صورتحساب، …)'
+                : t('search_products_customers_pages')
+            }
             className="flex-1 min-w-0 bg-transparent text-white text-sm placeholder-slate-400 outline-none"
             dir={language === 'english' ? 'ltr' : 'rtl'}
           />

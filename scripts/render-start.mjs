@@ -1,31 +1,18 @@
 /**
- * Render: مسیر SQLite مطلق + prisma db push سپس سرور API.
- * file:./... گاهی روی Linux/Render باعث شکست db push می‌شود.
+ * Render: prisma migrate deploy (بدون data loss) سپس سرور API.
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 process.chdir(root);
 
-const prismaDir = path.join(root, 'server', 'prisma');
-fs.mkdirSync(prismaDir, { recursive: true });
-
-const rawDb = String(process.env.DATABASE_URL || '').trim();
-const useAbsoluteSqlite =
-  !rawDb ||
-  rawDb.startsWith('file:./') ||
-  rawDb === 'file:./server/prisma/dev.db';
-
-if (useAbsoluteSqlite) {
-  const dbFile = path.join(prismaDir, 'dev.db');
-  process.env.DATABASE_URL = pathToFileURL(dbFile).href;
-  console.log('[render-start] DATABASE_URL → absolute SQLite (dev.db under server/prisma)');
-} else {
-  console.log('[render-start] DATABASE_URL from env (unchanged)');
+if (!String(process.env.DATABASE_URL || '').trim()) {
+  console.error('[render-start] DATABASE_URL is missing. Set it to your PostgreSQL URL (Render Postgres / Neon).');
+  process.exit(1);
 }
 
 function runShell(label, cmd) {
@@ -42,9 +29,13 @@ function runShell(label, cmd) {
   }
 }
 
-runShell('Step 1: prisma db push --accept-data-loss', 'npx prisma db push --accept-data-loss');
+runShell('Step 1: prisma migrate deploy', 'npx prisma migrate deploy');
 
 const indexJs = path.join(root, 'server', 'index.js');
+if (!fs.existsSync(indexJs)) {
+  console.error('[render-start] server/index.js not found');
+  process.exit(1);
+}
 console.log('[render-start] Step 2: API server');
 const node = spawnSync(process.execPath, ['--no-warnings', indexJs], {
   stdio: 'inherit',

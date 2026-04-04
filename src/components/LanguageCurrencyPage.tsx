@@ -12,7 +12,7 @@ const LANG_BADGE: Record<string, string> = {
 };
 
 export default function LanguageCurrencyPage() {
-  const { language, setLanguage, currency, setCurrency, theme, setTheme, t, currencies, updateExchangeRate } = useApp();
+  const { language, setLanguage, currency, setCurrency, theme, setTheme, t, currencies, updateExchangeRate, isDark } = useApp();
   const { success } = useToast();
   const [languages] = useState(() => mockLanguages.filter((l) => l.is_active));
   const [converterAmount, setConverterAmount] = useState('1000');
@@ -58,38 +58,65 @@ export default function LanguageCurrencyPage() {
   return (
     <div className="space-y-8 fade-in max-w-5xl mx-auto">
       {/* Hero */}
-      <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/40 p-8 shadow-2xl">
-        <div className="absolute -left-20 -top-20 h-56 w-56 rounded-full bg-emerald-500/10 blur-3xl pointer-events-none" />
-        <div className="absolute -right-16 bottom-0 h-40 w-40 rounded-full bg-violet-500/10 blur-3xl pointer-events-none" />
+      <div
+        className={`relative overflow-hidden rounded-3xl border p-8 shadow-2xl ${
+          isDark
+            ? 'border-white/10 bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/40'
+            : 'border-slate-200 bg-gradient-to-br from-white via-slate-50 to-indigo-50/95'
+        }`}
+      >
+        <div
+          className={`absolute -left-20 -top-20 h-56 w-56 rounded-full blur-3xl pointer-events-none ${
+            isDark ? 'bg-emerald-500/10' : ''
+          }`}
+          style={!isDark ? { background: 'rgba(16, 185, 129, 0.12)' } : undefined}
+        />
+        <div
+          className={`absolute -right-16 bottom-0 h-40 w-40 rounded-full blur-3xl pointer-events-none ${
+            isDark ? 'bg-violet-500/10' : 'bg-indigo-200/40'
+          }`}
+        />
         <div className="relative flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
           <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-emerald-300/90 text-xs font-medium mb-3">
+            <div
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium mb-3 ${
+                isDark
+                  ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300/90'
+                  : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+              }`}
+            >
               <Sparkles size={14} />
               تجربه چندزبانه و چندارزی
             </div>
-            <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">زبان، ارز و ظاهر</h1>
-            <p className="text-slate-400 text-sm mt-2 max-w-xl leading-relaxed">
+            <h1 className={`text-2xl sm:text-3xl font-bold tracking-tight ${textTitle}`}>زبان، ارز و ظاهر</h1>
+            <p className={`text-sm mt-2 max-w-xl leading-relaxed ${textMuted}`}>
               زبان رابط، جهت متن، تم کلی و واحد پول را از یک مرکز مدیریت کنید. تبدیل ارز بر اساس نرخ‌هایی است که اینجا تعریف می‌کنید.
             </p>
           </div>
-          <div className="flex items-center gap-3 text-slate-500 text-xs shrink-0">
-            <Globe size={36} className="text-emerald-500/40" strokeWidth={1.25} />
+          <div className={`flex items-center gap-3 text-xs shrink-0 ${textSubtle}`}>
+            <Globe size={36} className={isDark ? 'text-emerald-500/40' : 'text-emerald-600/50'} strokeWidth={1.25} />
           </div>
         </div>
       </div>
 
       {/* Theme */}
-      <section className="rounded-2xl border border-white/10 bg-slate-900/40 backdrop-blur-sm p-6 sm:p-8 shadow-xl">
+      <section className={sectionCard}>
         <div className="flex items-start gap-4 mb-6">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/30 to-violet-600/20 border border-indigo-400/20">
-            <Monitor size={22} className="text-indigo-300" />
+          <div
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border ${
+              isDark
+                ? 'bg-gradient-to-br from-indigo-500/30 to-violet-600/20 border-indigo-400/20'
+                : 'bg-indigo-50 border-indigo-200'
+            }`}
+          >
+            <Monitor size={22} className={isDark ? 'text-indigo-300' : 'text-indigo-600'} />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-white">تم ظاهری</h2>
-            <p className="text-slate-500 text-sm mt-0.5">رنگ‌بندی کلی پنل — بلافاصله اعمال می‌شود</p>
+            <h2 className={`text-lg font-semibold ${textTitle}`}>تم ظاهری</h2>
+            <p className={`text-sm mt-0.5 ${textMuted}`}>رنگ‌بندی کلی پنل — بلافاصله اعمال می‌شود</p>
           </div>
         </div>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
           {themeOptions.map(opt => {
             const Icon = opt.icon;
             const isSelected = theme === opt.value;
@@ -100,23 +127,45 @@ export default function LanguageCurrencyPage() {
                 onClick={() => setTheme(opt.value)}
                 className={`group relative flex items-center gap-4 p-5 rounded-2xl border text-right transition-all duration-200 ${
                   isSelected
-                    ? 'border-emerald-500/50 bg-emerald-500/[0.08] shadow-lg shadow-emerald-900/20'
-                    : 'border-slate-700/80 bg-slate-800/30 hover:border-slate-600 hover:bg-slate-800/50'
+                    ? isDark
+                      ? 'border-emerald-500/50 bg-emerald-500/[0.08] shadow-lg shadow-emerald-900/20'
+                      : 'border-emerald-500/60 bg-emerald-50 shadow-md shadow-emerald-900/10'
+                    : isDark
+                      ? 'border-slate-700/80 bg-slate-800/30 hover:border-slate-600 hover:bg-slate-800/50'
+                      : 'border-slate-200 bg-slate-50/80 hover:border-slate-300 hover:bg-white'
                 }`}
               >
-                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                  isSelected ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-500 group-hover:text-slate-300'
-                }`}>
+                <div
+                  className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    isSelected
+                      ? isDark
+                        ? 'bg-emerald-500/20 text-emerald-400'
+                        : 'bg-emerald-100 text-emerald-700'
+                      : isDark
+                        ? 'bg-slate-800 text-slate-500 group-hover:text-slate-300'
+                        : 'bg-white text-slate-400 border border-slate-200 group-hover:text-slate-600'
+                  }`}
+                >
                   <Icon size={20} />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className={`font-semibold ${isSelected ? 'text-emerald-300' : 'text-white'}`}>{opt.label}</p>
-                  <p className="text-slate-500 text-xs mt-1 leading-relaxed">{opt.desc}</p>
+                  <p
+                    className={`font-semibold ${
+                      isSelected
+                        ? isDark
+                          ? 'text-emerald-300'
+                          : 'text-emerald-800'
+                        : textTitle
+                    }`}
+                  >
+                    {opt.label}
+                  </p>
+                  <p className={`text-xs mt-1 leading-relaxed ${textMuted}`}>{opt.desc}</p>
                   <div className={`mt-2 h-2.5 w-24 rounded-full bg-gradient-to-r ${opt.swatch}`} />
                 </div>
                 {isSelected && (
                   <div className="absolute top-3 left-3 sm:left-auto sm:right-3">
-                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-white shadow-md">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-600 text-white shadow-md">
                       <Check size={14} strokeWidth={3} />
                     </span>
                   </div>
@@ -128,14 +177,20 @@ export default function LanguageCurrencyPage() {
       </section>
 
       {/* Language */}
-      <section className="rounded-2xl border border-white/10 bg-slate-900/40 backdrop-blur-sm p-6 sm:p-8 shadow-xl">
+      <section className={sectionCard}>
         <div className="flex items-start gap-4 mb-6">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-teal-500/30 to-cyan-600/20 border border-teal-400/20">
-            <Languages size={22} className="text-teal-300" />
+          <div
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border ${
+              isDark
+                ? 'bg-gradient-to-br from-teal-500/30 to-cyan-600/20 border-teal-400/20'
+                : 'bg-teal-50 border-teal-200'
+            }`}
+          >
+            <Languages size={22} className={isDark ? 'text-teal-300' : 'text-teal-700'} />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-white">زبان رابط کاربری</h2>
-            <p className="text-slate-500 text-sm mt-0.5">برچسب‌ها و منوها به زبان انتخابی نمایش داده می‌شوند</p>
+            <h2 className={`text-lg font-semibold ${textTitle}`}>زبان رابط کاربری</h2>
+            <p className={`text-sm mt-0.5 ${textMuted}`}>برچسب‌ها و منوها به زبان انتخابی نمایش داده می‌شوند</p>
           </div>
         </div>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -149,24 +204,56 @@ export default function LanguageCurrencyPage() {
                 onClick={() => setLanguage(lang.code as LangCode)}
                 className={`relative flex flex-col items-stretch p-5 rounded-2xl border text-right transition-all duration-200 ${
                   isSelected
-                    ? 'border-teal-500/50 bg-gradient-to-br from-teal-500/10 to-cyan-900/10 ring-1 ring-teal-500/20'
-                    : 'border-slate-700/80 bg-slate-800/25 hover:border-slate-600 hover:bg-slate-800/40'
+                    ? isDark
+                      ? 'border-teal-500/50 bg-gradient-to-br from-teal-500/10 to-cyan-900/10 ring-1 ring-teal-500/20'
+                      : 'border-teal-500/70 bg-teal-50/90 ring-1 ring-teal-200'
+                    : isDark
+                      ? 'border-slate-700/80 bg-slate-800/25 hover:border-slate-600 hover:bg-slate-800/40'
+                      : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-white'
                 }`}
               >
                 <div className="flex items-center justify-between gap-3 mb-3">
-                  <span className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-bold ${
-                    isSelected ? 'bg-teal-500/25 text-teal-200' : 'bg-slate-800 text-slate-400'
-                  }`}>
+                  <span
+                    className={`flex h-10 w-10 items-center justify-center rounded-xl text-sm font-bold ${
+                      isSelected
+                        ? isDark
+                          ? 'bg-teal-500/25 text-teal-200'
+                          : 'bg-teal-100 text-teal-800'
+                        : isDark
+                          ? 'bg-slate-800 text-slate-400'
+                          : 'bg-white text-slate-500 border border-slate-200'
+                    }`}
+                  >
                     {badge}
                   </span>
-                  {isSelected && <Check size={18} className="text-teal-400 shrink-0" />}
+                  {isSelected && (
+                    <Check size={18} className={`shrink-0 ${isDark ? 'text-teal-400' : 'text-teal-600'}`} />
+                  )}
                 </div>
-                <p className={`font-semibold text-base ${isSelected ? 'text-teal-200' : 'text-white'}`}>{lang.name}</p>
+                <p
+                  className={`font-semibold text-base ${
+                    isSelected ? (isDark ? 'text-teal-200' : 'text-teal-900') : textTitle
+                  }`}
+                >
+                  {lang.name}
+                </p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-950/50 text-slate-500 border border-white/5">
+                  <span
+                    className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md border ${
+                      isDark
+                        ? 'bg-slate-950/50 text-slate-500 border-white/5'
+                        : 'bg-slate-100 text-slate-600 border-slate-200'
+                    }`}
+                  >
                     {lang.code}
                   </span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-950/50 text-slate-500 border border-white/5">
+                  <span
+                    className={`text-[10px] px-2 py-0.5 rounded-md border ${
+                      isDark
+                        ? 'bg-slate-950/50 text-slate-500 border-white/5'
+                        : 'bg-slate-100 text-slate-600 border-slate-200'
+                    }`}
+                  >
                     {lang.direction === 'rtl' ? 'راست‌به‌چپ' : 'چپ‌به‌راست'}
                   </span>
                 </div>
@@ -177,22 +264,32 @@ export default function LanguageCurrencyPage() {
       </section>
 
       {/* Currency */}
-      <section className="rounded-2xl border border-white/10 bg-slate-900/40 backdrop-blur-sm p-6 sm:p-8 shadow-xl">
+      <section className={sectionCard}>
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div className="flex items-start gap-4">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500/25 to-emerald-600/20 border border-amber-400/15">
-              <DollarSign size={22} className="text-amber-300" />
+            <div
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border ${
+                isDark
+                  ? 'bg-gradient-to-br from-amber-500/25 to-emerald-600/20 border-amber-400/15'
+                  : 'bg-amber-50 border-amber-200'
+              }`}
+            >
+              <DollarSign size={22} className={isDark ? 'text-amber-300' : 'text-amber-700'} />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-white">ارز پیش‌فرض و نرخ‌ها</h2>
-              <p className="text-slate-500 text-sm mt-0.5">ارز فعال را انتخاب کنید و نرخ برابری نسبت به افغانی را ویرایش کنید</p>
+              <h2 className={`text-lg font-semibold ${textTitle}`}>ارز پیش‌فرض و نرخ‌ها</h2>
+              <p className={`text-sm mt-0.5 ${textMuted}`}>ارز فعال را انتخاب کنید و نرخ برابری نسبت به افغانی را ویرایش کنید</p>
             </div>
           </div>
           <button
             type="button"
             onClick={handleSave}
             className={`inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all shrink-0 ${
-              saved ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/30'
+              saved
+                ? isDark
+                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                  : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20'
             }`}
           >
             {saved ? <Check size={17} /> : <Save size={17} />}
@@ -210,24 +307,44 @@ export default function LanguageCurrencyPage() {
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setCurrency(c.code); } }}
               className={`flex flex-col sm:flex-row sm:items-center gap-4 p-4 sm:p-5 rounded-2xl border cursor-pointer transition-all ${
                 currency === c.code
-                  ? 'border-emerald-500/45 bg-emerald-500/[0.07] ring-1 ring-emerald-500/15'
-                  : 'border-slate-700/70 bg-slate-800/20 hover:border-slate-600'
+                  ? isDark
+                    ? 'border-emerald-500/45 bg-emerald-500/[0.07] ring-1 ring-emerald-500/15'
+                    : 'border-emerald-500/60 bg-emerald-50 ring-1 ring-emerald-200'
+                  : isDark
+                    ? 'border-slate-700/70 bg-slate-800/20 hover:border-slate-600'
+                    : 'border-slate-200 bg-slate-50/90 hover:border-slate-300 hover:bg-white'
               }`}
             >
-              <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-lg font-bold ${
-                currency === c.code ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-800 text-slate-300'
-              }`}>
+              <div
+                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-lg font-bold ${
+                  currency === c.code
+                    ? isDark
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : 'bg-emerald-100 text-emerald-800'
+                    : isDark
+                      ? 'bg-slate-800 text-slate-300'
+                      : 'bg-white text-slate-600 border border-slate-200'
+                }`}
+              >
                 {c.symbol}
               </div>
               <div className="flex-1 min-w-0">
-                <p className={`font-semibold ${currency === c.code ? 'text-emerald-300' : 'text-white'}`}>
+                <p
+                  className={`font-semibold ${
+                    currency === c.code
+                      ? isDark
+                        ? 'text-emerald-300'
+                        : 'text-emerald-800'
+                      : textTitle
+                  }`}
+                >
                   {c.name}
-                  <span className="text-slate-500 font-normal text-sm mr-2">({c.code})</span>
+                  <span className={`font-normal text-sm mr-2 ${textSubtle}`}>({c.code})</span>
                 </p>
-                <p className="text-xs text-slate-500 mt-1">۱ {c.code} معادل {c.exchange_rate} افغانی (پایه محاسبه)</p>
+                <p className={`text-xs mt-1 ${textMuted}`}>۱ {c.code} معادل {c.exchange_rate} افغانی (پایه محاسبه)</p>
               </div>
               <div className="flex items-center gap-3 sm:shrink-0">
-                <label className="text-slate-500 text-xs whitespace-nowrap">نرخ (؋)</label>
+                <label className={`text-xs whitespace-nowrap ${textMuted}`}>نرخ (؋)</label>
                 <input
                   type="number"
                   value={c.exchange_rate}
@@ -235,36 +352,60 @@ export default function LanguageCurrencyPage() {
                   onClick={e => e.stopPropagation()}
                   step="0.01"
                   disabled={c.code === 'AFN'}
-                  className="w-28 sm:w-32 bg-slate-950/60 border border-slate-600/80 rounded-xl px-3 py-2 text-white text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 outline-none text-center disabled:opacity-50"
+                  className={`w-28 sm:w-32 rounded-xl px-3 py-2 text-sm focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 outline-none text-center disabled:opacity-50 ${
+                    isDark
+                      ? 'bg-slate-950/60 border border-slate-600/80 text-white'
+                      : 'bg-white border border-slate-300 text-slate-900'
+                  }`}
                 />
-                {currency === c.code && <Check size={18} className="text-emerald-400 shrink-0 hidden sm:block" />}
+                {currency === c.code && (
+                  <Check size={18} className={`shrink-0 hidden sm:block ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`} />
+                )}
               </div>
             </div>
           ))}
         </div>
 
         {/* Converter */}
-        <div className="relative overflow-hidden rounded-2xl border border-emerald-500/15 bg-gradient-to-b from-slate-950/80 to-slate-900/50 p-6 sm:p-7">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full blur-2xl pointer-events-none" />
-          <h3 className="text-white font-semibold mb-5 flex items-center gap-2 relative">
-            <RefreshCw size={17} className="text-emerald-400" />
+        <div
+          className={`relative overflow-hidden rounded-2xl border p-6 sm:p-7 ${
+            isDark
+              ? 'border-emerald-500/15 bg-gradient-to-b from-slate-950/80 to-slate-900/50'
+              : 'border-emerald-200/80 bg-gradient-to-b from-emerald-50/90 to-white'
+          }`}
+        >
+          <div
+            className={`absolute top-0 right-0 w-32 h-32 rounded-full blur-2xl pointer-events-none ${
+              isDark ? 'bg-emerald-500/5' : 'bg-emerald-400/15'
+            }`}
+          />
+          <h3 className={`font-semibold mb-5 flex items-center gap-2 relative ${textTitle}`}>
+            <RefreshCw size={17} className={isDark ? 'text-emerald-400' : 'text-emerald-600'} />
             تبدیل سریع ارز
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-4 items-end relative">
             <div>
-              <label className="text-slate-500 text-xs block mb-2">مقدار</label>
+              <label className={`text-xs block mb-2 ${textMuted}`}>مقدار</label>
               <input
                 type="number"
                 value={converterAmount}
                 onChange={e => setConverterAmount(e.target.value)}
-                className="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:border-emerald-500 outline-none"
+                className={`w-full rounded-xl px-4 py-3 text-sm focus:border-emerald-500 outline-none ${
+                  isDark
+                    ? 'bg-slate-900/80 border border-slate-700 text-white'
+                    : 'bg-white border border-slate-300 text-slate-900'
+                }`}
               />
             </div>
             <div className="flex justify-center pb-1">
               <button
                 type="button"
                 onClick={swapCurrencies}
-                className="p-3 rounded-xl bg-slate-800 border border-slate-600 text-emerald-400 hover:bg-slate-700 hover:border-emerald-500/40 transition-colors"
+                className={`p-3 rounded-xl border transition-colors ${
+                  isDark
+                    ? 'bg-slate-800 border-slate-600 text-emerald-400 hover:bg-slate-700 hover:border-emerald-500/40'
+                    : 'bg-white border-slate-300 text-emerald-700 hover:bg-emerald-50 hover:border-emerald-400'
+                }`}
                 title="جابه‌جایی از و به"
               >
                 <ArrowLeftRight size={18} />
@@ -272,35 +413,47 @@ export default function LanguageCurrencyPage() {
             </div>
             <div className="grid grid-cols-2 sm:contents gap-3">
               <div>
-                <label className="text-slate-500 text-xs block mb-2">از</label>
+                <label className={`text-xs block mb-2 ${textMuted}`}>از</label>
                 <select
                   value={converterFrom}
                   onChange={e => setConverterFrom(e.target.value as CurrencyCode)}
-                  className="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-3 text-white text-sm focus:border-emerald-500 outline-none"
+                  className={`w-full rounded-xl px-3 py-3 text-sm focus:border-emerald-500 outline-none ${
+                    isDark
+                      ? 'bg-slate-900/80 border border-slate-700 text-white'
+                      : 'bg-white border border-slate-300 text-slate-900'
+                  }`}
                 >
                   {currencies.map(c => <option key={c.code} value={c.code}>{c.code} {c.symbol}</option>)}
                 </select>
               </div>
               <div className="sm:col-start-3">
-                <label className="text-slate-500 text-xs block mb-2">به</label>
+                <label className={`text-xs block mb-2 ${textMuted}`}>به</label>
                 <select
                   value={converterTo}
                   onChange={e => setConverterTo(e.target.value as CurrencyCode)}
-                  className="w-full bg-slate-900/80 border border-slate-700 rounded-xl px-3 py-3 text-white text-sm focus:border-emerald-500 outline-none"
+                  className={`w-full rounded-xl px-3 py-3 text-sm focus:border-emerald-500 outline-none ${
+                    isDark
+                      ? 'bg-slate-900/80 border border-slate-700 text-white'
+                      : 'bg-white border border-slate-300 text-slate-900'
+                  }`}
                 >
                   {currencies.map(c => <option key={c.code} value={c.code}>{c.code} {c.symbol}</option>)}
                 </select>
               </div>
             </div>
           </div>
-          <div className="mt-6 p-5 rounded-xl bg-emerald-500/[0.06] border border-emerald-500/10">
-            <p className="text-slate-500 text-xs mb-1">نتیجه</p>
-            <p className="text-white text-xl sm:text-2xl font-bold tracking-tight">
+          <div
+            className={`mt-6 p-5 rounded-xl border ${
+              isDark ? 'bg-emerald-500/[0.06] border-emerald-500/10' : 'bg-white border-emerald-200/80'
+            }`}
+          >
+            <p className={`text-xs mb-1 ${textMuted}`}>نتیجه</p>
+            <p className={`text-xl sm:text-2xl font-bold tracking-tight ${textTitle}`}>
               {parseFloat(converterAmount || '0').toLocaleString()} {converterFrom}
-              <span className="text-slate-600 mx-2 sm:mx-3 font-normal">=</span>
-              <span className="text-emerald-400">{getConverted()} {converterTo}</span>
+              <span className={`mx-2 sm:mx-3 font-normal ${textSubtle}`}>=</span>
+              <span className={isDark ? 'text-emerald-400' : 'text-emerald-700'}>{getConverted()} {converterTo}</span>
             </p>
-            <p className="text-slate-600 text-xs mt-2">
+            <p className={`text-xs mt-2 ${textSubtle}`}>
               نرخ تقریبی: ۱ {converterFrom} ={' '}
               {(() => {
                 const f = currencies.find(c => c.code === converterFrom);

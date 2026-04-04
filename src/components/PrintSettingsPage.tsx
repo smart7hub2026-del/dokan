@@ -1,20 +1,26 @@
 import { useState, useRef, useEffect } from 'react';
-import { Printer, Save, Eye, Upload, X, Store, Phone, MapPin, User } from 'lucide-react';
+import { Printer, Save, Eye, Upload, X, Store, Phone, MapPin, User, Globe, AlignLeft, ImageIcon } from 'lucide-react';
 import { useStore, type ShopSettings } from '../store/useStore';
 import { useToast } from './Toast';
 
 export default function PrintSettingsPage() {
-  const { success } = useToast();
+  const { success, error: toastError } = useToast();
   const shopSettings = useStore(s => s.shopSettings);
   const updateShopSettings = useStore(s => s.updateShopSettings);
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<'print' | 'shop'>('print');
   const [logoDraft, setLogoDraft] = useState<string | null>(null);
+  const [bannerDraft, setBannerDraft] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const bannerRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setLogoDraft(shopSettings.logo_url || null);
   }, [shopSettings.logo_url]);
+
+  useEffect(() => {
+    setBannerDraft(shopSettings.shop_banner_url || null);
+  }, [shopSettings.shop_banner_url]);
 
   const shopInfo = {
     name: shopSettings.shop_name,
@@ -22,25 +28,54 @@ export default function PrintSettingsPage() {
     address: shopSettings.shop_address,
     phone: shopSettings.shop_phone,
     logo: logoDraft,
+    tagline: shopSettings.shop_tagline || '',
+    website: shopSettings.shop_website || '',
+    about: shopSettings.shop_about || '',
+    banner: bannerDraft,
   };
 
-  const setShopField = (key: keyof Pick<ShopSettings, 'shop_name' | 'seller_name' | 'shop_address' | 'shop_phone'>, value: string) => {
+  const setShopField = (
+    key: keyof Pick<
+      ShopSettings,
+      'shop_name' | 'seller_name' | 'shop_address' | 'shop_phone' | 'shop_tagline' | 'shop_website'
+    >,
+    value: string
+  ) => {
     updateShopSettings({ [key]: value });
   };
 
   const handleSave = () => {
-    updateShopSettings({ logo_url: logoDraft || '' });
+    updateShopSettings({ logo_url: logoDraft || '', shop_banner_url: bannerDraft || '' });
     setSaved(true);
-    success('ذخیره شد', 'تنظیمات چاپ و فروشگاه در state فروشگاه ذخیره شد');
+    success('ذخیره شد', 'لوگو و بنر در state فروشگاه ذخیره شد');
     setTimeout(() => setSaved(false), 2200);
+  };
+
+  const readImageDraft = (file: File, setDraft: (u: string | null) => void) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const u = reader.result as string;
+      if (u.length > 620_000) {
+        toastError('حجم زیاد', 'تصویر را کوچک‌تر کنید (حدود زیر ۵۰۰KB)');
+        return;
+      }
+      setDraft(u);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setLogoDraft(reader.result as string);
-    reader.readAsDataURL(file);
+    readImageDraft(file, setLogoDraft);
+    e.target.value = '';
+  };
+
+  const handleBannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    readImageDraft(file, setBannerDraft);
+    e.target.value = '';
   };
 
   const paperSizes: ShopSettings['paper_size'][] = ['A4', 'A5', 'Letter', '80mm', '72mm', '58mm'];
@@ -139,7 +174,7 @@ export default function PrintSettingsPage() {
             onClick={handleSave}
             className={`flex items-center gap-2 text-white px-5 py-2 rounded-xl text-sm font-medium transition-all ${saved ? 'bg-emerald-600' : 'btn-primary'}`}
           >
-            <Save size={16} /> {saved ? '✓ ذخیره شد' : 'ذخیره لوگو'}
+            <Save size={16} /> {saved ? '✓ ذخیره شد' : 'ذخیرهٔ لوگو و بنر'}
           </button>
         </div>
       </div>
@@ -167,7 +202,42 @@ export default function PrintSettingsPage() {
               <Store size={18} /> اطلاعات فروشگاه
             </h3>
             <div>
-              <label className="text-slate-400 text-xs block mb-2">لوگوی فروشگاه</label>
+              <label className="text-slate-400 text-xs flex items-center gap-1.5 mb-2">
+                <ImageIcon size={14} /> بنر / کاور (اختیاری)
+              </label>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                <div
+                  className={`h-24 w-full max-w-md rounded-xl border-2 border-dashed overflow-hidden flex items-center justify-center ${bannerDraft ? 'border-indigo-500' : 'border-slate-600'}`}
+                >
+                  {bannerDraft ? (
+                    <img src={bannerDraft} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="text-slate-500 text-xs px-2 text-center">تصویر پهن برای بالای پروفایل</span>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => bannerRef.current?.click()}
+                    className="flex items-center gap-2 glass text-slate-300 hover:text-white px-4 py-2 rounded-xl text-sm"
+                  >
+                    <Upload size={14} /> آپلود بنر
+                  </button>
+                  {bannerDraft && (
+                    <button
+                      type="button"
+                      onClick={() => setBannerDraft(null)}
+                      className="flex items-center gap-2 text-rose-400 hover:text-rose-300 px-4 py-2 rounded-xl text-sm glass"
+                    >
+                      <X size={14} /> حذف بنر
+                    </button>
+                  )}
+                </div>
+              </div>
+              <input ref={bannerRef} type="file" accept="image/*" className="hidden" onChange={handleBannerUpload} />
+            </div>
+            <div>
+              <label className="text-slate-400 text-xs block mb-2">لوگو / آواتار فروشگاه</label>
               <div className="flex items-center gap-4">
                 <div
                   className={`w-20 h-20 rounded-xl border-2 border-dashed flex items-center justify-center overflow-hidden ${shopInfo.logo ? 'border-indigo-500' : 'border-slate-600 hover:border-slate-500'}`}
@@ -199,6 +269,29 @@ export default function PrintSettingsPage() {
               </div>
               <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
             </div>
+            <div>
+              <label className="text-slate-400 text-xs flex items-center gap-1.5 mb-1.5">
+                <AlignLeft size={14} /> شعار کوتاه
+              </label>
+              <input
+                value={shopSettings.shop_tagline || ''}
+                onChange={e => setShopField('shop_tagline', e.target.value)}
+                placeholder="مثلاً: کیفیت و اعتماد از ۱۳۹۸"
+                className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="text-slate-400 text-xs flex items-center gap-1.5 mb-1.5">
+                <Globe size={14} /> وب‌سایت یا لینک
+              </label>
+              <input
+                dir="ltr"
+                value={shopSettings.shop_website || ''}
+                onChange={e => setShopField('shop_website', e.target.value)}
+                placeholder="https://..."
+                className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:border-indigo-500"
+              />
+            </div>
             {[
               { key: 'shop_name' as const, label: 'نام فروشگاه', icon: <Store size={14} />, value: shopSettings.shop_name },
               { key: 'seller_name' as const, label: 'نام فروشنده (فاکتور)', icon: <User size={14} />, value: shopSettings.seller_name },
@@ -226,20 +319,56 @@ export default function PrintSettingsPage() {
                 className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:border-indigo-500 resize-none"
               />
             </div>
+            <div>
+              <label className="text-slate-400 text-xs flex items-center gap-1.5 mb-1.5">
+                <AlignLeft size={14} /> دربارهٔ فروشگاه
+              </label>
+              <textarea
+                value={shopSettings.shop_about || ''}
+                onChange={e => updateShopSettings({ shop_about: e.target.value })}
+                rows={4}
+                placeholder="معرفی، ساعت کاری، خدمات ویژه..."
+                className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white text-sm focus:border-indigo-500 resize-none"
+              />
+            </div>
           </div>
           <div className="glass rounded-2xl p-6">
-            <h3 className="text-white font-semibold mb-4">پیش‌نمایش هدر</h3>
-            <div className="bg-white rounded-xl p-5 text-gray-800 shadow-xl">
-              <div className="text-center border-b border-gray-200 pb-4 mb-4">
-                {shopInfo.logo && <img src={shopInfo.logo} alt="logo" className="w-16 h-16 object-contain mx-auto mb-2" />}
-                <p className="font-bold text-lg">{shopInfo.name || 'نام فروشگاه'}</p>
-                <p className="text-xs text-gray-500 mt-1">{shopInfo.address}</p>
-                <p className="text-xs text-gray-500">📞 {shopInfo.phone}</p>
-              </div>
-              <div className="text-xs space-y-1">
-                <div className="flex justify-between">
-                  <span>فروشنده:</span>
-                  <span className="font-medium">{shopInfo.seller}</span>
+            <h3 className="text-white font-semibold mb-4">پیش‌نمایش پروفایل فروشگاه</h3>
+            <div className="bg-white rounded-xl overflow-hidden text-gray-800 shadow-xl">
+              {shopInfo.banner && (
+                <div className="h-28 w-full bg-slate-200">
+                  <img src={shopInfo.banner} alt="" className="h-full w-full object-cover" />
+                </div>
+              )}
+              <div className="p-5">
+                <div className={`text-center border-b border-gray-200 pb-4 mb-4 ${shopInfo.banner ? '-mt-10 relative' : ''}`}>
+                  {shopInfo.logo && (
+                    <img
+                      src={shopInfo.logo}
+                      alt="logo"
+                      className={`w-16 h-16 object-contain mx-auto mb-2 rounded-xl border-4 border-white bg-white shadow ${shopInfo.banner ? 'relative z-10' : ''}`}
+                    />
+                  )}
+                  <p className="font-bold text-lg">{shopInfo.name || 'نام فروشگاه'}</p>
+                  {shopInfo.tagline ? <p className="text-xs text-indigo-600 mt-1 font-medium">{shopInfo.tagline}</p> : null}
+                  {shopInfo.website ? (
+                    <p className="text-[11px] text-blue-600 mt-1 truncate" dir="ltr">
+                      {shopInfo.website}
+                    </p>
+                  ) : null}
+                  <p className="text-xs text-gray-500 mt-1">{shopInfo.address}</p>
+                  <p className="text-xs text-gray-500">📞 {shopInfo.phone}</p>
+                </div>
+                {shopInfo.about ? (
+                  <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap border-t border-gray-100 pt-3">
+                    {shopInfo.about}
+                  </p>
+                ) : null}
+                <div className="text-xs space-y-1 mt-3">
+                  <div className="flex justify-between">
+                    <span>فروشنده:</span>
+                    <span className="font-medium">{shopInfo.seller}</span>
+                  </div>
                 </div>
               </div>
             </div>

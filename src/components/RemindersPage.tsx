@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Bell, X, CheckCircle, Clock, AlertTriangle, MessageCircle, Mail, Trash2, Edit2, StickyNote, Users, Calendar } from 'lucide-react';
+import { Plus, Bell, X, CheckCircle, AlertTriangle, MessageCircle, Mail, Trash2, Edit2, StickyNote, Users, Calendar } from 'lucide-react';
 import type { PersonalReminder } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import { useStore } from '../store/useStore';
@@ -213,15 +213,6 @@ export default function RemindersPage() {
               )}
             </div>
           </div>
-
-          <div className={`${cardBg} p-4`}>
-            <h3 className={`${textColor} font-semibold flex items-center gap-2 mb-2`}>
-              <Clock size={16} className="text-blue-400" /> تاریخچه ارسال خودکار
-            </h3>
-            <p className={`${subText} text-sm`}>
-              لاگ پیامک/واتساپ در state فروشگاه ذخیره نمی‌شود؛ از دکمه‌های بالا برای تماس دستی استفاده کنید. دادهٔ بدهی و مشتری از همین فروشگاه است.
-            </p>
-          </div>
         </div>
       )}
 
@@ -318,7 +309,7 @@ export default function RemindersPage() {
               aria-label="بستن"
               onClick={() => setShowPersonalModal(false)}
             />
-          <div className="relative z-[1] my-auto glass-dark rounded-2xl w-full max-w-2xl max-h-[min(92dvh,calc(100dvh-1.5rem))] flex flex-col overflow-hidden">
+          <div data-cf-app-modal className="relative z-[1] my-auto glass-dark rounded-2xl w-full max-w-2xl max-h-[min(92dvh,calc(100dvh-1.5rem))] flex flex-col overflow-hidden">
             <div className="flex shrink-0 items-center justify-between p-5 border-b border-white/10">
               <h2 className="text-white font-semibold flex items-center gap-2">
                 <StickyNote size={18} className="text-amber-400" />

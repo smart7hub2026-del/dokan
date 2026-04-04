@@ -3,7 +3,7 @@ import { Search, Edit2, Shield, User, Eye, EyeOff, KeyRound, UserCheck, RefreshC
 import { useToast } from './Toast';
 import { useApp } from '../context/AppContext';
 import Modal from './Modal';
-import { useStore } from '../store/useStore';
+import { useStore, type ShopSettings } from '../store/useStore';
 import {
   apiGetShopUsers,
   apiUpdateShopUser,
@@ -33,10 +33,23 @@ const roleDescriptions: Record<string, string> = {
   accountant: 'بدهی‌ها، حسابداری، حقوق، تأمین‌کنندگان',
 };
 
+type StaffLoginRole = 'seller' | 'stock_keeper' | 'accountant';
+
+function mergeRoleLoginEnabled(ss: ShopSettings) {
+  const r = ss.role_login_enabled;
+  return {
+    seller: r?.seller !== false,
+    stock_keeper: r?.stock_keeper !== false,
+    accountant: r?.accountant !== false,
+  };
+}
+
 export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
   const { t, isDark } = useApp();
   const { success, error } = useToast();
   const authToken = useStore(s => s.authToken);
+  const shopSettings = useStore(s => s.shopSettings);
+  const updateShopSettings = useStore(s => s.updateShopSettings);
   const [users, setUsers] = useState<ShopUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadErr, setLoadErr] = useState('');
@@ -117,6 +130,19 @@ export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
   const subText = isDark ? 'text-slate-400' : 'text-slate-500';
   const cardMobile = isDark ? 'bg-slate-800/70 border-white/10' : 'bg-slate-50 border-slate-200 shadow-sm';
 
+  const toggleStaffRoleLogin = (key: StaffLoginRole, on: boolean) => {
+    updateShopSettings({
+      role_login_enabled: {
+        ...mergeRoleLoginEnabled(shopSettings),
+        [key]: on,
+      },
+    });
+    success(
+      'ذخیره شد',
+      on ? `ورود با نقش «${roleLabels[key]}» فعال است` : `ورود با نقش «${roleLabels[key]}» غیرفعال است؛ پس از همگام‌سازی با سرور اعمال می‌شود.`,
+    );
+  };
+
   const savePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     const pwdErr = validatePasswordPolicy(pwd);
@@ -161,28 +187,58 @@ export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
         </div>
       </div>
 
-      <div className="glass rounded-2xl p-5">
-        <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-          <Shield size={16} className="text-indigo-400" /> نقش‌های دکان
-        </h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {Object.entries(roleLabels).map(([role, label]) => (
-            <div
-              key={role}
-              className={`rounded-xl p-3 border ${
-                role === 'admin'
-                  ? 'bg-purple-500/10 border-purple-500/20'
-                  : role === 'seller'
-                    ? 'bg-blue-500/10 border-blue-500/20'
-                    : role === 'accountant'
-                      ? 'bg-cyan-500/10 border-cyan-500/20'
-                      : 'bg-teal-500/10 border-teal-500/20'
-              }`}
-            >
-              <p className="text-white text-sm font-semibold">{label}</p>
-              <p className="text-slate-400 text-xs mt-1">{roleDescriptions[role]}</p>
-            </div>
-          ))}
+      <div className="glass rounded-2xl p-5 space-y-3">
+        <div>
+          <h3 className="text-white font-semibold flex items-center gap-2">
+            <Shield size={16} className="text-indigo-400" /> نقش‌های دکان و ورود
+          </h3>
+          <p className="text-slate-500 text-xs mt-1 leading-relaxed">
+            غیرفعال کردن نقش، آن را از صفحهٔ ورود حذف می‌کند و سرور ورود با آن نقش را نمی‌پذیرد. نقش مدیر همیشه فعال است.
+          </p>
+        </div>
+        <div className="space-y-2">
+          {(['admin', 'seller', 'stock_keeper', 'accountant'] as const).map((role) => {
+            const isAdminRow = role === 'admin';
+            const staffOn = isAdminRow ? true : mergeRoleLoginEnabled(shopSettings)[role];
+            const border =
+              role === 'admin'
+                ? 'border-purple-500/25 bg-purple-500/5'
+                : role === 'seller'
+                  ? 'border-blue-500/25 bg-blue-500/5'
+                  : role === 'accountant'
+                    ? 'border-cyan-500/25 bg-cyan-500/5'
+                    : 'border-teal-500/25 bg-teal-500/5';
+            return (
+              <div
+                key={role}
+                className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-3 py-2.5 ${border}`}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-white text-sm font-semibold">{roleLabels[role]}</p>
+                  <p className="text-slate-400 text-xs mt-0.5">{roleDescriptions[role]}</p>
+                </div>
+                {isAdminRow ? (
+                  <span className="text-[11px] font-medium text-emerald-400/90 shrink-0">همیشه فعال</span>
+                ) : (
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={staffOn}
+                    onClick={() => toggleStaffRoleLogin(role, !staffOn)}
+                    className={`relative h-7 w-12 shrink-0 rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400/60 ${
+                      staffOn ? 'bg-emerald-500/80' : 'bg-slate-600'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-[inset-inline-end] ${
+                        staffOn ? 'end-1' : 'start-1'
+                      }`}
+                    />
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 

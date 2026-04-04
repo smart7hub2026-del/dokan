@@ -3,6 +3,12 @@ import { useLocation, useNavigate, Routes, Route, Navigate } from 'react-router-
 import { AppProvider, useApp } from './context/AppContext';
 import { ToastProvider } from './components/Toast';
 import { useStore } from './store/useStore';
+import {
+  PAGE_ACCENT_BAR,
+  PAGE_ACCENT_BAR_DEFAULT,
+  PAGE_CONTENT_GLOW,
+  PAGE_CONTENT_GLOW_DEFAULT,
+} from './config/navigationTheme';
 import WelcomePage from './pages/WelcomePage';
 import { PrivacyPage, TermsPage } from './pages/LegalPages';
 import OnboardingModal, { isOnboardingDone } from './components/OnboardingModal';
@@ -12,7 +18,7 @@ import TenantsPage from './components/TenantsPage';
 import ShopDashboard from './components/ShopDashboard';
 import ProductsRouter from './components/ProductsRouter';
 import WarehousePage from './components/WarehousePage';
-import CustomersPage from './components/CustomersPage';
+import CustomersCrmHub from './components/CustomersCrmHub';
 import SalesPage from './components/SalesPage';
 import DebtsPage from './components/DebtsPage';
 import PendingPage from './components/PendingPage';
@@ -33,6 +39,7 @@ import InvoicesPage from './components/InvoicesPage';
 import ProductSalesRankingPage from './components/ProductSalesRankingPage';
 import ReorderListPage from './components/ReorderListPage';
 import GlobalSearchModal from './components/GlobalSearchModal';
+import ShopJournalPage from './components/ShopJournalPage';
 import MobileBottomNav from './components/MobileBottomNav';
 import BrandLogo from './components/BrandLogo';
 import ShopGateModal from './components/ShopGateModal';
@@ -230,11 +237,20 @@ function AppContent() {
     role: string,
     rolePassword: string,
     captchaToken?: string,
-    deviceName?: string
+    deviceName?: string,
+    loginUsername?: string
   ): Promise<{ ok: boolean; message?: string; code?: string; twoFactorRequired?: boolean; pendingToken?: string }> => {
     try {
       const normalizedRole = role.trim() === 'stock' ? 'stock_keeper' : role.trim();
-      const res: LoginResult = await apiLogin({ shopCode, shopPassword, role: normalizedRole, rolePassword, captchaToken, deviceName });
+      const res: LoginResult = await apiLogin({
+        shopCode,
+        shopPassword,
+        role: normalizedRole,
+        rolePassword,
+        captchaToken,
+        deviceName,
+        loginUsername,
+      });
 
       if ('twoFactorRequired' in res && res.twoFactorRequired) {
         return { ok: false, twoFactorRequired: true, pendingToken: res.pendingToken };
@@ -326,6 +342,7 @@ function AppContent() {
         shopCode: string;
         shopPassword: string;
         adminFullName: string;
+        adminUsername?: string;
         adminRoleTitle: string;
         adminRolePassword: string;
         message?: string;
@@ -341,6 +358,7 @@ function AppContent() {
           shopCode: res.shopCode,
           shopPassword: res.shopPassword,
           adminFullName: res.adminFullName,
+          adminUsername: res.adminUsername ?? `admin-${String(res.shopCode).toLowerCase()}`,
           adminRoleTitle: res.adminRoleTitle,
           adminRolePassword: res.adminRolePassword,
           message: res.message,
@@ -376,6 +394,7 @@ function AppContent() {
     if (!storeUser?.id) return;
     let mounted = true;
     const validate = () => {
+      if (document.visibilityState === 'hidden') return;
       apiMe(authToken || undefined)
         .then((data) => {
           if (!mounted) return;
@@ -390,9 +409,14 @@ function AppContent() {
     };
     validate();
     const tick = window.setInterval(validate, 3 * 60 * 1000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') validate();
+    };
+    document.addEventListener('visibilitychange', onVis);
     return () => {
       mounted = false;
       window.clearInterval(tick);
+      document.removeEventListener('visibilitychange', onVis);
     };
   }, [authToken, storeUser?.id, storeUser?.role, storeShopCode, storeLogout]);
 
@@ -420,6 +444,7 @@ function AppContent() {
       }
     };
     const sync = async () => {
+      if (document.visibilityState === 'hidden') return;
       const payload = buildSyncPayload();
       const next = JSON.stringify(payload);
       if (next === lastSnapshot) return;
@@ -446,10 +471,17 @@ function AppContent() {
       }
     };
     void boot();
-    const id = window.setInterval(() => { void sync(); }, 5000);
+    const id = window.setInterval(() => {
+      void sync();
+    }, 5000);
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void sync();
+    };
+    document.addEventListener('visibilitychange', onVis);
     return () => {
       canceled = true;
       window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVis);
     };
   }, [authToken, storeUser, storeShopCode, hydrateFromServer, buildSyncPayload, shopSuspended]);
 
@@ -459,6 +491,7 @@ function AppContent() {
     if (!pending || !syncSavePending) return;
     let canceled = false;
     const retry = async () => {
+      if (document.visibilityState === 'hidden') return;
       try {
         const payload = JSON.parse(pending) as Record<string, unknown>;
         await apiSaveState(authToken || undefined, payload, storeShopCode);
@@ -491,27 +524,37 @@ function AppContent() {
   const markAllRead = () => storeMarkAllRead();
 
   if (isCheckingSession) {
+    const sessionDark = theme !== 'light';
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: '#f0f2f5' }}>
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-slate-500 text-sm">{t('loading_session')}</p>
+      <div
+        className={`min-h-screen flex items-center justify-center ${sessionDark ? 'bg-[#0c0e12]' : ''}`}
+        style={sessionDark ? undefined : { background: '#f0f2f5' }}
+      >
+        <div className="text-center px-4">
+          {sessionDark ? (
+            <div className="cf-data-loader mx-auto mb-4" />
+          ) : (
+            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          )}
+          <p className={sessionDark ? 'text-slate-400 text-sm' : 'text-slate-500 text-sm'}>{t('loading_session')}</p>
         </div>
       </div>
     );
   }
 
+  const welcomeProps = {
+    onLogin: handleLogin,
+    onGoogleLogin: handleGoogleLogin,
+    onDemoLogin: handleDemoLogin,
+    onTwoFactorVerify: handleTwoFactorVerify,
+  };
+
   if (!currentUser) {
     return (
       <Routes>
-        <Route path="/" element={
-          <WelcomePage
-            onLogin={handleLogin}
-            onGoogleLogin={handleGoogleLogin}
-            onDemoLogin={handleDemoLogin}
-            onTwoFactorVerify={handleTwoFactorVerify}
-          />
-        } />
+        <Route path="/" element={<WelcomePage {...welcomeProps} />} />
+        <Route path="/login" element={<WelcomePage {...welcomeProps} initialAuthView="login" />} />
+        <Route path="/register" element={<WelcomePage {...welcomeProps} initialAuthView="register" />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -529,15 +572,19 @@ function AppContent() {
             <Route path="/billing" element={<BillingPage />} />
             <Route path="/admin-notifications" element={<AdminNotificationsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
+            <Route path="/customers" element={<CustomersCrmHub />} />
+            <Route path="/crm" element={<Navigate to="/customers?view=deals" replace />} />
             <Route path="/business-types" element={<BusinessTypesPage />} />
             <Route path="/support" element={<Navigate to="/settings?section=support" replace />} />
             <Route path="/settings" element={<SettingsPage currentUser={currentUser} authToken={authToken || ''} />} />
             <Route path="/settings/sessions" element={<Navigate to="/settings?section=sessions" replace />} />
+            <Route path="/backup" element={<Navigate to="/settings?section=backup" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </>
         ) : (
           <>
             <Route path="/dashboard" element={<ShopDashboard currentUser={currentUser as any} />} />
+            <Route path="/journal" element={<ShopJournalPage />} />
             <Route path="/products" element={<ProductsRouter />} />
             {['admin', 'stock_keeper'].includes(currentUser.role) && (
               <Route path="/warehouse" element={<WarehousePage />} />
@@ -545,7 +592,8 @@ function AppContent() {
             <Route path="/print-settings" element={<Navigate to="/settings?section=print" replace />} />
             <Route path="/offline" element={<Navigate to="/settings?section=offline" replace />} />
             <Route path="/support" element={<Navigate to="/settings?section=support" replace />} />
-            <Route path="/customers" element={<CustomersPage />} />
+            <Route path="/customers" element={<CustomersCrmHub />} />
+            <Route path="/crm" element={<Navigate to="/customers?view=deals" replace />} />
             <Route path="/sales" element={<SalesPage />} />
             <Route path="/product-sales-ranking" element={<ProductSalesRankingPage />} />
             <Route path="/reorder-list" element={<ReorderListPage />} />
@@ -568,6 +616,7 @@ function AppContent() {
             <Route path="/notifications" element={<NotificationsPage />} />
             <Route path="/settings" element={<SettingsPage currentUser={currentUser} authToken={authToken || ''} />} />
             <Route path="/settings/sessions" element={<Navigate to="/settings?section=sessions" replace />} />
+            <Route path="/backup" element={<Navigate to="/settings?section=backup" replace />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </>
         )}
@@ -577,21 +626,39 @@ function AppContent() {
 
   const isLightTheme = theme === 'light';
   const isTigersTheme = theme === 'tigers_dark';
-  const bgClass = isLightTheme ? 'bg-white' : isTigersTheme ? 'bg-[#08090d]' : 'bg-[#0B1F3A]';
+  const isDeepBlueTheme = theme === 'deep_blue';
+  /** تم «تاریک»: خاکستری عمیق — تم «آبی تاریک»: هم‌رنگ با پالت premium در index.css */
+  const bgClass = isLightTheme
+    ? 'bg-white'
+    : isTigersTheme
+      ? 'bg-[#08090d]'
+      : isDeepBlueTheme
+        ? 'bg-[#0b1f3a]'
+        : 'bg-[#0f172a]';
 
   const shellHeader = isLightTheme
     ? 'bg-white border-b border-slate-200 shadow-sm'
     : isTigersTheme
       ? 'border-b border-red-900/50 bg-[#0b0b0f]/95 backdrop-blur-md'
-      : 'border-b border-[#16345F] bg-[#0B1F3A]/95 backdrop-blur-md';
+      : isDeepBlueTheme
+        ? 'border-b border-[#16345F] bg-[#0B1F3A]/95 backdrop-blur-md'
+        : 'border-b border-slate-700/90 bg-[#0f172a]/95 backdrop-blur-md';
   const shellHeaderTitle = isLightTheme ? 'text-slate-900' : 'text-slate-100';
-  const shellHeaderSub = isLightTheme ? 'text-slate-500' : isTigersTheme ? 'text-red-200/70' : 'text-[#C9D6E2]';
+  const shellHeaderSub = isLightTheme ? 'text-slate-500' : isTigersTheme ? 'text-red-200/70' : isDeepBlueTheme ? 'text-[#C9D6E2]' : 'text-slate-400';
   const shellControl = isLightTheme
     ? 'bg-slate-50 border border-slate-200 text-slate-600 hover:bg-slate-100 hover:text-slate-900'
     : isTigersTheme
       ? 'glass text-red-100/90 hover:text-white border border-red-900/40'
-      : 'bg-[#112A4D]/80 border border-[#1C3A63] text-[#C9D6E2] hover:bg-[#16345F] hover:text-[#56CCF2]';
-  const shellMainCol = isLightTheme ? 'bg-white' : isTigersTheme ? 'bg-[#08090d]' : 'bg-[#0B1F3A]';
+      : isDeepBlueTheme
+        ? 'bg-[#112A4D]/80 border border-[#1C3A63] text-[#C9D6E2] hover:bg-[#16345F] hover:text-[#56CCF2]'
+        : 'bg-slate-800/90 border border-slate-600/80 text-slate-200 hover:bg-slate-800 hover:text-white';
+  const shellMainCol = isLightTheme
+    ? 'bg-white'
+    : isTigersTheme
+      ? 'bg-[#08090d]'
+      : isDeepBlueTheme
+        ? 'bg-[#0b1f3a]'
+        : 'bg-[#0f172a]';
 
   const getRoleLabel = (role: string) => {
     const labels: Record<string, string> = {
@@ -732,13 +799,8 @@ function AppContent() {
         </header>
 
         {demoTrialBlocked && currentUser?.role !== 'super_admin' && !shopSuspended && (
-          <div className="bg-rose-600/25 border-b border-rose-500/40 px-4 py-2.5 text-center text-sm text-rose-100 font-bold">
+          <div className="bg-rose-600/25 border-b border-rose-500/40 px-4 py-2.5 text-center text-sm text-rose-200 font-bold">
             دورهٔ آزمایشی ۳ روزه تمام شده است. برای ادامهٔ کار لطفاً اشتراک تهیه کنید یا با پشتیبانی تماس بگیرید.
-          </div>
-        )}
-        {syncSavePending && currentUser?.role !== 'super_admin' && !shopSuspended && (
-          <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2 text-center text-sm text-amber-200 font-semibold">
-            {t('sync_pending_banner')}
           </div>
         )}
         {!isOnline && (
@@ -748,8 +810,16 @@ function AppContent() {
           </div>
         )}
 
-        <main className="mobile-shell-main flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 pb-40 md:pb-5">
-          <div className="max-w-7xl mx-auto pb-8 md:pb-6">
+        <main className="mobile-shell-main relative flex-1 overflow-y-auto overflow-x-hidden p-3 sm:p-5 pb-40 md:pb-5">
+          <div
+            className={`pointer-events-none absolute inset-x-0 top-0 h-36 sm:h-44 bg-gradient-to-b ${PAGE_CONTENT_GLOW[activePage] ?? PAGE_CONTENT_GLOW_DEFAULT} to-transparent opacity-90`}
+            aria-hidden
+          />
+          <div className="relative z-[1] max-w-7xl mx-auto pb-8 md:pb-6">
+            <div
+              className={`h-1 rounded-full mb-4 sm:mb-5 ${PAGE_ACCENT_BAR[activePage] ?? PAGE_ACCENT_BAR_DEFAULT}`}
+              role="presentation"
+            />
             {renderPage()}
           </div>
         </main>

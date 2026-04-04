@@ -59,7 +59,7 @@ export default function AppDownloadCard({ variant = 'default', className = '', o
       </div>
 
       {hint ? (
-        <p className="relative mt-3 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-center text-[11px] font-bold text-amber-100">
+        <p className="relative mt-3 rounded-xl border border-amber-400/50 bg-amber-950/40 px-3 py-2 text-center text-[11px] font-bold text-amber-50">
           {hint}
         </p>
       ) : null}

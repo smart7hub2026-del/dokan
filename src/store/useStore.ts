@@ -4,10 +4,78 @@ import {
   Product, Book, Customer, Invoice, Debt, Supplier, PersonalReminder,
   Notification, Category, User, InvoiceItem, ProductExpiry, SerialNumber
 } from '../data/mockData';
+import { customerPhoneKey } from '../utils/customerPhone';
+import { sumStockInWarehouseBin } from '../utils/warehouseBins';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 const nextId = (arr: { id: number }[]) =>
   arr.length > 0 ? Math.max(...arr.map(a => a.id)) + 1 : 1;
+
+type StockRow = { id: number; stock_shop: number; stock_warehouse: number };
+
+function applyInvoiceLinesToStockRows<T extends StockRow>(
+  rows: T[],
+  lines: InvoiceItem[],
+  mode: 'restore' | 'deduct'
+): T[] {
+  return rows.map((row) => {
+    let next = { ...row };
+    for (const line of lines) {
+      if (line.product_id !== row.id) continue;
+      const q = Math.max(0, Math.floor(Number(line.quantity) || 0));
+      if (q <= 0) continue;
+      const src = line.stock_source ?? 'shop';
+      if (mode === 'restore') {
+        if (src === 'warehouse') {
+          next = { ...next, stock_warehouse: Number(next.stock_warehouse || 0) + q };
+        } else {
+          next = { ...next, stock_shop: Number(next.stock_shop || 0) + q };
+        }
+      } else {
+        if (src === 'warehouse') {
+          next = {
+            ...next,
+            stock_warehouse: Math.max(0, Number(next.stock_warehouse || 0) - q),
+          };
+        } else {
+          next = { ...next, stock_shop: Math.max(0, Number(next.stock_shop || 0) - q) };
+        }
+      }
+    }
+    return next;
+  });
+}
+
+function checkInvoiceLinesStock<T extends StockRow>(
+  rows: T[],
+  lines: InvoiceItem[]
+): { ok: true } | { ok: false; message: string } {
+  for (const line of lines) {
+    const q = Math.max(0, Math.floor(Number(line.quantity) || 0));
+    if (q <= 0) continue;
+    const row = rows.find((r) => r.id === line.product_id);
+    if (!row) {
+      return { ok: false, message: `قلم «${line.product_name}» در انبار یافت نشد` };
+    }
+    const src = line.stock_source ?? 'shop';
+    const avail = src === 'warehouse' ? Number(row.stock_warehouse || 0) : Number(row.stock_shop || 0);
+    if (q > avail) {
+      return {
+        ok: false,
+        message: `موجودی «${line.product_name}» از ${src === 'warehouse' ? 'گدام' : 'دکان'} کافی نیست (حداکثر ${avail})`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+function invoiceStockWasCommitted(inv: Invoice): boolean {
+  if (inv.stock_committed === true) return true;
+  if (inv.stock_committed === false) return false;
+  return inv.approval_status === 'approved' || inv.status === 'completed';
+}
+
+export type UpdateInvoiceResult = { ok: true } | { ok: false; message: string };
 
 // Hash simulation (in production use bcrypt on backend)
 const hashPassword = (pw: string) => btoa(pw + '_smarthub_salt_2025');
@@ -134,6 +202,14 @@ export interface ShopSettings {
   shop_address: string;
   shop_phone: string;
   logo_url: string;
+  /** بنر/کاور بالای پروفایل فروشگاه (اختیاری، مثل لوگو به‌صورت data URL) */
+  shop_banner_url?: string;
+  /** شعار کوتاه زیر نام */
+  shop_tagline?: string;
+  /** معرفی طولانی‌تر فروشگاه */
+  shop_about?: string;
+  /** وب‌سایت یا شبکه اجتماعی (نمایشی) */
+  shop_website?: string;
   paper_size: 'A4' | 'A5' | 'Letter' | '80mm' | '72mm' | '58mm';
   footer_text: string;
   show_shop_name: boolean;
@@ -155,6 +231,15 @@ export interface ShopSettings {
   business_type?: string;
   /** هم‌تراز با tenant در سرور — برای گزارش و ERP چندصنفی */
   tenant_id?: number;
+  /**
+   * ورود با نقش‌های کارکنان در صفحهٔ ورود (مدیر و ابرادمین همیشه مجازند).
+   * پیش‌فرض: همه true؛ با false همان نقش در check-shop و login رد می‌شود.
+   */
+  role_login_enabled?: {
+    seller: boolean;
+    stock_keeper: boolean;
+    accountant: boolean;
+  };
 }
 
 /** قلم دستی «خرید بعدی» (لیست تأمین) */
@@ -215,7 +300,8 @@ interface AppStore {
 
   // Categories
   categories: Category[];
-  addCategory: (name: string) => Category;
+  addCategory: (name: string, parent_id?: number | null) => Category;
+  updateCategory: (c: Category) => void;
   deleteCategory: (id: number) => void;
 
   // Expiry
@@ -232,15 +318,16 @@ interface AppStore {
 
   // Customers
   customers: Customer[];
-  addCustomer: (c: Omit<Customer, 'id' | 'created_at' | 'customer_code'>) => Customer;
+  addCustomer: (c: Omit<Customer, 'id' | 'created_at' | 'customer_code' | 'archived_at'>) => Customer | null;
   updateCustomer: (c: Customer) => void;
   deleteCustomer: (id: number) => void;
+  mergeCustomers: (keepId: number, removeId: number) => boolean;
   updateCustomerBalance: (id: number, delta: number) => void;
 
   // Sales Invoices
   invoices: Invoice[];
   addInvoice: (inv: Omit<Invoice, 'id' | 'invoice_number'>) => Invoice;
-  updateInvoice: (inv: Invoice) => void;
+  updateInvoice: (inv: Invoice) => UpdateInvoiceResult;
   deleteInvoice: (id: number) => void;
 
   // Purchase Invoices
@@ -332,6 +419,8 @@ interface AppStore {
   warehouses: WarehouseBin[];
   addWarehouse: (name: string) => void;
   removeWarehouse: (id: number) => void;
+  /** جمع موجودی فعال در یک سطل انبار (برای جلوگیری از حذف نادرست) */
+  getWarehouseBinStockTotal: (binId: number) => number;
 
   /** اقلام دستی لیست خرید بعدی / تأمین */
   procurementManualLines: ProcurementManualLine[];
@@ -356,6 +445,10 @@ export const emptyShopSettings: ShopSettings = {
   shop_address: '',
   shop_phone: '',
   logo_url: '',
+  shop_banner_url: '',
+  shop_tagline: '',
+  shop_about: '',
+  shop_website: '',
   paper_size: '80mm',
   footer_text: '',
   show_shop_name: true,
@@ -369,6 +462,11 @@ export const emptyShopSettings: ShopSettings = {
   show_product_image_on_sales: true,
   print_invoice_with_product_images: false,
   date_calendar: 'jalali',
+  role_login_enabled: {
+    seller: true,
+    stock_keeper: true,
+    accountant: true,
+  },
 };
 
 const defaultShopSettings: ShopSettings = { ...emptyShopSettings };
@@ -452,6 +550,17 @@ export const useStore = create<AppStore>()(
       removeWarehouse: (id) => {
         if (id === 1) return;
         set((s) => ({ warehouses: s.warehouses.filter((w) => w.id !== id) }));
+      },
+
+      getWarehouseBinStockTotal: (binId) => {
+        const s = get();
+        return sumStockInWarehouseBin(
+          binId,
+          s.shopSettings.business_type ?? '',
+          s.products,
+          s.books,
+          s.warehouses
+        );
       },
 
       login: (user, shopCode, isDemo = false, sessionTimeoutMinutes = 120, demoTrialEndsAt: string | null = null) => {
@@ -655,14 +764,28 @@ export const useStore = create<AppStore>()(
       // Categories
       categories: [],
 
-      addCategory: (name) => {
+      addCategory: (name, parent_id = null) => {
+        const trimmed = String(name || '').trim();
         const newCat: Category = {
           id: nextId(get().categories),
-          name, parent_id: null, status: 'active'
+          name: trimmed || 'دسته بدون نام',
+          parent_id: parent_id ?? null,
+          status: 'active',
         };
-        set(s => ({ categories: [...s.categories, newCat] }));
+        set((s) => ({ categories: [...s.categories, newCat] }));
         return newCat;
       },
+
+      updateCategory: (c) =>
+        set((s) => ({
+          categories: s.categories.map((x) => (x.id === c.id ? c : x)),
+          products: s.products.map((p) =>
+            p.category_id === c.id ? { ...p, category_name: c.name } : p
+          ),
+          books: s.books.map((b) =>
+            b.category_id === c.id ? { ...b, category_name: c.name } : b
+          ),
+        })),
 
       deleteCategory: (id) => set(s => ({
         categories: s.categories.filter(c => c.id !== id)
@@ -705,10 +828,16 @@ export const useStore = create<AppStore>()(
       customers: [],
 
       addCustomer: (c) => {
+        const key = customerPhoneKey(c.phone);
+        if (key && get().customers.some((x) => !x.archived_at && customerPhoneKey(x.phone) === key)) {
+          return null;
+        }
+        const id = nextId(get().customers);
         const newC: Customer = {
           ...c,
-          id: nextId(get().customers),
-          customer_code: `C${String(nextId(get().customers)).padStart(3, '0')}`,
+          marketing_consent: c.marketing_consent !== false,
+          id,
+          customer_code: `C${String(id).padStart(3, '0')}`,
           created_at: new Date().toISOString().slice(0, 10),
         };
         set(s => ({ customers: [newC, ...s.customers] }));
@@ -720,8 +849,42 @@ export const useStore = create<AppStore>()(
       })),
 
       deleteCustomer: (id) => set(s => ({
-        customers: s.customers.filter(x => x.id !== id)
+        customers: s.customers.map((x) =>
+          x.id === id
+            ? { ...x, archived_at: new Date().toISOString(), status: 'inactive' as const }
+            : x
+        ),
       })),
+
+      mergeCustomers: (keepId, removeId) => {
+        if (keepId === removeId) return false;
+        const keep = get().customers.find((c) => c.id === keepId);
+        const rem = get().customers.find((c) => c.id === removeId);
+        if (!keep || !rem) return false;
+        const merged: Customer = {
+          ...keep,
+          balance: keep.balance + rem.balance,
+          total_purchases: keep.total_purchases + rem.total_purchases,
+          whatsapp: keep.whatsapp || rem.whatsapp,
+          email: keep.email || rem.email,
+          address: keep.address || rem.address || '',
+          marketing_consent: Boolean(keep.marketing_consent !== false || rem.marketing_consent !== false),
+        };
+        set((st) => ({
+          customers: st.customers.filter((c) => c.id !== removeId).map((c) => (c.id === keepId ? merged : c)),
+          invoices: st.invoices.map((inv) =>
+            inv.customer_id === removeId
+              ? { ...inv, customer_id: keepId, customer_name: merged.name, customer_phone: merged.phone }
+              : inv
+          ),
+          debts: st.debts.map((d) =>
+            d.customer_id === removeId
+              ? { ...d, customer_id: keepId, customer_name: merged.name, customer_phone: merged.phone }
+              : d
+          ),
+        }));
+        return true;
+      },
 
       updateCustomerBalance: (id, delta) => set(s => ({
         customers: s.customers.map(c =>
@@ -735,15 +898,16 @@ export const useStore = create<AppStore>()(
       invoices: [],
 
       addInvoice: (inv) => {
+        const user = get().currentUser;
+        /** بدون کاربر (تست) یا مدیر دکان: فاکتور نهایی؛ فروشنده/انباردار/حسابدار: فقط پیش‌نویس تا تأیید مدیر */
+        const finalizeNow = !user || user.role === 'admin';
         const id = nextId(get().invoices);
         const newInv: Invoice = {
           ...inv,
           id,
           invoice_number: `INV-${String(id).padStart(3, '0')}`,
+          stock_committed: finalizeNow,
         };
-        const user = get().currentUser;
-        /** بدون کاربر (تست) یا مدیر دکان: فاکتور نهایی؛ فروشنده/انباردار/حسابدار: فقط پیش‌نوید تا تأیید مدیر */
-        const finalizeNow = !user || user.role === 'admin';
 
         set(s => ({ invoices: [newInv, ...s.invoices] }));
 
@@ -804,9 +968,47 @@ export const useStore = create<AppStore>()(
         return newInv;
       },
 
-      updateInvoice: (inv) => set(s => ({
-        invoices: s.invoices.map(x => x.id === inv.id ? inv : x)
-      })),
+      updateInvoice: (inv) => {
+        const s = get();
+        const prev = s.invoices.find((x) => x.id === inv.id);
+        if (!prev) {
+          set((st) => ({
+            invoices: st.invoices.map((x) => (x.id === inv.id ? inv : x)),
+          }));
+          return { ok: true };
+        }
+
+        const bookstore = s.shopSettings.business_type === 'bookstore';
+        const committed = invoiceStockWasCommitted(prev);
+        let nextProducts = s.products;
+        let nextBooks = s.books;
+
+        if (committed) {
+          if (bookstore) {
+            nextBooks = applyInvoiceLinesToStockRows(s.books, prev.items, 'restore');
+            const check = checkInvoiceLinesStock(nextBooks, inv.items);
+            if (!check.ok) return check;
+            nextBooks = applyInvoiceLinesToStockRows(nextBooks, inv.items, 'deduct');
+          } else {
+            nextProducts = applyInvoiceLinesToStockRows(s.products, prev.items, 'restore');
+            const check = checkInvoiceLinesStock(nextProducts, inv.items);
+            if (!check.ok) return check;
+            nextProducts = applyInvoiceLinesToStockRows(nextProducts, inv.items, 'deduct');
+          }
+        }
+
+        const merged: Invoice = {
+          ...inv,
+          stock_committed: inv.stock_committed ?? prev.stock_committed,
+        };
+
+        set({
+          invoices: s.invoices.map((x) => (x.id === inv.id ? merged : x)),
+          products: nextProducts,
+          books: nextBooks,
+        });
+        return { ok: true };
+      },
 
       deleteInvoice: (id) => set(s => ({
         invoices: s.invoices.filter(x => x.id !== id)
@@ -1136,23 +1338,22 @@ export const useStore = create<AppStore>()(
             const invoiceId = (item.data as { invoice_id?: number }).invoice_id;
             const inv = invoiceId != null ? s.invoices.find(i => i.id === invoiceId) : undefined;
             if (inv) {
+              const bookstoreSale = s.shopSettings.business_type === 'bookstore';
               nextInvoices = s.invoices.map(i =>
-                i.id === invoiceId ? { ...i, approval_status: 'approved' as const, status: 'approved' as const } : i
+                i.id === invoiceId
+                  ? {
+                      ...i,
+                      approval_status: 'approved' as const,
+                      status: 'approved' as const,
+                      stock_committed: true,
+                    }
+                  : i
               );
-              nextProducts = s.products.map(p => {
-                let next = { ...p };
-                for (const line of inv.items) {
-                  if (line.product_id !== p.id) continue;
-                  const qty = line.quantity;
-                  const src = line.stock_source ?? 'shop';
-                  if (src === 'warehouse') {
-                    next = { ...next, stock_warehouse: Math.max(0, Number(next.stock_warehouse || 0) - qty) };
-                  } else {
-                    next = { ...next, stock_shop: Math.max(0, Number(next.stock_shop || 0) - qty) };
-                  }
-                }
-                return next;
-              });
+              if (bookstoreSale) {
+                nextBooks = applyInvoiceLinesToStockRows(s.books, inv.items, 'deduct');
+              } else {
+                nextProducts = applyInvoiceLinesToStockRows(s.products, inv.items, 'deduct');
+              }
               if (inv.payment_method === 'credit' && inv.due_amount > 0) {
                 const debtId = nextId(s.debts);
                 const nowDate = new Date().toISOString().slice(0, 10);

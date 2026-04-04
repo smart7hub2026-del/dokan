@@ -1,10 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useMemo } from 'react';
 import {
   CheckCircle,
   XCircle,
   Eye,
-  X,
   Clock,
   Package,
   ClipboardList,
@@ -19,6 +17,7 @@ import { Invoice } from '../data/mockData';
 import { useStore, type PurchaseListTaskData } from '../store/useStore';
 import { useToast } from './Toast';
 import { useApp } from '../context/AppContext';
+import FormModal from './ui/FormModal';
 
 const MISC_TYPES = ['warehouse_transfer', 'staff_expense', 'staff_cash', 'staff_return'] as const;
 
@@ -62,22 +61,11 @@ export default function PendingPage() {
         ? 'bg-gradient-to-br from-rose-600/80 to-rose-900 text-white'
         : 'bg-gradient-to-br from-rose-500 to-rose-700 text-white shadow-md shadow-rose-900/15',
       emptyCard: isDark ? 'border-white/10 bg-slate-900/40' : 'border-slate-200 bg-slate-50/80',
-      modalShell: isDark ? 'glass-dark border-white/10 bg-slate-950/95' : 'bg-white border-slate-200 shadow-2xl',
-      modalOverlay: 'bg-black/55 backdrop-blur-sm',
     }),
     [isDark]
   );
 
   const [viewInvoice, setViewInvoice] = useState<Invoice | null>(null);
-
-  useEffect(() => {
-    if (!viewInvoice) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [viewInvoice]);
 
   const pending = invoices.filter(i => i.approval_status === 'pending');
   const approved = invoices.filter(i => i.approval_status === 'approved');
@@ -190,21 +178,46 @@ export default function PendingPage() {
   return (
     <div className="space-y-6 sm:space-y-8 fade-in pb-4" dir="rtl">
       <header
-        className={`flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 border-b pb-5 sm:pb-6 ${
-          isDark ? 'border-white/10' : 'border-slate-200'
+        className={`relative overflow-hidden rounded-3xl border p-5 sm:p-7 ${
+          isDark
+            ? 'border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-950/40 via-slate-950/60 to-slate-950/90 shadow-[0_20px_50px_rgba(0,0,0,0.35)]'
+            : 'border-fuchsia-200/80 bg-gradient-to-br from-fuchsia-50/90 via-white to-violet-50/50 shadow-lg shadow-fuchsia-900/5'
         }`}
       >
-        <div className="flex items-start gap-3">
-          <div
-            className={`hidden sm:flex h-12 w-12 rounded-2xl items-center justify-center shrink-0 ${
-              isDark ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-700'
-            }`}
-          >
-            <Activity size={24} strokeWidth={2} />
+        <div
+          className={`pointer-events-none absolute -left-16 -top-16 h-40 w-40 rounded-full blur-3xl ${
+            isDark ? 'bg-fuchsia-600/20' : 'bg-fuchsia-400/25'
+          }`}
+        />
+        <div className="relative flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div
+              className={`flex h-14 w-14 sm:h-16 sm:w-16 rounded-2xl items-center justify-center shrink-0 ring-2 ${
+                isDark
+                  ? 'bg-fuchsia-500/20 text-fuchsia-300 ring-fuchsia-500/30'
+                  : 'bg-fuchsia-100 text-fuchsia-700 ring-fuchsia-200'
+              }`}
+            >
+              <Activity size={28} strokeWidth={2} className="sm:w-8 sm:h-8" />
+            </div>
+            <div>
+              <p
+                className={`text-[11px] font-bold uppercase tracking-widest mb-1 ${
+                  isDark ? 'text-fuchsia-300/90' : 'text-fuchsia-700'
+                }`}
+              >
+                صف کار مدیر
+              </p>
+              <h1 className={`text-2xl sm:text-3xl font-black tracking-tight ${th.h1}`}>{t('pending_sales')}</h1>
+              <p className={`text-sm mt-2 max-w-xl leading-relaxed ${th.sub}`}>{t('pending_activity_hint')}</p>
+            </div>
           </div>
-          <div>
-            <h1 className={`text-xl sm:text-2xl font-black tracking-tight ${th.h1}`}>{t('pending_sales')}</h1>
-            <p className={`text-sm mt-1.5 max-w-2xl leading-relaxed ${th.sub}`}>{t('pending_activity_hint')}</p>
+          <div
+            className={`flex flex-wrap gap-2 text-xs font-bold ${isDark ? 'text-fuchsia-200/80' : 'text-fuchsia-900/80'}`}
+          >
+            <span className={`rounded-full px-3 py-1.5 ${isDark ? 'bg-white/10' : 'bg-white/80 border border-fuchsia-100'}`}>
+              فروش · انبار · خرید
+            </span>
           </div>
         </div>
       </header>
@@ -398,10 +411,17 @@ export default function PendingPage() {
             { label: 'تأییدشده', value: approved.length, className: th.statOk, icon: CheckCircle },
             { label: 'ردشده', value: rejected.length, className: th.statNo, icon: XCircle },
           ].map(s => (
-            <div key={s.label} className={`rounded-2xl p-4 sm:p-5 ${s.className}`}>
-              <s.icon size={22} className="text-white/80 mb-2" />
-              <p className="text-2xl sm:text-3xl font-black text-white tabular-nums">{s.value}</p>
-              <p className="text-white/85 text-xs sm:text-sm mt-1 font-bold">{s.label}</p>
+            <div
+              key={s.label}
+              className={`rounded-2xl p-4 sm:p-5 ${s.className} shadow-lg ring-1 ring-white/10`}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <span className="rounded-lg bg-black/10 p-1.5">
+                  <s.icon size={20} className="text-white/95" />
+                </span>
+              </div>
+              <p className="text-2xl sm:text-3xl font-black text-white tabular-nums leading-none">{s.value}</p>
+              <p className="text-white/90 text-xs sm:text-sm mt-2 font-bold">{s.label}</p>
             </div>
           ))}
         </div>
@@ -571,109 +591,95 @@ export default function PendingPage() {
         </div>
       )}
 
-      {viewInvoice &&
-        createPortal(
-          <div
-            className={`fixed inset-0 z-[110] flex items-center justify-center overflow-y-auto overscroll-contain p-3 pt-[max(12px,env(safe-area-inset-top))] pb-[max(12px,env(safe-area-inset-bottom))] sm:p-4 sm:py-6 ${th.modalOverlay}`}
-            style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}
-            role="dialog"
-            aria-modal="true"
-          >
-            <button
-              type="button"
-              className="fixed inset-0 cursor-default"
-              aria-label="بستن"
-              onClick={() => setViewInvoice(null)}
-            />
-            <div
-              className={`relative z-[1] my-auto rounded-2xl w-full max-w-2xl max-h-[min(92dvh,calc(100dvh-1.5rem))] flex flex-col overflow-hidden border ${th.modalShell}`}
-              onClick={e => e.stopPropagation()}
-            >
-              <div
-                className={`flex shrink-0 items-center justify-between p-4 sm:p-5 border-b ${
-                  isDark ? 'border-white/10' : 'border-slate-200'
-                }`}
-              >
-                <h2 className={`font-bold ${th.h1}`}>فاکتور {viewInvoice.invoice_number}</h2>
-                <button type="button" onClick={() => setViewInvoice(null)} className={th.muted}>
-                  <X size={20} />
-                </button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  {[
-                    ['مشتری', viewInvoice.customer_name],
-                    ['موبایل', viewInvoice.customer_phone],
-                    ['فروشنده', viewInvoice.seller_name],
-                    ['تاریخ', viewInvoice.invoice_date],
-                    ['روش پرداخت', viewInvoice.payment_method === 'cash' ? 'نقدی' : 'نسیه'],
-                  ].map(([k, v]) => (
-                    <div key={k}>
-                      <span className={`block text-xs ${th.muted}`}>{k}</span>
-                      <span className={`font-medium ${th.body}`}>{v}</span>
-                    </div>
-                  ))}
+      <FormModal
+        open={Boolean(viewInvoice)}
+        onClose={() => setViewInvoice(null)}
+        title={
+          viewInvoice ? (
+            <span className="flex flex-wrap items-center gap-2">
+              <span className={isDark ? 'text-fuchsia-300' : 'text-fuchsia-700'}>فاکتور</span>
+              <span className="font-mono text-sm sm:text-base">{viewInvoice.invoice_number}</span>
+            </span>
+          ) : (
+            ''
+          )
+        }
+        size="lg"
+      >
+        {viewInvoice ? (
+          <div className="space-y-4 text-right">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+              {[
+                ['مشتری', viewInvoice.customer_name],
+                ['موبایل', viewInvoice.customer_phone],
+                ['فروشنده', viewInvoice.seller_name],
+                ['تاریخ', viewInvoice.invoice_date],
+                ['روش پرداخت', viewInvoice.payment_method === 'cash' ? 'نقدی' : 'نسیه'],
+              ].map(([k, v]) => (
+                <div key={k}>
+                  <span className={`block text-xs ${th.muted}`}>{k}</span>
+                  <span className={`font-medium ${th.body}`}>{v}</span>
                 </div>
-                <div>
-                  <h3 className={`text-sm font-bold mb-2 ${th.h1}`}>آیتم‌ها</h3>
-                  <div className="space-y-2">
-                    {viewInvoice.items.map(item => (
-                      <div
-                        key={item.id}
-                        className={`flex justify-between rounded-xl p-3 text-sm border ${th.invoiceBox}`}
+              ))}
+            </div>
+            <div>
+              <h3 className={`text-sm font-bold mb-2 ${th.h1}`}>آیتم‌ها</h3>
+              <div className="space-y-2">
+                {viewInvoice.items.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`flex justify-between rounded-xl p-3 text-sm border ${th.invoiceBox}`}
+                  >
+                    <span className={th.body}>{item.product_name}</span>
+                    <div className="text-left">
+                      <span className={th.muted}>
+                        {item.quantity} × {item.unit_price.toLocaleString()}
+                      </span>
+                      <span
+                        className={`font-bold mr-2 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}
                       >
-                        <span className={th.body}>{item.product_name}</span>
-                        <div className="text-left">
-                          <span className={th.muted}>
-                            {item.quantity} × {item.unit_price.toLocaleString()}
-                          </span>
-                          <span
-                            className={`font-bold mr-2 ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}
-                          >
-                            {item.total_price.toLocaleString()} ؋
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className={`border-t pt-3 space-y-2 text-sm ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
-                  <div className={`flex justify-between ${th.muted}`}>
-                    <span>جمع:</span>
-                    <span className={th.h1}>{viewInvoice.subtotal.toLocaleString()} ؋</span>
-                  </div>
-                  {viewInvoice.discount > 0 && (
-                    <div className="flex justify-between">
-                      <span className={th.muted}>تخفیف:</span>
-                      <span className={isDark ? 'text-amber-400' : 'text-amber-700'}>
-                        -{viewInvoice.discount.toLocaleString()} ؋
+                        {item.total_price.toLocaleString()} ؋
                       </span>
                     </div>
-                  )}
-                  <div className={`flex justify-between font-bold ${th.h1}`}>
-                    <span>مجموع:</span>
-                    <span className="text-lg">{viewInvoice.total.toLocaleString()} ؋</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className={th.muted}>پرداخت‌شده:</span>
-                    <span className={isDark ? 'text-emerald-400' : 'text-emerald-600'}>
-                      {viewInvoice.paid_amount.toLocaleString()} ؋
-                    </span>
-                  </div>
-                  {viewInvoice.due_amount > 0 && (
-                    <div className="flex justify-between">
-                      <span className={th.muted}>بدهی:</span>
-                      <span className={`font-bold ${isDark ? 'text-rose-400' : 'text-rose-600'}`}>
-                        {viewInvoice.due_amount.toLocaleString()} ؋
-                      </span>
-                    </div>
-                  )}
-                </div>
+                ))}
               </div>
             </div>
-          </div>,
-          document.body
-        )}
+            <div className={`border-t pt-3 space-y-2 text-sm ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+              <div className={`flex justify-between ${th.muted}`}>
+                <span>جمع:</span>
+                <span className={th.h1}>{viewInvoice.subtotal.toLocaleString()} ؋</span>
+              </div>
+              {viewInvoice.discount > 0 && (
+                <div className="flex justify-between">
+                  <span className={th.muted}>تخفیف:</span>
+                  <span className={isDark ? 'text-amber-400' : 'text-amber-700'}>
+                    -{viewInvoice.discount.toLocaleString()} ؋
+                  </span>
+                </div>
+              )}
+              <div className={`flex justify-between font-bold ${th.h1}`}>
+                <span>مجموع:</span>
+                <span className="text-lg">{viewInvoice.total.toLocaleString()} ؋</span>
+              </div>
+              <div className="flex justify-between">
+                <span className={th.muted}>پرداخت‌شده:</span>
+                <span className={isDark ? 'text-emerald-400' : 'text-emerald-600'}>
+                  {viewInvoice.paid_amount.toLocaleString()} ؋
+                </span>
+              </div>
+              {viewInvoice.due_amount > 0 && (
+                <div className="flex justify-between">
+                  <span className={th.muted}>بدهی:</span>
+                  <span className={`font-bold ${isDark ? 'text-rose-400' : 'text-rose-600'}`}>
+                    {viewInvoice.due_amount.toLocaleString()} ؋
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : null}
+      </FormModal>
     </div>
   );
 }

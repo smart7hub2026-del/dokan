@@ -6,11 +6,20 @@ import {
   apiGetTenants,
   apiGetSubscriptionPayments,
   apiMasterPlatformBackup,
+  apiMasterPlatformSnapshotBlob,
   apiMasterLoginAudit,
+  apiMasterBackupAudit,
+  apiMasterPlatformRestore,
   apiGetAdminPayments,
   apiVerifyAdminPayment,
+  apiGetMasterBranchRequests,
+  apiApproveBranchRequest,
+  apiRejectBranchRequest,
   type Tenant,
+  type BranchRequestRow,
 } from '../services/api';
+
+const MASTER_RESTORE_PHRASE_HINT = 'DOKANYAR-AF-RESTORE-PLATFORM';
 import { formatDateByCalendar, formatDateTimeByCalendar, formatMonthLabelByCalendar, type CalendarMode } from '../utils/dateFormat';
 
 const StatCard = ({ icon: Icon, label, value, sub, color, subColor }: { icon: React.ElementType; label: string; value: string; sub?: string; color: string; subColor?: string }) => (
@@ -51,9 +60,21 @@ export default function SuperAdminDashboard() {
   const [backupMsg, setBackupMsg] = useState('');
   const [auditRows, setAuditRows] = useState<Record<string, unknown>[]>([]);
   const [auditError, setAuditError] = useState('');
+  const [masterBackupAuditRows, setMasterBackupAuditRows] = useState<Record<string, unknown>[]>([]);
+  const [masterAuditError, setMasterAuditError] = useState('');
+  const [masterAuditQ, setMasterAuditQ] = useState('');
+  const [restoreSnapshot, setRestoreSnapshot] = useState<Record<string, unknown> | null>(null);
+  const [restoreAckLoss, setRestoreAckLoss] = useState(false);
+  const [restoreAckTenants, setRestoreAckTenants] = useState(false);
+  const [restorePhrase, setRestorePhrase] = useState('');
+  const [restoreResetCode, setRestoreResetCode] = useState('');
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState('');
   const [opsBusy, setOpsBusy] = useState(false);
   const [adminPayments, setAdminPayments] = useState<Record<string, unknown>[]>([]);
   const [payOpsBusy, setPayOpsBusy] = useState(false);
+  const [branchRequests, setBranchRequests] = useState<BranchRequestRow[]>([]);
+  const [branchReqBusy, setBranchReqBusy] = useState(false);
 
   useEffect(() => {
     const tok = authToken || undefined;
@@ -66,10 +87,18 @@ export default function SuperAdminDashboard() {
           apiGetSubscriptionPayments(undefined, tok),
         ]);
         const ap = await apiGetAdminPayments(tok);
+        let br: BranchRequestRow[] = [];
+        try {
+          const bq = await apiGetMasterBranchRequests(tok);
+          br = bq.requests || [];
+        } catch {
+          br = [];
+        }
         if (canceled) return;
         setTenants(tr.tenants || []);
         setPayments((pr.payments as SubPayment[]) || []);
         setAdminPayments((ap.payments as unknown as Record<string, unknown>[]) || []);
+        setBranchRequests(br);
         setLoadError('');
       } catch (e) {
         if (!canceled) setLoadError(e instanceof Error ? e.message : 'خطا در دریافت داده');
@@ -85,7 +114,9 @@ export default function SuperAdminDashboard() {
     setBackupMsg('');
     try {
       const r = await apiMasterPlatformBackup(tok);
-      setBackupMsg(`پشتیبان ذخیره شد: ${r.path}`);
+      const hint = r.hint ? ` — ${r.hint}` : '';
+      const sha = r.sha256 ? ` | SHA256 ${r.sha256.slice(0, 14)}…` : '';
+      setBackupMsg(`پشتیبان روی سرور ذخیره شد${hint}: ${r.path}${sha}`);
     } catch (e) {
       setBackupMsg(e instanceof Error ? e.message : 'خطا در پشتیبان');
     } finally {
@@ -108,6 +139,22 @@ export default function SuperAdminDashboard() {
       setOpsBusy(false);
     }
   }, [authToken]);
+
+  const loadMasterBackupAudit = useCallback(async () => {
+    const tok = authToken || undefined;
+    if (!tok) return;
+    setOpsBusy(true);
+    setMasterAuditError('');
+    try {
+      const r = await apiMasterBackupAudit({ q: masterAuditQ.trim() || undefined, limit: 80, token: tok });
+      setMasterBackupAuditRows(Array.isArray(r.entries) ? r.entries : []);
+    } catch (e) {
+      setMasterAuditError(e instanceof Error ? e.message : 'خطا در لاگ بکاپ');
+      setMasterBackupAuditRows([]);
+    } finally {
+      setOpsBusy(false);
+    }
+  }, [authToken, masterAuditQ]);
 
   const activeTenants = tenants.filter(t => t.status === 'active').length;
   const expiredTenants = tenants.filter(t => t.subscription_status === 'expired').length;
@@ -215,6 +262,91 @@ export default function SuperAdminDashboard() {
         </div>
       </div>
 
+      <div className="glass rounded-2xl p-5 border border-amber-500/25">
+        <h3 className="text-white font-semibold mb-2 flex items-center gap-2">
+          <Building2 size={18} className="text-amber-400" />
+          تأیید شعبهٔ جدید (درخواست از مدیران دکان)
+        </h3>
+        <p className="text-slate-500 text-xs mb-4 leading-relaxed">
+          مدیر هر فروشگاه از تنظیمات → کاربران فروشگاه درخواست می‌فرستد. اینجا بررسی کنید؛ پس از تأیید، کد فروشگاه جدید را طبق فرایند داخلی در «مستأجرین» بسازید.
+        </p>
+        <div className="space-y-3 max-h-[420px] overflow-y-auto">
+          {branchRequests.length === 0 ? (
+            <p className="text-slate-500 text-sm py-4 text-center">درخواست معلقی نیست.</p>
+          ) : (
+            branchRequests.map((r) => (
+              <div
+                key={r.id}
+                className="rounded-xl border border-white/10 bg-slate-900/40 p-4 space-y-2 text-right"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-amber-200 font-mono text-sm" dir="ltr">
+                    #{r.id} — از {r.from_shop_code}
+                  </span>
+                  <span className="text-slate-500 text-[10px]">{r.created_at?.replace('T', ' ').slice(0, 19)}</span>
+                </div>
+                {r.branch_title ? <p className="text-white font-bold text-sm">{r.branch_title}</p> : null}
+                <p className="text-slate-300 text-xs whitespace-pre-wrap leading-relaxed">{r.message}</p>
+                {r.contact_phone ? (
+                  <p className="text-slate-400 text-xs">
+                    تماس: <span dir="ltr">{r.contact_phone}</span>
+                  </p>
+                ) : null}
+                {r.proposed_credentials_note ? (
+                  <div className="rounded-lg bg-black/25 border border-white/10 p-2 text-[11px] text-slate-400 whitespace-pre-wrap">
+                    یادداشت رمز/کاربری: {r.proposed_credentials_note}
+                  </div>
+                ) : null}
+                {r.image_data_url ? (
+                  <img src={r.image_data_url} alt="" className="max-h-40 rounded-lg border border-white/10 object-contain" />
+                ) : null}
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={branchReqBusy}
+                    onClick={async () => {
+                      if (!authToken) return;
+                      setBranchReqBusy(true);
+                      try {
+                        await apiApproveBranchRequest(r.id, '', authToken);
+                        setBranchRequests((prev) => prev.filter((x) => x.id !== r.id));
+                      } catch (e) {
+                        setLoadError(e instanceof Error ? e.message : 'خطا در تأیید');
+                      } finally {
+                        setBranchReqBusy(false);
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold disabled:opacity-50"
+                  >
+                    تأیید (ثبت شد)
+                  </button>
+                  <button
+                    type="button"
+                    disabled={branchReqBusy}
+                    onClick={async () => {
+                      if (!authToken) return;
+                      const reason = window.prompt('دلیل رد (اختیاری):') || '';
+                      setBranchReqBusy(true);
+                      try {
+                        await apiRejectBranchRequest(r.id, reason, authToken);
+                        setBranchRequests((prev) => prev.filter((x) => x.id !== r.id));
+                      } catch (e) {
+                        setLoadError(e instanceof Error ? e.message : 'خطا در رد');
+                      } finally {
+                        setBranchReqBusy(false);
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-rose-600/80 hover:bg-rose-500 text-white text-xs font-bold disabled:opacity-50"
+                  >
+                    رد
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
       <div className="glass rounded-2xl p-5">
         <h3 className="text-white font-semibold mb-4">دکان‌ها</h3>
         <div className="overflow-x-auto">
@@ -305,7 +437,8 @@ export default function SuperAdminDashboard() {
           <Database size={18} className="text-emerald-400" /> عملیات پلتفرم
         </h3>
         <p className="text-slate-400 text-xs mb-4 leading-relaxed">
-          کپی SQLite به <span className="font-mono text-slate-300">server/backups</span>؛ لاگ ورودهای موفق (رمز، گوگل، ۲FA، آزمایشی سریع).
+          روی PostgreSQL: اسنپ‌شات JSON در <span className="font-mono text-slate-300">server/backups/platform-*.json</span>
+          {' '}— روی SQLite قدیمی: کپی <span className="font-mono">.db</span>. دکمهٔ دوم همان JSON را مستقیم در مرورگر دانلود می‌کند. لاگ ورود جداست.
         </p>
         <div className="flex flex-wrap gap-3">
           <button
@@ -314,7 +447,34 @@ export default function SuperAdminDashboard() {
             onClick={() => void handlePlatformBackup()}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-bold transition-colors"
           >
-            <Database size={16} /> پشتیبان پایگاه داده
+            <Database size={16} /> پشتیبان روی دیسک سرور
+          </button>
+          <button
+            type="button"
+            disabled={opsBusy || !authToken}
+            onClick={async () => {
+              const tok = authToken || undefined;
+              if (!tok) return;
+              setOpsBusy(true);
+              setBackupMsg('');
+              try {
+                const blob = await apiMasterPlatformSnapshotBlob(tok);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `dokanyar_platform_snapshot_${Date.now()}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                setBackupMsg('اسنپ‌شات JSON پلتفرم دانلود شد.');
+              } catch (e) {
+                setBackupMsg(e instanceof Error ? e.message : 'خطا در دانلود');
+              } finally {
+                setOpsBusy(false);
+              }
+            }}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-600 hover:bg-slate-500 disabled:opacity-50 text-white text-sm font-bold transition-colors"
+          >
+            <Database size={16} /> دانلود JSON در مرورگر
           </button>
           <button
             type="button"
@@ -324,11 +484,140 @@ export default function SuperAdminDashboard() {
           >
             <ScrollText size={16} /> نمایش لاگ ورود
           </button>
+          <button
+            type="button"
+            disabled={opsBusy || !authToken}
+            onClick={() => void loadMasterBackupAudit()}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-bold transition-colors"
+          >
+            <ScrollText size={16} /> لاگ ممیزی بکاپ master
+          </button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          <input
+            type="search"
+            value={masterAuditQ}
+            onChange={(e) => setMasterAuditQ(e.target.value)}
+            placeholder="جستجو در action / detail / دکان…"
+            className="flex-1 min-w-[200px] px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-xs placeholder:text-slate-500"
+          />
         </div>
         {backupMsg && (
           <p className={`text-xs mt-3 font-medium ${backupMsg.includes('خطا') ? 'text-rose-400' : 'text-emerald-400'}`}>{backupMsg}</p>
         )}
         {auditError && <p className="text-rose-400 text-xs mt-3">{auditError}</p>}
+        {masterAuditError && <p className="text-rose-400 text-xs mt-3">{masterAuditError}</p>}
+        {masterBackupAuditRows.length > 0 && (
+          <div className="mt-4 max-h-48 overflow-auto rounded-xl border border-indigo-500/20">
+            <p className="text-indigo-200/90 text-[10px] font-bold px-2 py-1 bg-indigo-950/40">ممیزی بکاپ (جدا از settingsLogs)</p>
+            <table className="w-full text-[10px]">
+              <thead className="sticky top-0 bg-slate-800/95">
+                <tr className="text-slate-400 text-right border-b border-white/10">
+                  <th className="py-2 px-2">زمان</th>
+                  <th className="py-2 px-2">action</th>
+                  <th className="py-2 px-2">جزئیات</th>
+                  <th className="py-2 px-2">دکان</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5 text-slate-300">
+                {masterBackupAuditRows.map((row) => (
+                  <tr key={String(row.id ?? row.createdAt)}>
+                    <td className="py-1.5 px-2 whitespace-nowrap">{formatDateTimeByCalendar(String(row.createdAt || ''), calendarMode)}</td>
+                    <td className="py-1.5 px-2 font-mono text-indigo-200">{String(row.action || '')}</td>
+                    <td className="py-1.5 px-2 max-w-[200px] truncate" title={String(row.detail || '')}>{String(row.detail || '')}</td>
+                    <td className="py-1.5 px-2 font-mono">{String(row.actorShopCode || '')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="mt-6 rounded-xl border border-rose-500/25 bg-rose-950/20 p-4 space-y-3">
+          <h4 className="text-rose-200 text-sm font-bold">بازیابی کامل پلتفرم از اسنپ‌شات JSON</h4>
+          <p className="text-slate-400 text-[11px] leading-relaxed">
+            فقط همان فایل اسنپ‌شات کامل پلتفرم (مثلاً از «دانلود JSON»). این کار تمام دکان‌ها و دادهٔ عملیاتی را با فایل جایگزین می‌کند. کد ریست سیستم (از تنظیمات امنیتی) و عبارت دقیق زیر لازم است.
+          </p>
+          <input
+            type="file"
+            accept=".json,application/json"
+            className="text-xs text-slate-300 w-full"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              const reader = new FileReader();
+              reader.onload = () => {
+                try {
+                  const o = JSON.parse(String(reader.result || '{}')) as Record<string, unknown>;
+                  if (!Array.isArray(o.shops)) throw new Error('فایل اسنپ‌شات پلتفرم نیست (shops[] ندارد)');
+                  setRestoreSnapshot(o);
+                  setRestoreMsg('');
+                } catch (ex) {
+                  setRestoreSnapshot(null);
+                  setRestoreMsg(ex instanceof Error ? ex.message : 'JSON نامعتبر');
+                }
+              };
+              reader.readAsText(f);
+            }}
+          />
+          <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
+            <input type="checkbox" checked={restoreAckLoss} onChange={(e) => setRestoreAckLoss(e.target.checked)} />
+            می‌دانم تمام دادهٔ فعلی سرور از بین می‌رود.
+          </label>
+          <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer">
+            <input type="checkbox" checked={restoreAckTenants} onChange={(e) => setRestoreAckTenants(e.target.checked)} />
+            فایل معتبر است و قصد جایگزینی همهٔ tenantها را دارم.
+          </label>
+          <div>
+            <p className="text-[10px] text-slate-500 mb-1">عبارت تأیید (دقیقاً): <span className="font-mono text-amber-200/90">{MASTER_RESTORE_PHRASE_HINT}</span></p>
+            <input
+              type="text"
+              value={restorePhrase}
+              onChange={(e) => setRestorePhrase(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-xs font-mono"
+              placeholder={MASTER_RESTORE_PHRASE_HINT}
+              dir="ltr"
+            />
+          </div>
+          <input
+            type="password"
+            value={restoreResetCode}
+            onChange={(e) => setRestoreResetCode(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-xs"
+            placeholder="کد ریست سیستم (از پنل امنیت)"
+            dir="ltr"
+          />
+          <button
+            type="button"
+            disabled={restoreBusy || !authToken || !restoreSnapshot}
+            onClick={async () => {
+              const tok = authToken || undefined;
+              if (!tok || !restoreSnapshot) return;
+              setRestoreBusy(true);
+              setRestoreMsg('');
+              try {
+                const r = await apiMasterPlatformRestore(
+                  {
+                    snapshot: restoreSnapshot,
+                    acknowledgeTotalDataLoss: restoreAckLoss,
+                    confirmReplaceAllTenants: restoreAckTenants,
+                    typedPhrase: restorePhrase.trim(),
+                    resetCode: restoreResetCode.trim(),
+                  },
+                  tok,
+                );
+                setRestoreMsg(r.message || 'بازیابی انجام شد.');
+              } catch (e) {
+                setRestoreMsg(e instanceof Error ? e.message : 'خطا');
+              } finally {
+                setRestoreBusy(false);
+              }
+            }}
+            className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-sm font-bold"
+          >
+            {restoreBusy ? 'در حال بازیابی…' : 'اجرای بازیابی پلتفرم'}
+          </button>
+          {restoreMsg ? <p className={`text-xs ${restoreMsg.includes('خطا') || restoreMsg.includes('نادرست') || restoreMsg.includes('ناقص') ? 'text-rose-400' : 'text-emerald-400'}`}>{restoreMsg}</p> : null}
+        </div>
         {auditRows.length > 0 && (
           <div className="mt-4 max-h-56 overflow-auto rounded-xl border border-white/10">
             <table className="w-full text-xs">

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { MessageSquare, X, Send, Eye, Check, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, type ChangeEvent } from 'react';
+import { MessageSquare, X, Send, Eye, Check, AlertTriangle, Loader2, RefreshCw, Paperclip } from 'lucide-react';
 import type { SupportTicket } from '../services/api';
 import {
   apiGetMasterSupport,
@@ -37,6 +37,27 @@ export default function SupportPage() {
   const [showSendForm, setShowSendForm] = useState(false);
   const [sendForm, setSendForm] = useState({ subject: '', message: '', priority: 'normal' });
   const [sending, setSending] = useState(false);
+  const [ticketAttachment, setTicketAttachment] = useState<string | null>(null);
+  const attachRef = useRef<HTMLInputElement>(null);
+
+  const onPickAttachment = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) {
+        error(t('error'), 'حجم تصویر حداکثر ۲ مگابایت است.');
+        e.target.value = '';
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') setTicketAttachment(reader.result);
+      };
+      reader.readAsDataURL(file);
+      e.target.value = '';
+    },
+    [error, t]
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -97,11 +118,17 @@ export default function SupportPage() {
     setSending(true);
     try {
       await apiPostSupportMessage(
-        { subject: sendForm.subject, message: sendForm.message, priority: sendForm.priority },
+        {
+          subject: sendForm.subject,
+          message: sendForm.message,
+          priority: sendForm.priority,
+          attachment_base64: ticketAttachment || undefined,
+        },
         token || undefined
       );
       success(t('success'), t('support_ticket_sent'));
       setSendForm({ subject: '', message: '', priority: 'normal' });
+      setTicketAttachment(null);
       setShowSendForm(false);
       await load();
     } catch (err) {
@@ -281,6 +308,16 @@ export default function SupportPage() {
               <div className="bg-slate-800/40 rounded-xl p-4">
                 <p className="text-slate-400 text-xs mb-2">{t('support_message_body')}</p>
                 <p className="text-white text-sm">{viewMsg.message}</p>
+                {viewMsg.attachment_base64 ? (
+                  <div className="mt-4 rounded-xl border border-white/10 overflow-hidden bg-black/20">
+                    <p className="text-slate-500 text-[10px] px-3 py-1.5 border-b border-white/5">ضمیمه</p>
+                    <img
+                      src={viewMsg.attachment_base64}
+                      alt=""
+                      className="max-h-64 w-full object-contain"
+                    />
+                  </div>
+                ) : null}
               </div>
               {viewMsg.reply ? (
                 <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4">
@@ -321,7 +358,14 @@ export default function SupportPage() {
           <div className="glass-dark rounded-2xl w-full max-w-2xl max-h-[min(92dvh,calc(100dvh-1.5rem))] overflow-y-auto overscroll-contain">
             <div className="flex items-center justify-between p-5 border-b border-white/10">
               <h2 className="text-white font-semibold">{t('support_send_ticket')}</h2>
-              <button type="button" onClick={() => setShowSendForm(false)} className="text-slate-400 hover:text-white">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSendForm(false);
+                  setTicketAttachment(null);
+                }}
+                className="text-slate-400 hover:text-white"
+              >
                 <X size={20} />
               </button>
             </div>
@@ -358,6 +402,33 @@ export default function SupportPage() {
                   className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 resize-none"
                   required
                 />
+              </div>
+              <div>
+                <label className="text-slate-400 text-xs mb-2 block flex items-center gap-1.5">
+                  <Paperclip size={12} /> {t('support_attachment_optional')}
+                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => attachRef.current?.click()}
+                    className="glass text-slate-300 hover:text-white px-4 py-2 rounded-xl text-sm"
+                  >
+                    انتخاب تصویر
+                  </button>
+                  <input ref={attachRef} type="file" accept="image/*" className="hidden" onChange={onPickAttachment} />
+                  {ticketAttachment && (
+                    <>
+                      <img src={ticketAttachment} alt="" className="h-14 w-14 rounded-lg object-cover border border-white/10" />
+                      <button
+                        type="button"
+                        onClick={() => setTicketAttachment(null)}
+                        className="text-rose-400 text-xs hover:underline"
+                      >
+                        حذف تصویر
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
               <div className="flex gap-3">
                 <button

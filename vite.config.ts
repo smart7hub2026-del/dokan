@@ -1,39 +1,57 @@
 import path from "path";
-import { fileURLToPath } from "url";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const __pkgJson = path.join(path.dirname(fileURLToPath(import.meta.url)), "package.json");
+const __pkg = JSON.parse(readFileSync(__pkgJson, "utf-8")) as { version?: string };
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { loadEnv } from "vite";
 import { defineConfig } from "vitest/config";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const API_PORT = process.env.PORT || '4000';
-
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss(), viteSingleFile()],
-  optimizeDeps: {
-    include: ["jspdf", "jspdf-autotable", "xlsx"],
-  },
-  test: {
-    // bcrypt + SQLite in server tests can exceed Vitest's 5s default on Windows CI/dev machines
-    testTimeout: 180_000,
-    hookTimeout: 180_000,
-  },
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "src"),
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  /** هرگز از PORT برای پروکسی استفاده نکن — ممکن است با پورت Vite یا هاست اشتباه شود */
+  const apiPort = env.SERVER_PORT || env.VITE_DEV_API_PORT || "4000";
+
+  return {
+    define: {
+      __APP_VERSION__: JSON.stringify(__pkg.version ?? "0.0.0"),
     },
-  },
-  server: {
-    host: true, // expose on local network (needed for mobile testing)
-    proxy: {
-      '/api': {
-        target: `http://localhost:${API_PORT}`,
-        changeOrigin: true,
+    plugins: [react(), tailwindcss(), viteSingleFile()],
+    optimizeDeps: {
+      include: ["jspdf", "jspdf-autotable", "xlsx"],
+    },
+    test: {
+      setupFiles: ["./server/vitest-setup.ts"],
+      env: {
+        DATABASE_URL:
+          process.env.DATABASE_URL ||
+          "postgresql://postgres:postgres@127.0.0.1:5432/dokanyar_test",
+      },
+      maxWorkers: 1,
+      fileParallelism: false,
+      testTimeout: 180_000,
+      hookTimeout: 180_000,
+    },
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "src"),
       },
     },
-    // موبایل: اپ را با IP ماشین باز کنید (مثلاً 192.168.x.x:5173) و VITE_API_BASE_URL را خالی نگه دارید
-  },
+    server: {
+      host: true,
+      proxy: {
+        "/api": {
+          target: `http://127.0.0.1:${apiPort}`,
+          changeOrigin: true,
+        },
+      },
+    },
+  };
 });

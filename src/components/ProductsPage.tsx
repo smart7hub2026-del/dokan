@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Plus, Search, Edit2, Trash2, X, Package, AlertTriangle, Barcode, Hash, Calendar, Printer, RefreshCw, Camera, Mic, MicOff, Download, ChevronRight, ChevronLeft, Info, ShoppingCart } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, X, Package, AlertTriangle, Barcode, Hash, Calendar, Printer, RefreshCw, Camera, Mic, MicOff, Download, ChevronRight, ChevronLeft, Info, ShoppingCart, FolderTree } from 'lucide-react';
+import ProductCategoriesPanel from './ProductCategoriesPanel';
 import { Product, type CurrencyCode } from '../data/mockData';
 import { useApp } from '../context/AppContext';
-import { useStore } from '../store/useStore';
+import { useStore, type WarehouseBin } from '../store/useStore';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
 import { BrowserMultiFormatReader } from '@zxing/library';
 import FormModal from './ui/FormModal';
@@ -25,7 +26,7 @@ function exportToCSV(data: any[], filename: string) {
   document.body.removeChild(link);
 }
 
-type Tab = 'products' | 'serials' | 'expiry';
+type Tab = 'products' | 'categories' | 'serials' | 'expiry';
 type PrintSize = 'A4' | 'A5' | '80mm' | '58mm';
 
 function generateBarcode(): string {
@@ -174,6 +175,7 @@ export default function ProductsPage() {
   const navigate = useNavigate();
   const { isDark, t, currencies, formatPrice } = useApp();
   const products = useStore(s => s.products);
+  const books = useStore((s) => s.books);
   const categories = useStore(s => s.categories);
   const serials = useStore(s => s.serialNumbers);
   const expiryRecords = useStore(s => s.expiryRecords);
@@ -185,6 +187,10 @@ export default function ProductsPage() {
   const addCategoryStore = useStore(s => s.addCategory);
   const addExpiry = useStore(s => s.addExpiry);
   const storeAddSerial = useStore(s => s.addSerial);
+  const warehouses = useStore(s => s.warehouses);
+  const shopSettings = useStore(s => s.shopSettings);
+  const isGoldJewelry = shopSettings?.business_type === 'gold_jewelry';
+  const isBookstore = shopSettings?.business_type === 'bookstore';
 
   const [activeTab, setActiveTab] = useState<Tab>('products');
   const [currentPage, setCurrentPage] = useState(1);
@@ -207,6 +213,8 @@ export default function ProductsPage() {
 
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [rowGlowId, setRowGlowId] = useState<number | null>(null);
+  const [rowExitId, setRowExitId] = useState<number | null>(null);
 
   // Scanner state
   const [showScanner, setShowScanner] = useState(false);
@@ -232,12 +240,46 @@ export default function ProductsPage() {
 
   const [form, setForm] = useState({
     product_code: '', barcode: '', name: '', category_id: 1,
-    purchase_price: '' as NumField, sale_price: '' as NumField, stock_shop: '' as NumField, stock_warehouse: '' as NumField,
+    purchase_price: '' as NumField, sale_price: '' as NumField, stock_shop: '' as NumField,
     min_stock: '' as NumField, has_expiry: false, has_serial: false,
     expiry_date: '', batch_number: '', image_url: '',
     currency_code: 'AFN' as CurrencyCode,
+    unit: 'عدد',
+    karat: '' as NumField,
+    weight_grams: '' as NumField,
+    labor_note: '',
+    note: '',
   });
+  /** موجودی انبار به ازای هر انبار (هنگام چند انبار) */
+  const [whQtyById, setWhQtyById] = useState<Record<number, NumField>>({});
+  const [activeWhId, setActiveWhId] = useState(1);
   const imageRef = useRef<HTMLInputElement>(null);
+
+  const emptyWhQty = (list: WarehouseBin[]) => {
+    const o: Record<number, NumField> = {};
+    for (const w of list) o[w.id] = '';
+    return o;
+  };
+
+  const initWhFromProduct = (list: WarehouseBin[], p: Product | null) => {
+    const o = emptyWhQty(list);
+    if (!list.length || !p) return o;
+    const raw = p.warehouse_stock_by_id;
+    if (raw && typeof raw === 'object') {
+      let any = false;
+      for (const w of list) {
+        const k = String(w.id);
+        if (Object.prototype.hasOwnProperty.call(raw, k)) {
+          o[w.id] = Number(raw[k]) || 0;
+          any = true;
+        }
+      }
+      if (!any) o[list[0].id] = p.stock_warehouse;
+    } else {
+      o[list[0].id] = p.stock_warehouse;
+    }
+    return o;
+  };
 
   const { isListening, startListening, stopListening, supported } = useVoiceSearch((text) => {
     setSearch(text);
@@ -270,7 +312,7 @@ export default function ProductsPage() {
 
   const textColor = isDark ? 'text-white' : 'text-slate-800';
   const subText = isDark ? 'text-slate-400' : 'text-slate-500';
-  const cardBg = isDark ? 'glass' : 'bg-white border border-slate-200 shadow-sm rounded-2xl';
+  const cardBg = isDark ? 'glass cf-glass-card' : 'bg-white border border-slate-200 shadow-sm rounded-2xl';
   const inputClass = isDark
     ? 'w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none'
     : 'w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-800 text-sm focus:border-indigo-500 outline-none';
@@ -280,10 +322,14 @@ export default function ProductsPage() {
     const matchSearch =
       p.name.includes(q) ||
       p.product_code.includes(q) ||
-      p.barcode.includes(q);
+      p.barcode.includes(q) ||
+      (isGoldJewelry &&
+        q !== '' &&
+        ((p.karat != null && String(p.karat).includes(q)) ||
+          (p.weight_grams != null && String(p.weight_grams).includes(q))));
     const matchCat = catFilter === 0 || p.category_id === catFilter;
     return matchSearch && matchCat;
-  }), [products, search, catFilter]);
+  }), [products, search, catFilter, isGoldJewelry]);
 
   const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
   const paginated = filtered.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
@@ -294,6 +340,14 @@ export default function ProductsPage() {
       'بارکد': p.barcode,
       'نام محصول': p.name,
       'دسته‌بندی': p.category_name,
+      ...(isGoldJewelry
+        ? {
+            عیار: p.karat ?? '',
+            'وزن (گرم)': p.weight_grams ?? '',
+            'یادداشت اجرت': p.labor_note ?? '',
+            یادداشت: p.note ?? '',
+          }
+        : {}),
       'قیمت خرید': p.purchase_price,
       'قیمت فروش': p.sale_price,
       'موجودی فروشگاه': p.stock_shop,
@@ -310,11 +364,15 @@ export default function ProductsPage() {
     setForm({
       product_code: `P${String(nextNum).padStart(3, '0')}`,
       barcode: '', name: '', category_id: defaultCatId,
-      purchase_price: '', sale_price: '', stock_shop: '', stock_warehouse: '',
+      purchase_price: '', sale_price: '', stock_shop: '',
       min_stock: '', has_expiry: false, has_serial: false,
       expiry_date: '', batch_number: '', image_url: '',
       currency_code: 'AFN',
+      unit: 'عدد',
+      karat: '', weight_grams: '', labor_note: '', note: '',
     });
+    setWhQtyById(emptyWhQty(warehouses));
+    setActiveWhId(warehouses[0]?.id ?? 1);
     setShowModal(true);
   };
 
@@ -324,11 +382,18 @@ export default function ProductsPage() {
       product_code: p.product_code, barcode: p.barcode, name: p.name,
       category_id: p.category_id, purchase_price: p.purchase_price,
       sale_price: p.sale_price, stock_shop: p.stock_shop,
-      stock_warehouse: p.stock_warehouse, min_stock: p.min_stock,
+      min_stock: p.min_stock,
       has_expiry: p.has_expiry || false, has_serial: p.has_serial || false,
       expiry_date: '', batch_number: '', image_url: p.image_url || '',
       currency_code: p.currency_code ?? 'AFN',
+      unit: (p as any).unit || 'عدد',
+      karat: p.karat ?? '',
+      weight_grams: p.weight_grams ?? '',
+      labor_note: p.labor_note ?? '',
+      note: p.note ?? '',
     });
+    setWhQtyById(initWhFromProduct(warehouses, p));
+    setActiveWhId(warehouses[0]?.id ?? 1);
     setShowModal(true);
   };
 
@@ -340,8 +405,26 @@ export default function ProductsPage() {
     const purchase_price = parseMoneyNum(form.purchase_price);
     const sale_price = parseMoneyNum(form.sale_price);
     const stock_shop = parseFormNum(form.stock_shop);
-    const stock_warehouse = parseFormNum(form.stock_warehouse);
+    const warehouse_stock_by_id: Record<string, number> = {};
+    let stock_warehouse = 0;
+    for (const w of warehouses) {
+      const q = parseFormNum(whQtyById[w.id] ?? '');
+      warehouse_stock_by_id[String(w.id)] = q;
+      stock_warehouse += q;
+    }
     const min_stock = parseFormNum(form.min_stock);
+    const editorId = currentUser?.id;
+    const product_status = editItem
+      ? (editItem.product_status ?? (editItem.is_active ? 'active' : 'discontinued'))
+      : 'active';
+    const goldFields = isGoldJewelry
+      ? {
+          karat: form.karat === '' ? undefined : Number(form.karat),
+          weight_grams: form.weight_grams === '' ? undefined : parseMoneyNum(form.weight_grams),
+          labor_note: form.labor_note.trim() || undefined,
+          note: form.note.trim() || undefined,
+        }
+      : {};
     if (editItem) {
       updateProduct({
         ...editItem,
@@ -354,12 +437,19 @@ export default function ProductsPage() {
         sale_price,
         stock_shop,
         stock_warehouse,
+        warehouse_stock_by_id,
         min_stock,
         has_expiry: form.has_expiry,
         has_serial: form.has_serial,
         image_url: form.image_url || undefined,
         currency_code: form.currency_code,
+        product_status,
+        updated_by: editorId,
+        ...goldFields,
       });
+      const id = editItem.id;
+      setRowGlowId(id);
+      window.setTimeout(() => setRowGlowId((cur) => (cur === id ? null : cur)), 1000);
     } else {
       const np = addProduct({
         product_code: form.product_code,
@@ -371,6 +461,7 @@ export default function ProductsPage() {
         sale_price,
         stock_shop,
         stock_warehouse,
+        warehouse_stock_by_id,
         min_stock,
         is_active: true,
         tenant_id: tenantId,
@@ -378,6 +469,9 @@ export default function ProductsPage() {
         has_serial: form.has_serial,
         image_url: form.image_url || undefined,
         currency_code: form.currency_code,
+        product_status: 'active',
+        updated_by: editorId,
+        ...goldFields,
       });
       if (form.has_expiry && form.expiry_date) {
         addExpiry({
@@ -395,10 +489,14 @@ export default function ProductsPage() {
   const confirmDelete = (p: Product) => setDeleteItem(p);
 
   const doDelete = () => {
-    if (deleteItem) {
-      deleteProduct(deleteItem.id);
-      setDeleteItem(null);
-    }
+    if (!deleteItem) return;
+    const id = deleteItem.id;
+    setDeleteItem(null);
+    setRowExitId(id);
+    window.setTimeout(() => {
+      deleteProduct(id);
+      setRowExitId((cur) => (cur === id ? null : cur));
+    }, 480);
   };
 
   const sendToSales = (p: Product) => {
@@ -543,6 +641,7 @@ export default function ProductsPage() {
       <div className="flex gap-2">
         {[
           { id: 'products', label: 'محصولات', icon: <Package size={15}/> },
+          { id: 'categories', label: t('product_categories_tab'), icon: <FolderTree size={15}/> },
           { id: 'serials', label: 'سریال نامبر', icon: <Hash size={15}/> },
           { id: 'expiry', label: 'تاریخ انقضا', icon: <Calendar size={15}/> },
         ].map(tab => (
@@ -553,6 +652,17 @@ export default function ProductsPage() {
         ))}
       </div>
 
+      {activeTab === 'categories' && (
+        <ProductCategoriesPanel
+          countInCategory={(cid) => {
+            let n = products.filter((p) => p.category_id === cid).length;
+            if (isBookstore) n += books.filter((b) => b.category_id === cid).length;
+            return n;
+          }}
+          entityLabel={t('product')}
+        />
+      )}
+
       {/* PRODUCTS TAB */}
       {activeTab === 'products' && (
         <>
@@ -560,7 +670,7 @@ export default function ProductsPage() {
             <div className="relative flex-1 flex items-center">
               <Search size={16} className="absolute right-3 text-slate-400" />
               <input value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="جستجو (نام، کد، بارکد)..."
+                placeholder={isGoldJewelry ? 'جستجو (نام، کد، بارکد، عیار، وزن)…' : 'جستجو (نام، کد، بارکد)…'}
                 className={`${inputClass} pr-10 pl-24`} />
               
               <div className="absolute left-2 flex items-center gap-1">
@@ -612,11 +722,11 @@ export default function ProductsPage() {
           </div>
 
           <div className={`${cardBg} overflow-hidden`}>
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="hidden md:block overflow-x-auto max-h-[70vh] overflow-y-auto">
+              <table className={`w-full text-sm ${isDark ? 'cf-data-grid' : ''}`}>
                 <thead>
                   <tr className={`${isDark ? 'bg-slate-800/50 border-b border-white/10' : 'bg-slate-50 border-b border-slate-200'}`}>
-                    {['کد', 'بارکد', 'نام محصول', 'دسته', 'قیمت خرید', 'قیمت فروش', 'موجودی', 'انبار', 'وضعیت', 'عملیات'].map(h => (
+                    {[...['کد', 'بارکد', 'نام محصول', 'دسته'], ...(isGoldJewelry ? ['عیار', 'وزن (g)'] : []), ...['قیمت خرید', 'قیمت فروش', 'موجودی', 'انبار', 'وضعیت', 'عملیات']].map(h => (
                       <th key={h} className={`text-right ${subText} font-medium py-3 px-4 whitespace-nowrap`}>{h}</th>
                     ))}
                   </tr>
@@ -626,6 +736,8 @@ export default function ProductsPage() {
                     <tr
                       key={p.id}
                       className={`${isDark ? 'table-row-hover' : 'hover:bg-slate-50 transition-colors'} ${
+                        rowGlowId === p.id ? 'cf-row-updated' : ''
+                      } ${rowExitId === p.id ? 'cf-row-exit' : ''} ${
                         p.is_active && p.stock_shop > 0 && p.stock_shop <= p.min_stock
                           ? isDark
                             ? 'bg-rose-500/5'
@@ -653,8 +765,16 @@ export default function ProductsPage() {
                         </div>
                       </td>
                       <td className={`py-3 px-4 ${subText} text-xs`}>{p.category_name}</td>
-                      <td className="py-3 px-4 text-amber-400 font-medium">{formatPriceWithOriginal(p.purchase_price, p.currency_code ?? 'AFN')}</td>
-                      <td className="py-3 px-4 text-emerald-400 font-medium">{formatPriceWithOriginal(p.sale_price, p.currency_code ?? 'AFN')}</td>
+                      {isGoldJewelry && (
+                        <>
+                          <td className={`py-3 px-4 ${subText} font-mono text-xs`}>{p.karat != null ? p.karat : '—'}</td>
+                          <td className={`py-3 px-4 ${subText} font-mono text-xs`}>
+                            {p.weight_grams != null ? p.weight_grams : '—'}
+                          </td>
+                        </>
+                      )}
+                      <td className="py-3 px-4 text-amber-400 font-medium font-num tabular-nums">{formatPriceWithOriginal(p.purchase_price, p.currency_code ?? 'AFN')}</td>
+                      <td className="py-3 px-4 text-emerald-400 font-medium font-num tabular-nums">{formatPriceWithOriginal(p.sale_price, p.currency_code ?? 'AFN')}</td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1">
                           <span className={`font-bold ${p.stock_shop === 0 ? 'text-rose-400' : p.stock_shop <= p.min_stock ? 'text-amber-400' : textColor}`}>{p.stock_shop}</span>
@@ -717,6 +837,13 @@ export default function ProductsPage() {
                         <span className={`text-[11px] px-2 py-0.5 rounded-lg ${isDark ? 'bg-white/5' : 'bg-white border border-slate-200'} ${subText}`}>
                           {p.category_name}
                         </span>
+                        {isGoldJewelry && (
+                          <span
+                            className={`text-[11px] px-2 py-0.5 rounded-lg bg-amber-500/15 ${isDark ? 'text-amber-300' : 'text-amber-800'}`}
+                          >
+                            عیار {p.karat ?? '—'} · {p.weight_grams != null ? `${p.weight_grams}g` : '—'}
+                          </span>
+                        )}
                         {p.has_expiry && (
                           <span
                             className={`text-[11px] px-2 py-0.5 rounded-lg bg-amber-500/15 ${isDark ? 'text-amber-400' : 'text-amber-700'}`}
@@ -1021,6 +1148,56 @@ export default function ProductsPage() {
                   }}
                     className={inputClass} min="0" />
                 </div>
+                {isGoldJewelry && (
+                  <>
+                    <div>
+                      <label className="text-slate-400 text-xs mb-1 block">عیار (مثلاً ۱۸، ۲۱، ۹۰۰ برای سکه)</label>
+                      <input
+                        type="number"
+                        value={form.karat === '' ? '' : form.karat}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setForm({ ...form, karat: v === '' ? '' : Number(v) });
+                        }}
+                        className={inputClass}
+                        min="0"
+                        step="1"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-400 text-xs mb-1 block">وزن (گرم)</label>
+                      <input
+                        type="number"
+                        value={form.weight_grams === '' ? '' : form.weight_grams}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setForm({ ...form, weight_grams: v === '' ? '' : Number(v) });
+                        }}
+                        className={inputClass}
+                        min="0"
+                        step="0.001"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-slate-400 text-xs mb-1 block">اجرت / توضیح اجرت</label>
+                      <input
+                        value={form.labor_note}
+                        onChange={(e) => setForm({ ...form, labor_note: e.target.value })}
+                        className={inputClass}
+                        placeholder="اختیاری"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-slate-400 text-xs mb-1 block">یادداشت کالا</label>
+                      <input
+                        value={form.note}
+                        onChange={(e) => setForm({ ...form, note: e.target.value })}
+                        className={inputClass}
+                        placeholder="اختیاری"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Prices & Stock */}
@@ -1043,7 +1220,6 @@ export default function ProductsPage() {
                   ['قیمت خرید', 'purchase_price'],
                   ['قیمت فروش', 'sale_price'],
                   ['موجودی فروشگاه', 'stock_shop'],
-                  ['موجودی انبار', 'stock_warehouse'],
                 ] as const).map(([label, field]) => (
                   <div key={field}>
                     <label className="text-slate-400 text-xs mb-1 block">{label}</label>
@@ -1056,6 +1232,87 @@ export default function ProductsPage() {
                       className={inputClass} min="0" />
                   </div>
                 ))}
+                <div className="col-span-2">
+                  <label className="text-slate-400 text-xs mb-1 block">واحد اصلی موجودی</label>
+                  <select
+                    value={form.unit}
+                    onChange={(e) => setForm({ ...form, unit: e.target.value })}
+                    className={inputClass}
+                  >
+                    {['عدد', 'کیلو', 'متر', 'بسته', 'لیتر', 'کارتن', 'جعبه'].map((u) => (
+                      <option key={u} value={u}>
+                        {u}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    این واحد برای تفسیر تعداد موجودی و گزارش‌ها استفاده می‌شود (مثلاً ۱۰ کیلو، ۵ متر، ۳ بسته).
+                  </p>
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <label className="text-slate-400 text-xs mb-1 block">موجودی انبار</label>
+                  {warehouses.length === 0 ? (
+                    <p className={`text-xs ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>
+                      ابتدا از بخش انبار حداقل یک انبار تعریف کنید.
+                    </p>
+                  ) : warehouses.length <= 1 ? (
+                    <input
+                      type="number"
+                      value={warehouses[0] ? (whQtyById[warehouses[0].id] === '' ? '' : whQtyById[warehouses[0].id]) : ''}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        const id = warehouses[0]?.id;
+                        if (id == null) return;
+                        setWhQtyById((prev) => ({
+                          ...prev,
+                          [id]: v === '' ? '' : Number(v),
+                        }));
+                      }}
+                      step="1"
+                      className={inputClass}
+                      min="0"
+                      placeholder={warehouses[0] ? warehouses[0].name : 'انبار'}
+                    />
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-slate-500 text-[10px] mb-1 block">انبار</label>
+                        <select
+                          value={activeWhId}
+                          onChange={(e) => setActiveWhId(Number(e.target.value))}
+                          className={inputClass}
+                        >
+                          {warehouses.map((w) => (
+                            <option key={w.id} value={w.id}>{w.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-slate-500 text-[10px] mb-1 block">تعداد در این انبار</label>
+                        <input
+                          type="number"
+                          value={whQtyById[activeWhId] === '' ? '' : whQtyById[activeWhId]}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setWhQtyById((prev) => ({
+                              ...prev,
+                              [activeWhId]: v === '' ? '' : Number(v),
+                            }));
+                          }}
+                          step="1"
+                          className={inputClass}
+                          min="0"
+                        />
+                      </div>
+                      <p className="col-span-full text-[11px] text-slate-500">
+                        جمع موجودی انبار:{' '}
+                        <span className="font-bold text-slate-300">
+                          {warehouses.reduce((s, w) => s + parseFormNum(whQtyById[w.id] ?? ''), 0)}
+                        </span>
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Special Features */}

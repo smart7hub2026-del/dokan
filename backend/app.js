@@ -21,8 +21,20 @@ import nodemailer from 'nodemailer';
 import fsp from 'fs/promises';
 import crypto from 'crypto';
 import { z } from 'zod';
-import { loadDatabase, saveDatabase } from './storage.js';
-import { copyPlatformDatabase, resolvePlatformSqlitePath } from './backupPlatformDb.js';
+import { loadDatabase, saveDatabase, restorePlatformFromMasterSnapshot, prisma } from './storage.js';
+import { logMasterBackupAudit } from './masterBackupAudit.js';
+import zlib from 'zlib';
+import { promisify } from 'util';
+import { zipSync, strToU8 } from 'fflate';
+import {
+  copyPlatformDatabase,
+  resolvePlatformSqlitePath,
+  isPostgresDatasource,
+  pruneBackupFiles,
+} from './backupPlatformDb.js';
+import { validateShopCustomersArray } from './customerValidation.js';
+
+const gzipBufferAsync = promisify(zlib.gzip);
 
 // ─── Email utility ──────────────────────────────────────────────────────────
 const GMAIL_USER = process.env.GMAIL_USER || '';
@@ -64,6 +76,40 @@ const setSessionCookie = (res, token, maxAgeMs) => {
 };
 
 const app = express();
+
+/** Promiseهای ردشده در routeهای async باید به error middleware برسند (مثلاً STORAGE_CONFLICT → 409). */
+function wrapAsyncRouteHandler(handler) {
+  if (typeof handler !== 'function') return handler;
+  if (handler.length > 3) return handler;
+  return function asyncRouteWrapped(req, res, next) {
+    try {
+      const ret = handler.call(this, req, res, next);
+      if (ret != null && typeof ret.then === 'function') {
+        ret.then(undefined, next);
+      }
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+function patchExpressAsyncHandlers(expressApp) {
+  const methods = ['use', 'get', 'post', 'put', 'patch', 'delete', 'all'];
+  for (const m of methods) {
+    const orig = expressApp[m].bind(expressApp);
+    expressApp[m] = function patchedExpressMethod(...args) {
+      if (args.length === 0) return orig();
+      const first = args[0];
+      if (typeof first === 'string' || first instanceof RegExp) {
+        return orig(first, ...args.slice(1).map(wrapAsyncRouteHandler));
+      }
+      return orig(...args.map(wrapAsyncRouteHandler));
+    };
+  }
+}
+
+patchExpressAsyncHandlers(app);
+
 const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'test' ? 'test-secret-key' : '');
 const TOKEN_EXPIRES_IN = '2h';
 const DEMO_TOKEN_EXPIRES_IN = '7d';
@@ -77,10 +123,11 @@ const REQUIRE_2FA_FOR_PRIVILEGED_ROLES =
     : String(process.env.REQUIRE_2FA_FOR_PRIVILEGED_ROLES || 'false') === 'true';
 const MIN_PASSWORD_LENGTH = Number(process.env.MIN_PASSWORD_LENGTH || (process.env.NODE_ENV === 'test' ? 4 : 8));
 const RECAPTCHA_SECRET_KEY = String(process.env.RECAPTCHA_SECRET_KEY || '').trim();
+/** فقط با RECAPTCHA_REQUIRED_IN_PROD=true روشن می‌شود؛ پیش‌فرض خاموش (مثلاً Render بدون کلید) */
 const RECAPTCHA_REQUIRED_IN_PROD =
   String(process.env.RECAPTCHA_REQUIRED_IN_PROD || '').toLowerCase() === 'true';
 
-/** پیش‌فرض روشن. خاموش: ALLOW_TRIAL_QUICK_SIGNUP=false */
+/** پیش‌فرض روشن (شامل production / Render). خاموش: ALLOW_TRIAL_QUICK_SIGNUP=false */
 const trialQuickSignupEnabled = () => {
   const v = process.env.ALLOW_TRIAL_QUICK_SIGNUP;
   if (v === 'false' || v === '0') return false;
@@ -118,7 +165,9 @@ if (IS_PROD) {
     throw new Error('JWT_SECRET must be at least 32 characters in production.');
   }
   if (!HESABPAY_WEBHOOK_SECRET) {
-    throw new Error('HESABPAY_WEBHOOK_SECRET is required in production.');
+    console.warn(
+      '[config] HESABPAY_WEBHOOK_SECRET is empty — HesabPay webhooks stay disabled until you set it.',
+    );
   }
   if (RECAPTCHA_REQUIRED_IN_PROD && !RECAPTCHA_SECRET_KEY) {
     throw new Error('RECAPTCHA_SECRET_KEY is required in production when RECAPTCHA_REQUIRED_IN_PROD is enabled.');
@@ -129,6 +178,31 @@ const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map((x) => x.trim())
   .filter(Boolean);
+
+if (IS_PROD && ALLOWED_ORIGINS.length === 0) {
+  console.warn(
+    '[config] ALLOWED_ORIGINS is empty — browsers will get CORS errors. Set comma-separated front-end URLs (e.g. https://your-app.onrender.com).',
+  );
+}
+
+/** روی Render + Vercel: اگر true باشد هر origin با https و *.vercel.app هم قبول می‌شود (پیش‌نمایش و دامنهٔ اصلی) */
+const CORS_ALLOW_VERCEL_APP =
+  String(process.env.CORS_ALLOW_VERCEL_APP || '').toLowerCase() === 'true';
+
+const isCorsOriginAllowed = (origin) => {
+  if (!origin) return true;
+  if (!IS_PROD) return true;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  if (CORS_ALLOW_VERCEL_APP) {
+    try {
+      const u = new URL(origin);
+      if (u.protocol === 'https:' && u.hostname.endsWith('.vercel.app')) return true;
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  return false;
+};
 
 const authAttemptStore = new Map();
 const lockoutStore = new Map();
@@ -153,6 +227,56 @@ const generateCode = (prefix, length = 6) => {
   }
   return `${prefix}${out}`;
 };
+
+const normalizeLoginUsernameKey = (s) =>
+  String(s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, '-')
+    .replace(/_/g, '-');
+
+function collectLoginUsernameCandidates(user, shopCodeUpper) {
+  const out = [];
+  const st = String(user?.username || '').trim();
+  if (st) out.push(st);
+  const em = String(user?.email || '').trim();
+  if (em) out.push(em);
+  if (String(user?.role || '') === 'super_admin') {
+    out.push('superadmin');
+  }
+  if (String(user?.role || '') === 'admin') {
+    const c = String(shopCodeUpper || '').trim().toLowerCase();
+    if (c) {
+      out.push(`admin-${c}`);
+      out.push(`admin_${c}`);
+    }
+  }
+  return out;
+}
+
+function loginStepUsernameMatches(user, shopCodeUpper, loginUserRaw) {
+  const raw = String(loginUserRaw || '').trim();
+  if (!raw) return true;
+  const want = normalizeLoginUsernameKey(raw);
+  for (const cand of collectLoginUsernameCandidates(user, shopCodeUpper)) {
+    if (normalizeLoginUsernameKey(cand) === want) return true;
+  }
+  return false;
+}
+
+function displayUsernameForCheckShopRole(user, shopCodeUpper) {
+  const un = String(user?.username || '').trim();
+  if (un) return un;
+  const em = String(user?.email || '').trim();
+  if (em) return em;
+  if (String(user?.role || '') === 'super_admin') {
+    return 'superadmin';
+  }
+  if (String(user?.role || '') === 'admin') {
+    return `admin-${String(shopCodeUpper || '').trim().toLowerCase()}`;
+  }
+  return '';
+}
 
 const getTotpAttemptKey = (pendingToken, req) =>
   `${String(pendingToken).slice(0, 48)}:${getClientIp(req)}`;
@@ -234,6 +358,7 @@ function mergeShopStatePayload(existing, incoming) {
 /** ده صنف اولویت‌دار افغانستان — کد پایدار برای tenant / shopSettings.business_type */
 const AF_TENANT_BUSINESS_CODES = [
   'supermarket',
+  'bookstore',
   'pharmacy',
   'mobile_accessories',
   'restaurant',
@@ -344,6 +469,78 @@ function applyDemoBusinessSeed(state, businessType, tenantId) {
     state[key] = [];
   }
   state.currencyRates = { AFN: 1, USD: 70, EUR: 76, IRT: 0.017 };
+}
+
+/** نمونهٔ محصول و دسته برای زرگری (افغانستان) — آزمایشی */
+function seedAfGoldJewelryDemoState(state, tenantId) {
+  const tid = Number(tenantId) || 1;
+  const now = new Date().toISOString();
+  /** هم‌شکل با `Category` در فرانت: status + parent_id (بدون tenant_id در UI) */
+  state.categories = [
+    { id: 1, name: 'زیور ۱۸ عیار', parent_id: null, status: 'active' },
+    { id: 2, name: 'زیور ۲۱ و ۲۴ عیار', parent_id: null, status: 'active' },
+  ];
+  state.products = [
+    {
+      id: 1,
+      product_code: 'GL18-BRC-001',
+      barcode: 'GL18-BRC-001',
+      name: 'دستبند طلا ۱۸ عیار (نمونه)',
+      sale_price: 52000,
+      purchase_price: 46000,
+      stock_shop: 1,
+      stock_warehouse: 2,
+      min_stock: 0,
+      is_active: true,
+      tenant_id: tid,
+      created_at: now,
+      category_id: 1,
+      category_name: 'زیور ۱۸ عیار',
+      product_status: 'active',
+      karat: 18,
+      weight_grams: 12.5,
+      labor_note: 'اجرت ٪۱۸ — نمونه آزمایشی',
+    },
+    {
+      id: 2,
+      product_code: 'GL21-RNG-002',
+      barcode: 'GL21-RNG-002',
+      name: 'انگشتر طلا ۲۱ عیار',
+      sale_price: 38000,
+      purchase_price: 33000,
+      stock_shop: 2,
+      stock_warehouse: 0,
+      min_stock: 0,
+      is_active: true,
+      tenant_id: tid,
+      created_at: now,
+      category_id: 2,
+      category_name: 'زیور ۲۱ و ۲۴ عیار',
+      product_status: 'active',
+      karat: 21,
+      weight_grams: 8.2,
+    },
+    {
+      id: 3,
+      product_code: 'COIN-BAHA-001',
+      barcode: 'COIN-BAHA-001',
+      name: 'سکه بهار آزادی (نمونه وزن)',
+      sale_price: 28500,
+      purchase_price: 27000,
+      stock_shop: 5,
+      stock_warehouse: 10,
+      min_stock: 1,
+      is_active: true,
+      tenant_id: tid,
+      created_at: now,
+      category_id: 2,
+      category_name: 'زیور ۲۱ و ۲۴ عیار',
+      product_status: 'active',
+      karat: 900,
+      weight_grams: 8.13,
+      note: 'قیمت را با بازار روز کابل/هرات هماهنگ کنید',
+    },
+  ];
 }
 
 
@@ -544,6 +741,7 @@ async function provisionShopFromPaymentRequest(db, payment) {
   return {
     shopCode,
     shopPassword: plainShopPassword,
+    adminUsername,
     adminRolePassword: plainAdminRolePassword,
     shop,
   };
@@ -707,6 +905,8 @@ const appendLoginAudit = async (db, row) => {
 
 app.set('trust proxy', 1);
 app.use(helmet({
+  /** بدون این، پیش‌فرض Helmet «same-origin» است و fetch از دامنهٔ دیگر (مثلاً Vercel → Render) در مرورگر قطع می‌شود (Failed to fetch). */
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
   contentSecurityPolicy: {
     useDefaults: true,
     directives: {
@@ -725,15 +925,13 @@ app.use(cors({
     if (!origin) return callback(null, true);
     // In development: allow any origin (Vite proxy on different IPs, mobile, etc.)
     if (!IS_PROD) return callback(null, true);
-    // In production: enforce whitelist
-    if (ALLOWED_ORIGINS.length === 0) return callback(new Error('CORS origin denied'));
-    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    if (isCorsOriginAllowed(origin)) return callback(null, true);
     return callback(new Error('CORS origin denied'));
   },
   credentials: true,
 }));
 app.use(cookieParser());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: process.env.API_JSON_LIMIT || '32mb' }));
 app.use(morgan('dev'));
 
 app.get('/api/health', (_req, res) => {
@@ -754,7 +952,13 @@ app.get('/api/meta/public', (_req, res) => {
 
 app.use(requestRateLimiter);
 app.use((req, res, next) => {
-  if (IS_PROD && req.headers['x-forwarded-proto'] !== 'https') {
+  if (!IS_PROD) return next();
+  /** فقط درخواست صریح http را رد کن؛ اگر هدر نبود (برخی پروکسی‌ها) با !== 'https' همه چیز ۴۲۶ می‌شد و مرورگر Failed to fetch می‌داد. */
+  const proto = String(req.headers['x-forwarded-proto'] || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  if (proto === 'http') {
     return res.status(426).json({ message: 'HTTPS required' });
   }
   return next();
@@ -962,8 +1166,20 @@ const requirePrivileged2FA = async (req, res, next) => {
   return next();
 };
 
+/** نقش‌های staff را می‌توان از shopSettings.role_login_enabled غیرفعال کرد؛ admin و super_admin همیشه مجازند */
+function isRoleLoginEnabledForShop(shopSettings, role) {
+  const r = String(role || '');
+  if (r === 'admin' || r === 'super_admin') return true;
+  const rle = shopSettings && typeof shopSettings === 'object' ? shopSettings.role_login_enabled : null;
+  if (!rle || typeof rle !== 'object') return true;
+  if (r === 'seller') return rle.seller !== false;
+  if (r === 'stock_keeper') return rle.stock_keeper !== false;
+  if (r === 'accountant') return rle.accountant !== false;
+  return true;
+}
+
 const handleLogin = async (req, res) => {
-  const { shopCode, shopPassword, role, rolePassword, deviceName } = req.body ?? {};
+  const { shopCode, shopPassword, role, rolePassword, deviceName, loginUsername } = req.body ?? {};
   if (!shopCode || !shopPassword || !rolePassword) {
     return res.status(400).json({ message: 'ورودی‌ها ناقص است' });
   }
@@ -1010,11 +1226,28 @@ const handleLogin = async (req, res) => {
     });
   }
 
-  const normalizedRole = normalizedCode === 'SUPERADMIN' ? 'super_admin' : String(role);
+  const normalizedRole = String(role);
+  db.stateByShop = db.stateByShop || {};
+  const shopStateForLogin = ensureShopState(db, normalizedCode);
+  shopStateForLogin.shopSettings =
+    shopStateForLogin.shopSettings && typeof shopStateForLogin.shopSettings === 'object'
+      ? shopStateForLogin.shopSettings
+      : {};
+  if (!isRoleLoginEnabledForShop(shopStateForLogin.shopSettings, normalizedRole)) {
+    recordAuthFailure(normalizedCode, req);
+    return res.status(403).json({ message: 'ورود با این نقش توسط مدیر غیرفعال شده است.' });
+  }
+
   const user = shop.users.find((u) => u.role === normalizedRole && u.status === 'active');
   if (!user) {
     recordAuthFailure(normalizedCode, req);
     return res.status(401).json({ message: 'نقش کاربر معتبر نیست' });
+  }
+
+  const loginUserRaw = String(loginUsername || '').trim();
+  if (loginUserRaw && !loginStepUsernameMatches(user, normalizedCode, loginUserRaw)) {
+    recordAuthFailure(normalizedCode, req);
+    return res.status(401).json({ message: 'نام کاربری با این نقش در فروشگاه مطابقت ندارد' });
   }
 
   const roleOk = await bcrypt.compare(String(rolePassword), user.passwordHash);
@@ -1025,7 +1258,8 @@ const handleLogin = async (req, res) => {
   clearAuthFailures(normalizedCode, req);
 
   if (REQUIRE_2FA_FOR_PRIVILEGED_ROLES && ['super_admin', 'admin'].includes(String(user.role))) {
-    if (!shop.is_demo && !(user.two_factor_enabled && user.totp_secret)) {
+    const platformBootstrap = normalizedCode === 'SUPERADMIN';
+    if (!shop.is_demo && !platformBootstrap && !(user.two_factor_enabled && user.totp_secret)) {
       return res.status(403).json({
         message: 'برای نقش مدیر/ابرادمین، فعال‌سازی 2FA الزامی است.',
         code: 'TWO_FACTOR_SETUP_REQUIRED',
@@ -1429,12 +1663,19 @@ const handleDemoLogin = async (req, res) => {
     const trialEnds = new Date(Date.now() + DEMO_TRIAL_MS).toISOString();
     const inactiveRolePwHash = await bcrypt.hash(generateCode('RP', 14), 10);
     const businessType = normalizeDemoBusinessType(req.body?.businessType);
-    if (businessType !== 'supermarket') {
+    const demoDbAllowed =
+      businessType === 'supermarket' || businessType === 'bookstore' || businessType === 'gold_jewelry';
+    if (!demoDbAllowed) {
       return res.status(400).json({
         message:
-          'ثبت‌نام آزمایشی با دیتابیس فعلاً فقط برای سوپرمارکت فعال است. برای سایر صنوف از طرح‌های پولی و تأیید ادمین استفاده کنید.',
+          'ثبت‌نام آزمایشی با دیتابیس فقط برای «فروشگاه عمومی»، «کتابفروشی» یا «زرگری و طلا» است. سایر صنوف از طرح‌های پولی و تأیید ادمین.',
       });
     }
+    const regEmail =
+      email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())
+        ? String(email).trim().toLowerCase()
+        : '';
+    const adminLoginUsername = regEmail || `admin-${shopCode.toLowerCase()}`;
     const shop = {
       code: shopCode,
       name: fullName,
@@ -1453,7 +1694,7 @@ const handleDemoLogin = async (req, res) => {
       users: [
         {
           id: adminId,
-          username: normalizedPhone,
+          username: adminLoginUsername,
           phone: normalizedPhone,
           full_name: fullName,
           role: 'admin',
@@ -1495,6 +1736,9 @@ const handleDemoLogin = async (req, res) => {
     db.stateByShop[shopCode] = initialDemoShopState(fullName, normalizedPhone, businessType);
     ensureShopState(db, shopCode);
     applyDemoBusinessSeed(db.stateByShop[shopCode], businessType, shop.tenantId);
+    if (businessType === 'gold_jewelry') {
+      seedAfGoldJewelryDemoState(db.stateByShop[shopCode], shop.tenantId);
+    }
     await saveDatabase(db);
     await appendLoginAudit(db, {
       shop_code: shop.code,
@@ -1505,9 +1749,6 @@ const handleDemoLogin = async (req, res) => {
       method: 'trial_register',
     });
 
-    const regEmail = email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())
-      ? String(email).trim().toLowerCase()
-      : '';
     if (regEmail) {
       const esc = (s) =>
         String(s)
@@ -1525,9 +1766,10 @@ const handleDemoLogin = async (req, res) => {
           <p><b>کد فروشگاه:</b> ${shopCode}</p>
           <p><b>رمز فروشگاه:</b> ${plainShopPassword}</p>
           <p><b>نام مدیر:</b> ${esc(fullName)}</p>
+          <p><b>نام کاربری انگلیسی مدیر (مرحلهٔ دوم ورود):</b> ${esc(adminLoginUsername)}</p>
           <p><b>نقش در صفحهٔ ورود:</b> مدیر دکان</p>
           <p><b>رمز نقش مدیر:</b> ${esc(password)}</p>
-          <p>از «ورود» کد و رمز فروشگاه را بزنید؛ نقش «مدیر دکان» را انتخاب کرده و در فیلد رمز نقش، همان «رمز نقش مدیر» بالا را وارد کنید.</p>
+          <p>از «ورود» کد و رمز فروشگاه را بزنید؛ در مرحلهٔ بعد نام کاربری انگلیسی بالا و رمز نقش مدیر را وارد کنید.</p>
           <p>دسترسی آزمایشی پنل مادر + دکان: <b>۳ روز</b>. نقش‌های فروشنده/انباردار/حسابدار تا فعال‌سازی در بخش کاربران توسط مدیر، غیرفعال هستند.</p>
         </div>`,
       });
@@ -1542,13 +1784,14 @@ const handleDemoLogin = async (req, res) => {
       shopPassword: plainShopPassword,
       shopName: shop.name,
       adminFullName: fullName,
+      adminUsername: adminLoginUsername,
       adminRoleTitle: 'مدیر دکان',
       adminRolePassword: plainAdminRolePassword,
       trialEndsAt: trialEnds,
       trialDaysRemaining,
       shop_meta: buildShopMeta(shop),
       message:
-        'ثبت‌نام موفق بود. کد و رمز فروشگاه، نام مدیر و رمز نقش مدیر را یادداشت کنید؛ سپس از صفحهٔ ورود وارد شوید.',
+        'ثبت‌نام موفق بود. کد و رمز فروشگاه، نام کاربری انگلیسی مدیر، رمز نقش و نام نمایشی را یادداشت کنید؛ سپس از صفحهٔ ورود وارد شوید.',
     });
   }
 
@@ -1694,20 +1937,28 @@ app.post('/api/auth/check-shop', checkShopLimiter, authLockoutGuard, async (req,
     });
   }
   clearAuthFailures(normalizedCode, req);
-  /** فقط کاربران فعال واقعی — بدون چهار کارت پیش‌فرض؛ نقش‌ها از همان «کاربران فروشگاه» */
-  const rolesPayload = (shop.users || [])
-    .filter((u) => u.status === 'active')
-    .map((u) => ({ role: u.role, full_name: u.full_name, status: 'active' }));
   db.stateByShop = db.stateByShop || {};
   const shopState = ensureShopState(db, normalizedCode);
   shopState.shopSettings = shopState.shopSettings && typeof shopState.shopSettings === 'object' ? shopState.shopSettings : {};
   const adminRoleNameRaw = String(shopState.shopSettings.admin_role_name || '').trim();
   const admin_role_name = adminRoleNameRaw || 'admin';
+  const ss = shopState.shopSettings;
+  /** فقط کاربران فعال واقعی — بدون چهار کارت پیش‌فرض؛ نقش‌ها از همان «کاربران فروشگاه» */
+  const rolesPayload = (shop.users || [])
+    .filter((u) => u.status === 'active')
+    .filter((u) => isRoleLoginEnabledForShop(ss, u.role))
+    .map((u) => ({
+      role: u.role,
+      full_name: u.full_name,
+      username: displayUsernameForCheckShopRole(u, normalizedCode),
+      status: 'active',
+    }));
   return res.json({
     ok: true,
     shopName: shop.name,
     roles: rolesPayload,
     is_demo_shop: Boolean(shop.is_demo),
+    is_platform_shop: normalizedCode === 'SUPERADMIN',
     admin_role_name,
   });
 });
@@ -2082,7 +2333,7 @@ app.post('/api/master/tenants', authMiddleware, async (req, res) => {
     users: [
       {
         id: userId,
-        username: owner_email || `admin_${normalized.toLowerCase()}`,
+        username: owner_email || `admin-${normalized.toLowerCase()}`,
         email: owner_email || '',
         phone: owner_phone || '',
         full_name: String(owner_name).trim(),
@@ -2105,10 +2356,16 @@ app.post('/api/master/tenants', authMiddleware, async (req, res) => {
   applyDemoBusinessSeed(db.stateByShop[normalized], bt0, tenantId);
   await saveDatabase(db);
 
+  const adminUser = shop.users.find((u) => u.role === 'admin');
   return res.status(201).json({
     ok: true,
     tenant: shopToTenant(shop, db),
-    credentials: { shopCode: normalized, shopPassword: pass, adminRolePassword: rolePass },
+    credentials: {
+      shopCode: normalized,
+      shopPassword: pass,
+      adminUsername: adminUser ? String(adminUser.username || '').trim() : '',
+      adminRolePassword: rolePass,
+    },
   });
 });
 
@@ -2656,6 +2913,87 @@ app.post('/api/shop/users/:id/set-password', authMiddleware, requirePrivileged2F
   return res.json({ ok: true, user: sanitizeShopUser(user) });
 });
 
+// ─── درخواست شعبهٔ جدید (مدیر دکان → ابرادمین) ─────────────────────────────
+app.post('/api/shop/branch-request', authMiddleware, async (req, res) => {
+  if (req.auth.role !== 'admin') {
+    return res.status(403).json({ message: 'فقط مدیر فروشگاه می‌تواند درخواست شعبه ثبت کند' });
+  }
+  const db = await loadDatabase();
+  if (!Array.isArray(db.branchRequests)) db.branchRequests = [];
+  const {
+    message,
+    branch_title: branchTitle,
+    contact_phone: contactPhone,
+    proposed_credentials_note: credNote,
+    image_data_url: imageDataUrl,
+  } = req.body ?? {};
+  const msg = String(message || '').trim();
+  if (msg.length < 10) {
+    return res.status(400).json({ message: 'متن درخواست را حداقل ۱۰ نویسه وارد کنید' });
+  }
+  const img = imageDataUrl != null ? String(imageDataUrl) : '';
+  if (img.length > 500000) {
+    return res.status(400).json({ message: 'تصویر خیلی بزرگ است (حدود زیر ۵۰۰KB توصیه می‌شود)' });
+  }
+  const row = {
+    id: nextId(db.branchRequests),
+    status: 'pending',
+    from_shop_code: String(req.auth.shopCode || '').toUpperCase(),
+    submitted_by_user_id: Number(req.auth.sub) || 0,
+    created_at: new Date().toISOString(),
+    branch_title: String(branchTitle || '').trim().slice(0, 200),
+    message: msg.slice(0, 8000),
+    contact_phone: String(contactPhone || '').trim().slice(0, 40),
+    proposed_credentials_note: String(credNote || '').trim().slice(0, 4000),
+    image_data_url: img.slice(0, 500000),
+  };
+  db.branchRequests.push(row);
+  await saveDatabase(db);
+  return res.json({ ok: true, id: row.id });
+});
+
+app.get('/api/master/branch-requests', authMiddleware, async (req, res) => {
+  if (!(await assertMasterApi(req, res))) return;
+  const db = await loadDatabase();
+  const list = Array.isArray(db.branchRequests) ? db.branchRequests : [];
+  const pending = list
+    .filter((r) => r.status === 'pending')
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  return res.json({ requests: pending });
+});
+
+app.post('/api/master/branch-requests/:id/approve', authMiddleware, async (req, res) => {
+  if (!(await assertMasterApi(req, res))) return;
+  const id = Number(req.params.id);
+  const db = await loadDatabase();
+  const list = Array.isArray(db.branchRequests) ? db.branchRequests : [];
+  const row = list.find((r) => Number(r.id) === id);
+  if (!row) return res.status(404).json({ message: 'درخواست یافت نشد' });
+  row.status = 'approved';
+  row.reviewed_at = new Date().toISOString();
+  row.reviewer_note = String(req.body?.note || '').slice(0, 2000);
+  await saveDatabase(db);
+  return res.json({
+    ok: true,
+    message:
+      'وضعیت درخواست به «تأیید» تغییر کرد. ایجاد کد فروشگاه و حساب جدید را در پنل مستأجرین یا فرایند داخلی انجام دهید.',
+  });
+});
+
+app.post('/api/master/branch-requests/:id/reject', authMiddleware, async (req, res) => {
+  if (!(await assertMasterApi(req, res))) return;
+  const id = Number(req.params.id);
+  const db = await loadDatabase();
+  const list = Array.isArray(db.branchRequests) ? db.branchRequests : [];
+  const row = list.find((r) => Number(r.id) === id);
+  if (!row) return res.status(404).json({ message: 'درخواست یافت نشد' });
+  row.status = 'rejected';
+  row.reviewed_at = new Date().toISOString();
+  row.reject_reason = String(req.body?.reason || '').slice(0, 2000);
+  await saveDatabase(db);
+  return res.json({ ok: true });
+});
+
 app.get('/api/master/shops/:code/users', authMiddleware, async (req, res) => {
   if (!(await assertMasterApi(req, res))) return;
   const code = String(req.params.code || '').trim().toUpperCase();
@@ -2703,9 +3041,19 @@ app.post('/api/support/message', authMiddleware, async (req, res) => {
   if (req.auth.role === 'super_admin') {
     return res.status(400).json({ message: 'ابرادمین از مسیر master استفاده کند' });
   }
-  const { subject, message, priority } = req.body ?? {};
+  const { subject, message, priority, attachment_base64 } = req.body ?? {};
   if (!subject || !message) {
     return res.status(400).json({ message: 'موضوع و متن الزامی است' });
+  }
+  let attachment = null;
+  if (attachment_base64 != null && String(attachment_base64).trim()) {
+    const raw = String(attachment_base64);
+    if (!raw.startsWith('data:image/') || raw.length > 650_000) {
+      return res.status(400).json({
+        message: 'تصویر نامعتبر یا بیش از حد بزرگ است؛ فقط تصویر (حدود زیر ۵۰۰KB) مجاز است.',
+      });
+    }
+    attachment = raw;
   }
   const db = await loadDatabase();
   ensureSupportTickets(db);
@@ -2726,6 +3074,7 @@ app.post('/api/support/message', authMiddleware, async (req, res) => {
     status: 'pending',
     created_at: new Date().toISOString(),
     reply: '',
+    attachment_base64: attachment,
   };
   db.supportTickets.unshift(ticket);
   await saveDatabase(db);
@@ -2942,14 +3291,278 @@ app.post('/api/master/reset-all-data', authMiddleware, async (req, res) => {
   return res.json({ ok: true, message: 'همه داده‌های دکان‌ها پاک شد' });
 });
 
-app.post('/api/master/platform-backup', authMiddleware, async (req, res) => {
+const PLATFORM_SNAPSHOT_MAX_BYTES = Number(process.env.PLATFORM_SNAPSHOT_MAX_BYTES || 96 * 1024 * 1024);
+const PLATFORM_SNAPSHOT_TIMEOUT_MS = Number(process.env.PLATFORM_SNAPSHOT_TIMEOUT_MS || 180000);
+const MASTER_RESTORE_CONFIRM_PHRASE = String(
+  process.env.MASTER_RESTORE_CONFIRM_PHRASE || 'DOKANYAR-AF-RESTORE-PLATFORM',
+).trim();
+
+const masterBackupRateHits = new Map();
+function rateLimitMasterBackup(req, res, next) {
+  const ip = String(req.ip || req.socket?.remoteAddress || 'local');
+  const now = Date.now();
+  const windowMs = 60_000;
+  const max = 10;
+  let e = masterBackupRateHits.get(ip);
+  if (!e || now > e.resetAt) {
+    e = { n: 0, resetAt: now + windowMs };
+    masterBackupRateHits.set(ip, e);
+  }
+  e.n += 1;
+  if (e.n > max) {
+    return res.status(429).json({ message: 'تعداد درخواست بکاپ پلتفرم زیاد است؛ حدود یک دقیقه صبر کنید.' });
+  }
+  next();
+}
+
+app.post('/api/master/platform-backup', authMiddleware, rateLimitMasterBackup, async (req, res) => {
   if (!(await assertMasterApi(req, res))) return;
   try {
-    const destPath = await copyPlatformDatabase();
-    return res.json({ ok: true, path: destPath, at: new Date().toISOString() });
+    const meta = await copyPlatformDatabase();
+    const pr = await pruneBackupFiles();
+    const kind = isPostgresDatasource() ? 'اسنپ‌شات JSON + مانیفست روی دیسک سرور' : 'کپی فایل پایگاه (.db) + مانیفست';
+    await logMasterBackupAudit({
+      action: 'platform_backup_disk',
+      detail: `${meta.backend} ${meta.sha256?.slice(0, 16)}…`,
+      actorShopCode: req.auth.shopCode,
+      actorSub: String(req.auth.sub),
+      ip: getClientIp(req),
+      meta: {
+        path: meta.path,
+        manifestPath: meta.manifestPath,
+        encPath: meta.encPath || null,
+        byteLength: meta.byteLength,
+        pruned: pr.pruned,
+        s3: meta.s3 || null,
+      },
+    });
+    return res.json({
+      ok: true,
+      path: meta.path,
+      manifestPath: meta.manifestPath,
+      sha256: meta.sha256,
+      byteLength: meta.byteLength,
+      gzipPath: meta.gzipPath,
+      encPath: meta.encPath || null,
+      prunedOldBackups: pr.pruned,
+      at: new Date().toISOString(),
+      backend: meta.backend,
+      hint: kind,
+      s3: meta.s3,
+    });
   } catch (e) {
     console.error('[backup]', e);
     return res.status(500).json({ message: 'کپی پایگاه داده انجام نشد', detail: String(e?.message || e) });
+  }
+});
+
+/**
+ * ZIP چند فروشگاه سمت سرور (ابرادمین) — همان قالب JSON بکاپ v2 + MANIFEST + SHA-256.
+ */
+app.post('/api/master/shops-backup-archive', authMiddleware, rateLimitMasterBackup, async (req, res) => {
+  if (!(await assertMasterApi(req, res))) return;
+  const raw = req.body?.shopCodes;
+  const codes = Array.isArray(raw)
+    ? [...new Set(raw.map((c) => String(c || '').trim()).filter(Boolean))].slice(0, 100)
+    : [];
+  if (!codes.length) {
+    return res.status(400).json({ message: 'shopCodes (آرایه) الزامی است' });
+  }
+  try {
+    const db = await loadDatabase();
+    for (const code of codes) {
+      if (!db.shops.some((s) => s.code === code)) {
+        return res.status(400).json({ message: `کد فروشگاه نامعتبر: ${code}` });
+      }
+    }
+    const files = {};
+    const sha256_by_file = {};
+    for (const code of codes) {
+      const state = db.stateByShop[code] || {};
+      const exportedAt = new Date().toISOString();
+      const dataStr = JSON.stringify(state);
+      const checksum = crypto.createHash('sha256').update(dataStr).digest('hex');
+      const payload = {
+        format: 'dokanyar-shop-backup-v2',
+        shopCode: code,
+        exportedAt,
+        checksum,
+        data: state,
+      };
+      const json = JSON.stringify(payload);
+      const fname = `dokanyar_shop_${code.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`;
+      files[fname] = strToU8(json);
+      sha256_by_file[fname] = crypto.createHash('sha256').update(json).digest('hex');
+    }
+    const manifest = {
+      format: 'dokanyar-bulk-shop-backup-v1',
+      generatedAt: new Date().toISOString(),
+      shopFiles: Object.keys(files),
+      sha256_by_file,
+      note: 'ساخته‌شده روی سرور؛ بازیابی per-shop از تب بکاپ.',
+    };
+    files['MANIFEST.json'] = strToU8(JSON.stringify(manifest, null, 2));
+    const zipped = zipSync(files, { level: 6 });
+    appendSettingsLog(db, req.auth.shopCode, req.auth, 'backup_export', `Bulk ZIP ${codes.length} shops`);
+    await saveDatabase(db);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="dokanyar_shops_server_${stamp}.zip"`);
+    return res.send(Buffer.from(zipped));
+  } catch (e) {
+    console.error('[shops-backup-archive]', e);
+    return res.status(500).json({ message: e?.message || 'خطا در ساخت ZIP' });
+  }
+});
+
+/** دانلود مستقیم اسنپ‌شات کامل پلتفرم (JSON) — برای ابرادمین؛ روی PostgreSQL همان مدل ذخیرهٔ فایل روی سرور است. */
+app.get('/api/master/platform-snapshot', authMiddleware, rateLimitMasterBackup, async (req, res) => {
+  if (!(await assertMasterApi(req, res))) return;
+  req.setTimeout(PLATFORM_SNAPSHOT_TIMEOUT_MS);
+  res.setTimeout(PLATFORM_SNAPSHOT_TIMEOUT_MS);
+  try {
+    const db = await loadDatabase();
+    const body = JSON.stringify(db);
+    const buf = Buffer.from(body, 'utf8');
+    if (buf.length > PLATFORM_SNAPSHOT_MAX_BYTES) {
+      return res.status(413).json({
+        message: `حجم اسنپ‌شات از سقف سرور (${Math.round(PLATFORM_SNAPSHOT_MAX_BYTES / 1024 / 1024)}MB) بیشتر است؛ از بکاپ روی دیسک سرور استفاده کنید.`,
+        code: 'SNAPSHOT_TOO_LARGE',
+        bytes: buf.length,
+      });
+    }
+    const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    appendSettingsLog(db, req.auth.shopCode, req.auth, 'backup_export_db', 'Downloaded platform JSON snapshot (master API)');
+    await saveDatabase(db);
+    await logMasterBackupAudit({
+      action: 'platform_snapshot_download',
+      detail: `bytes=${buf.length} gzip=${String(req.query.compress || '') === 'gzip'}`,
+      actorShopCode: req.auth.shopCode,
+      actorSub: String(req.auth.sub),
+      ip: getClientIp(req),
+      meta: { sha256: sha256.slice(0, 24), bytes: buf.length },
+    });
+    res.setHeader('X-Backup-SHA256', sha256);
+    res.setHeader('X-Backup-Bytes', String(buf.length));
+    const asGzip = String(req.query.compress || '') === 'gzip';
+    if (asGzip) {
+      const gz = await gzipBufferAsync(buf);
+      if (gz.length > PLATFORM_SNAPSHOT_MAX_BYTES) {
+        return res.status(413).json({
+          message: 'خروجی فشرده هم از سقف مجاز بیشتر است.',
+          code: 'SNAPSHOT_GZIP_TOO_LARGE',
+        });
+      }
+      res.setHeader('Content-Type', 'application/gzip');
+      res.setHeader('Content-Disposition', `attachment; filename="dokanyar_platform_snapshot_${stamp}.json.gz"`);
+      return res.send(gz);
+    }
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="dokanyar_platform_snapshot_${stamp}.json"`);
+    return res.send(body);
+  } catch (e) {
+    console.error('[platform-snapshot]', e);
+    return res.status(500).json({ message: e?.message || 'خطا در ساخت اسنپ‌شات' });
+  }
+});
+
+/** جستجو در لاگ ممیزی بکاپ master (جدا از settingsLogs). */
+app.get('/api/master/backup-audit', authMiddleware, rateLimitMasterBackup, async (req, res) => {
+  if (!(await assertMasterApi(req, res))) return;
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const take = q ? Math.min(2000, limit * 25) : limit;
+  const rows = await prisma.masterBackupAuditLog.findMany({
+    orderBy: { createdAt: 'desc' },
+    take,
+  });
+  const filtered = q
+    ? rows.filter(
+        (r) =>
+          String(r.action || '').toLowerCase().includes(q) ||
+          String(r.detail || '').toLowerCase().includes(q) ||
+          String(r.actorShopCode || '').toLowerCase().includes(q),
+      )
+    : rows;
+  return res.json({ entries: filtered.slice(0, limit) });
+});
+
+/**
+ * بازیابی کامل پلتفرم — فقط ابرادمین؛ نیاز به کد ریست سیستم + عبارت تأیید + چک‌لیست در body.
+ */
+app.post(
+  '/api/master/platform-restore',
+  authMiddleware,
+  requirePrivileged2FA,
+  rateLimitMasterBackup,
+  async (req, res) => {
+  if (!(await assertMasterApi(req, res))) return;
+  const {
+    snapshot,
+    acknowledgeTotalDataLoss,
+    confirmReplaceAllTenants,
+    typedPhrase,
+    resetCode,
+  } = req.body ?? {};
+  if (!acknowledgeTotalDataLoss || !confirmReplaceAllTenants) {
+    return res.status(400).json({
+      message: 'چک‌لیست امنیتی ناقص است: acknowledgeTotalDataLoss و confirmReplaceAllTenants باید true باشند.',
+    });
+  }
+  if (String(typedPhrase || '').trim() !== MASTER_RESTORE_CONFIRM_PHRASE) {
+    return res.status(400).json({
+      message: `عبارت تأیید نادرست است. دقیقاً "${MASTER_RESTORE_CONFIRM_PHRASE}" را ارسال کنید.`,
+    });
+  }
+  if (!resetCode || typeof snapshot !== 'object') {
+    return res.status(400).json({ message: 'resetCode و snapshot الزامی است.' });
+  }
+  const rawSize = Buffer.byteLength(JSON.stringify(snapshot), 'utf8');
+  const maxRestore = Number(process.env.PLATFORM_RESTORE_MAX_BYTES || 120 * 1024 * 1024);
+  if (rawSize > maxRestore) {
+    return res.status(413).json({ message: 'حجم اسنپ‌شات از سقف بازیابی بیشتر است.' });
+  }
+  const dbCur = await loadDatabase();
+  const okRc = await bcrypt.compare(String(resetCode), dbCur.systemSettings.resetCodeHash);
+  if (!okRc) {
+    return res.status(401).json({ message: 'کد ریست سیستم نادرست است.' });
+  }
+  try {
+    await restorePlatformFromMasterSnapshot(snapshot);
+    await logMasterBackupAudit({
+      action: 'platform_restore_full',
+      detail: `restored bytes≈${rawSize}`,
+      actorShopCode: req.auth.shopCode,
+      actorSub: String(req.auth.sub),
+      ip: getClientIp(req),
+      meta: { shops: Array.isArray(snapshot.shops) ? snapshot.shops.length : 0 },
+    });
+    return res.json({ ok: true, message: 'پلتفرم از اسنپ‌شات بازیابی شد.' });
+  } catch (e) {
+    const msg = e?.message || String(e);
+    if (
+      e?.code === 'DUPLICATE_CUSTOMER_PHONE' ||
+      msg === 'DUPLICATE_ACTIVE_CUSTOMER_PHONE'
+    ) {
+      return res.status(409).json({
+        message:
+          e?.messageFa ||
+          'اسنپ‌شات با دادهٔ مشتریان تداخل دارد (مثلاً شمارهٔ تکراری). بکاپ را بررسی کنید یا با پشتیبانی تماس بگیرید.',
+        code: 'RESTORE_CONFLICT',
+      });
+    }
+    if (msg.includes('STORAGE_CONFLICT')) {
+      return res.status(409).json({
+        message: 'تداخل ذخیره‌سازی هنگام بازیابی؛ دوباره تلاش کنید.',
+        code: 'RESTORE_CONFLICT',
+      });
+    }
+    console.error('[platform-restore]', e);
+    const prod = process.env.NODE_ENV === 'production';
+    return res.status(500).json({
+      message: prod ? 'بازیابی انجام نشد. لطفاً بعداً تلاش یا با پشتیبانی تماس بگیرید.' : msg || 'بازیابی ناموفق',
+    });
   }
 });
 
@@ -2959,6 +3572,261 @@ app.get('/api/master/login-audit', authMiddleware, async (req, res) => {
   const db = await loadDatabase();
   ensureLoginAuditLog(db);
   return res.json({ entries: db.loginAuditLog.slice(0, limit) });
+});
+
+const resolveCrmShopCode = (req, db) => {
+  if (req.auth.role === 'super_admin') {
+    return normalizeShopCode(req.query.shopCode || req.body?.shopCode) || null;
+  }
+  return normalizeShopCode(req.auth.shopCode);
+};
+
+function assertCrmShopOrFail(req, res, db) {
+  if (!['admin', 'super_admin'].includes(req.auth.role)) {
+    res.status(403).json({ message: 'فقط مدیر دکان یا ابرادمین' });
+    return null;
+  }
+  const code = resolveCrmShopCode(req, db);
+  if (!code) {
+    res.status(400).json({ message: 'برای CRM، shopCode (ابرادمین) یا نشست دکان لازم است' });
+    return null;
+  }
+  if (!db.shops.some((s) => s.code === code)) {
+    res.status(404).json({ message: 'فروشگاه یافت نشد' });
+    return null;
+  }
+  if (req.auth.role !== 'super_admin' && normalizeShopCode(req.auth.shopCode) !== code) {
+    res.status(403).json({ message: 'عدم دسترسی' });
+    return null;
+  }
+  return code;
+}
+
+/** CRM سروری — معامله / قیف */
+app.get('/api/crm/deals', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const deals = await prisma.shopCrmDeal.findMany({
+    where: { shopCode: code },
+    orderBy: { id: 'desc' },
+    take: 300,
+  });
+  return res.json({ deals });
+});
+
+app.post('/api/crm/deals', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const { customerId, title, stage, valueAfs, notes } = req.body ?? {};
+  const cid = Number(customerId);
+  if (!Number.isFinite(cid) || !String(title || '').trim()) {
+    return res.status(400).json({ message: 'customerId و title الزامی است' });
+  }
+  const deal = await prisma.shopCrmDeal.create({
+    data: {
+      shopCode: code,
+      customerId: cid,
+      title: String(title).trim(),
+      stage: String(stage || 'lead').slice(0, 64),
+      valueAfs: Number(valueAfs) || 0,
+      notes: String(notes || '').slice(0, 4000),
+    },
+  });
+  return res.json({ ok: true, deal });
+});
+
+app.get('/api/crm/tasks', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const tasks = await prisma.shopCrmTask.findMany({
+    where: { shopCode: code },
+    orderBy: { id: 'desc' },
+    take: 300,
+  });
+  return res.json({ tasks });
+});
+
+app.post('/api/crm/tasks', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const { title, dueAt, customerId, dealId, done } = req.body ?? {};
+  if (!String(title || '').trim()) {
+    return res.status(400).json({ message: 'title الزامی است' });
+  }
+  const task = await prisma.shopCrmTask.create({
+    data: {
+      shopCode: code,
+      title: String(title).trim(),
+      dueAt: dueAt ? new Date(dueAt) : null,
+      customerId: customerId != null ? Number(customerId) : null,
+      dealId: dealId != null ? Number(dealId) : null,
+      done: Boolean(done),
+    },
+  });
+  return res.json({ ok: true, task });
+});
+
+app.patch('/api/crm/tasks/:id', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ message: 'شناسه نامعتبر' });
+  const prev = await prisma.shopCrmTask.findFirst({ where: { id, shopCode: code } });
+  if (!prev) return res.status(404).json({ message: 'وظیفه یافت نشد' });
+  const task = await prisma.shopCrmTask.update({
+    where: { id },
+    data: {
+      done: req.body?.done !== undefined ? Boolean(req.body.done) : prev.done,
+      title: req.body?.title != null ? String(req.body.title).trim() : prev.title,
+    },
+  });
+  return res.json({ ok: true, task });
+});
+
+app.get('/api/crm/contacts', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const logs = await prisma.shopCrmContactLog.findMany({
+    where: { shopCode: code },
+    orderBy: { at: 'desc' },
+    take: 400,
+  });
+  return res.json({ logs });
+});
+
+app.post('/api/crm/contacts', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const { customerId, channel, note } = req.body ?? {};
+  const cid = Number(customerId);
+  if (!Number.isFinite(cid) || !String(channel || '').trim()) {
+    return res.status(400).json({ message: 'customerId و channel الزامی است' });
+  }
+  const log = await prisma.shopCrmContactLog.create({
+    data: {
+      shopCode: code,
+      customerId: cid,
+      channel: String(channel).trim().slice(0, 64),
+      note: String(note || '').slice(0, 4000),
+    },
+  });
+  return res.json({ ok: true, log });
+});
+
+app.get('/api/crm/email-templates', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const templates = await prisma.shopCrmEmailTemplate.findMany({
+    where: { shopCode: code },
+    orderBy: { id: 'asc' },
+  });
+  return res.json({ templates });
+});
+
+app.post('/api/crm/email-templates', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const { name, subject, bodyHtml } = req.body ?? {};
+  if (!String(name || '').trim() || !String(subject || '').trim() || bodyHtml == null) {
+    return res.status(400).json({ message: 'name، subject و bodyHtml الزامی است' });
+  }
+  const tpl = await prisma.shopCrmEmailTemplate.upsert({
+    where: { shopCode_name: { shopCode: code, name: String(name).trim() } },
+    create: {
+      shopCode: code,
+      name: String(name).trim(),
+      subject: String(subject).trim(),
+      bodyHtml: String(bodyHtml),
+    },
+    update: {
+      subject: String(subject).trim(),
+      bodyHtml: String(bodyHtml),
+    },
+  });
+  return res.json({ ok: true, template: tpl });
+});
+
+/** RFM / LTV ساده از فاکتورهای جدولی (واقعی روی PG). */
+app.get('/api/crm/rfm', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const invoices = await prisma.shopInvoice.findMany({
+    where: { shopCode: code },
+    select: { customerId: true, total: true, invoiceDate: true },
+  });
+  const agg = new Map();
+  for (const inv of invoices) {
+    const id = Number(inv.customerId);
+    if (!id) continue;
+    const cur = agg.get(id) || { customer_id: id, orders: 0, monetary_afs: 0, last_invoice_date: '' };
+    cur.orders += 1;
+    cur.monetary_afs += Number(inv.total) || 0;
+    const d = String(inv.invoiceDate || '');
+    if (d > cur.last_invoice_date) cur.last_invoice_date = d;
+    agg.set(id, cur);
+  }
+  const rows = [...agg.values()].map((r) => {
+    const orders = r.orders;
+    const m = r.monetary_afs;
+    const rScore = r.last_invoice_date ? 3 : 1;
+    const fScore = orders >= 5 ? 3 : orders >= 2 ? 2 : 1;
+    const mScore = m >= 100000 ? 3 : m >= 20000 ? 2 : 1;
+    return {
+      ...r,
+      r_score: rScore,
+      f_score: fScore,
+      m_score: mScore,
+      rfm_label: `${rScore}${fScore}${mScore}`,
+      ltv_afs: m,
+    };
+  });
+  rows.sort((a, b) => b.ltv_afs - a.ltv_afs);
+  return res.json({ rows });
+});
+
+/** ارسال انبوه ایمیل از سرور (قالب + شناسه مشتری) — نیاز به GMAIL_* در env. */
+app.post('/api/crm/bulk-email', authMiddleware, async (req, res) => {
+  const db = await loadDatabase();
+  const code = assertCrmShopOrFail(req, res, db);
+  if (!code) return;
+  const { templateName, customerIds } = req.body ?? {};
+  const ids = Array.isArray(customerIds) ? customerIds.map((x) => Number(x)).filter((n) => Number.isFinite(n)) : [];
+  if (!String(templateName || '').trim() || ids.length === 0) {
+    return res.status(400).json({ message: 'templateName و customerIds[] لازم است' });
+  }
+  const tpl = await prisma.shopCrmEmailTemplate.findUnique({
+    where: { shopCode_name: { shopCode: code, name: String(templateName).trim() } },
+  });
+  if (!tpl) return res.status(404).json({ message: 'قالب یافت نشد' });
+  const customers = await prisma.shopCustomer.findMany({
+    where: { shopCode: code, id: { in: ids } },
+  });
+  let sent = 0;
+  let skipped = 0;
+  for (const c of customers) {
+    const em = c.email && String(c.email).trim();
+    if (!em || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) {
+      skipped += 1;
+      continue;
+    }
+    const html = String(tpl.bodyHtml || '')
+      .replace(/\{\{\s*name\s*\}\}/gi, c.name || '')
+      .replace(/\{\{\s*phone\s*\}\}/gi, c.phone || '');
+    const ok = await sendEmail({ to: em, subject: tpl.subject, html });
+    if (ok) sent += 1;
+    else skipped += 1;
+  }
+  return res.json({ ok: true, sent, skipped, total: customers.length });
 });
 
 app.post('/api/auth/change-password', authMiddleware, requirePrivileged2FA, async (req, res) => {
@@ -3069,16 +3937,48 @@ app.get('/api/settings/backup/export', authMiddleware, async (req, res) => {
 
 app.get('/api/settings/backup/export-db', authMiddleware, async (req, res) => {
   if (req.auth.role !== 'super_admin') {
-    return res.status(403).json({ message: 'فقط مدیر پلتفرم (سوپرادمین) می‌تواند فایل SQLite کل پلتفرم را دانلود کند.' });
+    return res.status(403).json({
+      message:
+        'فقط مدیر پلتفرم (سوپرادمین) می‌تواند خروجی کامل پلتفرم را دانلود کند (روی PostgreSQL: JSON، روی SQLite قدیمی: فایل .db).',
+    });
   }
   try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    if (isPostgresDatasource()) {
+      const db = await loadDatabase();
+      const body = JSON.stringify(db);
+      const buf = Buffer.from(body, 'utf8');
+      if (buf.length > PLATFORM_SNAPSHOT_MAX_BYTES) {
+        return res.status(413).json({
+          message: `حجم اسنپ‌شات از سقف (${Math.round(PLATFORM_SNAPSHOT_MAX_BYTES / 1024 / 1024)}MB) بیشتر است؛ از بکاپ روی دیسک سرور استفاده کنید.`,
+          code: 'EXPORT_DB_TOO_LARGE',
+        });
+      }
+      const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
+      appendSettingsLog(db, req.auth.shopCode, req.auth, 'backup_export_db', 'Exported platform JSON snapshot (super_admin download)');
+      await saveDatabase(db);
+      await logMasterBackupAudit({
+        action: 'platform_export_db_settings',
+        detail: `bytes=${buf.length}`,
+        actorShopCode: req.auth.shopCode,
+        actorSub: String(req.auth.sub),
+        ip: getClientIp(req),
+        meta: { sha256: sha256.slice(0, 24) },
+      });
+      req.setTimeout(PLATFORM_SNAPSHOT_TIMEOUT_MS);
+      res.setTimeout(PLATFORM_SNAPSHOT_TIMEOUT_MS);
+      res.setHeader('X-Backup-SHA256', sha256);
+      res.setHeader('X-Backup-Bytes', String(buf.length));
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="dokanyar_platform_${stamp}.json"`);
+      return res.send(body);
+    }
     const dbPath = resolvePlatformSqlitePath();
     await fsp.access(dbPath);
     const buf = await fsp.readFile(dbPath);
     const db = await loadDatabase();
-    appendSettingsLog(db, req.auth.shopCode, req.auth, 'backup_export_db', 'Exported platform SQLite file');
+    appendSettingsLog(db, req.auth.shopCode, req.auth, 'backup_export_db', 'Exported platform SQLite .db file');
     await saveDatabase(db);
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="dokanyar_platform_${stamp}.db"`);
     return res.send(buf);
@@ -3134,6 +4034,19 @@ app.post('/api/settings/backup/restore', authMiddleware, async (req, res) => {
     if (!okPw) {
       return res.status(401).json({ message: 'رمز فروشگاه نادرست است' });
     }
+  }
+
+  try {
+    validateShopCustomersArray(restoreData.customers);
+  } catch (err) {
+    const code = err && err.code;
+    if (code === 'DUPLICATE_CUSTOMER_PHONE' || code === 'INVALID_CUSTOMER_PHONE') {
+      return res.status(409).json({
+        message: err.messageFa || err.message || 'مشتریان بکاپ نامعتبر',
+        code,
+      });
+    }
+    throw err;
   }
 
   db.stateByShop[targetShop] = restoreData;
@@ -3215,7 +4128,20 @@ app.put('/api/state', authMiddleware, async (req, res) => {
     return res.status(404).json({ message: 'فروشگاه هدف یافت نشد' });
   }
   const prev = db.stateByShop[targetShop] || {};
-  db.stateByShop[targetShop] = mergeShopStatePayload(prev, incoming);
+  const merged = mergeShopStatePayload(prev, incoming);
+  try {
+    validateShopCustomersArray(merged.customers);
+  } catch (err) {
+    const code = err && err.code;
+    if (code === 'DUPLICATE_CUSTOMER_PHONE' || code === 'INVALID_CUSTOMER_PHONE') {
+      return res.status(409).json({
+        message: err.messageFa || err.message || 'مشتریان نامعتبر',
+        code,
+      });
+    }
+    throw err;
+  }
+  db.stateByShop[targetShop] = merged;
   await saveDatabase(db);
   return res.json({ ok: true, updatedAt: new Date().toISOString() });
 });
@@ -3576,9 +4502,9 @@ app.post('/api/sales/invoices', authMiddleware, async (req, res) => {
       {
         id: nextId(nextNotifications),
         user_id: 1,
-        type: 'pending',
+        type: 'message',
         title: 'فاکتور جدید',
-        message: `فاکتور ${invoice.invoice_number} به مبلغ ${Number(invoice.total || 0).toLocaleString()} افغانی ثبت شد`,
+        message: `فاکتور ${invoice.invoice_number} به مبلغ ${Number(invoice.total || 0).toLocaleString()} افغانی ثبت شد (ثبت توسط مدیر — بدون نیاز به تأیید).`,
         link: '/invoices',
         is_read: false,
         is_heard: false,
@@ -3593,9 +4519,9 @@ app.post('/api/sales/invoices', authMiddleware, async (req, res) => {
           id: nextId(nextNotifications),
           user_id: req.auth.sub,
           recipient_user_id: adminUser.id,
-          type: 'pending',
+          type: 'message',
           title: 'فاکتور فروش در انتظار تأیید',
-          message: `${sellerName} فاکتور ${invoice.invoice_number} به مبلغ ${Number(invoice.total || 0).toLocaleString()} ؋ ثبت کرد — در «تأیید فروش» بررسی کنید.`,
+          message: `${sellerName} فاکتور ${invoice.invoice_number} به مبلغ ${Number(invoice.total || 0).toLocaleString()} ؋ ثبت کرد. برای تأیید یا رد به صفحه «تأیید فعالیت» بروید.`,
           link: '/pending',
           is_read: false,
           is_heard: false,
@@ -3606,6 +4532,19 @@ app.post('/api/sales/invoices', authMiddleware, async (req, res) => {
     }
   }
   state.notifications = nextNotifications;
+
+  try {
+    validateShopCustomersArray(state.customers);
+  } catch (err) {
+    const code = err && err.code;
+    if (code === 'DUPLICATE_CUSTOMER_PHONE' || code === 'INVALID_CUSTOMER_PHONE') {
+      return res.status(409).json({
+        message: err.messageFa || err.message || 'مشتریان پس از به‌روزرسانی فاکتور نامعتبرند',
+        code,
+      });
+    }
+    throw err;
+  }
 
   db.stateByShop[shopCode] = state;
   await saveDatabase(db);
@@ -3655,7 +4594,13 @@ app.post('/api/admin/payments/verify', authMiddleware, requirePrivileged2FA, asy
         credentials = {
           shopCode: prov.shopCode,
           shopPassword: prov.shopPassword,
+          adminUsername: prov.adminUsername,
           adminRolePassword: prov.adminRolePassword,
+          inactiveRoleUsernamesPreview: {
+            seller: `${prov.shopCode}-SELLER`,
+            stock_keeper: `${prov.shopCode}-STOCK`,
+            accountant: `${prov.shopCode}-ACC`,
+          },
         };
         payment.shop_code = prov.shopCode;
         payment.tenant_id = prov.shop.tenantId;
@@ -3679,10 +4624,13 @@ app.post('/api/admin/payments/verify', authMiddleware, requirePrivileged2FA, asy
             html: `<div dir="rtl" style="font-family:sans-serif;padding:20px;max-width:600px">
               <p>سلام <b>${esc(ownerNm)}</b>،</p>
               <p>پرداخت شما تأیید شد و فروشگاه ایجاد گردید.</p>
+              <p><b>مرحلهٔ ۱ ورود:</b> کد و رمز فروشگاه</p>
               <p><b>کد فروشگاه:</b> ${esc(prov.shopCode)}</p>
               <p><b>رمز فروشگاه:</b> ${esc(prov.shopPassword)}</p>
+              <p><b>مرحلهٔ ۲ ورود:</b> نقش «مدیر دکان» — نام کاربری انگلیسی و رمز نقش</p>
+              <p><b>نام کاربری انگلیسی مدیر:</b> ${esc(prov.adminUsername)}</p>
               <p><b>رمز نقش مدیر دکان:</b> ${esc(prov.adminRolePassword)}</p>
-              <p>در صفحهٔ ورود کد و رمز فروشگاه را وارد کنید؛ نقش «مدیر دکان» و رمز نقش را مطابق بالا بزنید.</p>
+              <p>پس از ورود، از تنظیمات → کاربران فروشگاه نقش‌های دیگر را فعال کنید. نام کاربری پیش‌فرض (تا فعال‌سازی): <span dir="ltr">${esc(prov.shopCode)}-SELLER</span>، <span dir="ltr">${esc(prov.shopCode)}-STOCK</span>، <span dir="ltr">${esc(prov.shopCode)}-ACC</span>.</p>
             </div>`,
           });
         }
@@ -3703,6 +4651,48 @@ app.post('/api/admin/payments/verify', authMiddleware, requirePrivileged2FA, asy
   await saveDatabase(db);
 
   return res.json({ ok: true, payment, credentials });
+});
+
+app.use((err, _req, res, next) => {
+  const msg = err && typeof err.message === 'string' ? err.message : '';
+  const code = err?.code;
+  if (msg.startsWith('STORAGE_CONFLICT')) {
+    return res.status(409).json({
+      message: 'داده همزمان به‌روز شده؛ صفحه را تازه کنید و دوباره تلاش کنید.',
+      code: msg,
+    });
+  }
+  if (code === 'DUPLICATE_CUSTOMER_PHONE' || msg === 'DUPLICATE_ACTIVE_CUSTOMER_PHONE') {
+    return res.status(409).json({
+      message:
+        err.messageFa || 'در این دکان مشتری دیگری با همین شماره موبایل ثبت شده است.',
+      code: 'DUPLICATE_CUSTOMER_PHONE',
+    });
+  }
+  const prismaConn =
+    code === 'P1001' ||
+    err?.name === 'PrismaClientInitializationError' ||
+    /Can't reach database server|connect ECONNREFUSED.*5432|P1001/i.test(msg);
+  if (prismaConn) {
+    return res.status(503).json({
+      message:
+        'PostgreSQL در دسترس نیست. روی ویندوز: Docker Desktop را نصب و اجرا کنید، در پوشه پروژه دستور «docker compose up -d» بزنید، سپس «npm run db:migrate». در فایل .env مقدار DATABASE_URL را مثل postgresql://postgres:postgres@127.0.0.1:5432/dokanyar بگذارید.',
+      code: 'DATABASE_UNAVAILABLE',
+    });
+  }
+  next(err);
+});
+
+app.use((err, _req, res, _next) => {
+  if (res.headersSent) return;
+  console.error(err);
+  const prod = process.env.NODE_ENV === 'production';
+  const status = Number(err?.status) >= 400 && Number(err?.status) < 600 ? err.status : 500;
+  const hideDetails = prod && status >= 500;
+  res.status(status).json({
+    message: hideDetails ? 'خطای داخلی سرور. لطفاً بعداً تلاش کنید.' : err?.message || 'خطا',
+    ...(!prod ? { code: err?.code, stack: err?.stack } : {}),
+  });
 });
 
 export default app;

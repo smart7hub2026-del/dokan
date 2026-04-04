@@ -7,9 +7,19 @@ import {
   apiSetTenantStatus, apiGetSubscriptionPayments, apiCreateSubscriptionPayment,
   apiGetPendingRegistrations, apiApproveRegistration, apiRejectRegistration, apiResetAllData,
   apiGetAdminPayments, apiVerifyAdminPayment, apiGetMasterShopUsers,
-  apiMasterPlatformBackup, apiExportShopBackupJson,
+  apiMasterPlatformBackup, apiExportShopBackupJson, apiMasterPlatformSnapshotBlob,
+  apiMasterShopsBackupArchiveBlob,
   type Tenant, type PendingRegistration, type AdminPaymentRequestRow, type ShopUserRow,
 } from '../services/api';
+import { zipSync, strToU8 } from 'fflate';
+
+async function sha256HexUtf8(text: string): Promise<string> {
+  const buf = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
 import PasswordStrength from './PasswordStrength';
 import { validatePasswordPolicy } from '../utils/passwordPolicy';
@@ -331,23 +341,16 @@ export default function TenantsPage() {
     );
   };
 
-  const downloadJsonBlob = (filename: string, data: unknown) => {
-    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const runPlatformBackup = async () => {
     if (!tok) return;
     setBulkBackupBusy(true);
     setBulkBackupMsg('');
     try {
       const r = await apiMasterPlatformBackup(tok);
-      setBulkBackupMsg(`کپی SQLite پلتفرم روی سرور انجام شد: ${r.path}`);
+      const hint = r.hint ? ` (${r.hint})` : '';
+      const sha = r.sha256 ? ` SHA256=${r.sha256.slice(0, 16)}…` : '';
+      const pr = r.prunedOldBackups != null && r.prunedOldBackups > 0 ? ` | حذف ${r.prunedOldBackups} نسخهٔ قدیمی` : '';
+      setBulkBackupMsg(`بکاپ پلتفرم ذخیره شد${hint}: ${r.path}${sha}${pr}`);
     } catch (e) {
       setBulkBackupMsg(e instanceof Error ? e.message : 'خطا در بکاپ پلتفرم');
     } finally {
@@ -359,19 +362,86 @@ export default function TenantsPage() {
     if (!tok || backupSelectedCodes.length === 0) return;
     setBulkBackupBusy(true);
     setBulkBackupMsg('');
-    let ok = 0;
     try {
+      const files: Record<string, Uint8Array> = {};
+      const sha256_by_file: Record<string, string> = {};
       for (let i = 0; i < backupSelectedCodes.length; i += 1) {
         const code = backupSelectedCodes[i];
         const payload = await apiExportShopBackupJson(code, tok);
+        const json = JSON.stringify(payload);
         const safe = code.replace(/[^a-zA-Z0-9_-]/g, '_');
-        downloadJsonBlob(`dokanyar_shop_${safe}_${Date.now()}_${i}.json`, payload);
-        ok += 1;
-        await new Promise((r) => setTimeout(r, 100));
+        const fname = `dokanyar_shop_${safe}.json`;
+        files[fname] = strToU8(json);
+        sha256_by_file[fname] = await sha256HexUtf8(json);
+        setBulkBackupMsg(`در حال دریافت… ${i + 1} از ${backupSelectedCodes.length}`);
+        await new Promise((r) => setTimeout(r, 280));
       }
-      setBulkBackupMsg(`${ok} فایل JSON برای فروشگاه‌های انتخاب‌شده دانلود شد.`);
+      const manifest = {
+        format: 'dokanyar-bulk-shop-backup-v1',
+        generatedAt: new Date().toISOString(),
+        shopFiles: Object.keys(files),
+        sha256_by_file,
+        note:
+          'هر JSON همان خروجی /api/settings/backup/export است. بازیابی فقط per-shop از تب بکاپ همان فروشگاه؛ اسنپ‌شات کل پلتفرم جداست.',
+      };
+      files['MANIFEST.json'] = strToU8(JSON.stringify(manifest, null, 2));
+      const zipped = zipSync(files, { level: 6 });
+      const blob = new Blob([zipped], { type: 'application/zip' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dokanyar_shops_${backupSelectedCodes.length}_${Date.now()}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setBulkBackupMsg(
+        `یک فایل ZIP (${backupSelectedCodes.length} فروشگاه + MANIFEST با SHA-256) دانلود شد.`,
+      );
     } catch (e) {
       setBulkBackupMsg(e instanceof Error ? e.message : 'خطا در بکاپ یکی از فروشگاه‌ها');
+    } finally {
+      setBulkBackupBusy(false);
+    }
+  };
+
+  const downloadServerZipForSelection = async () => {
+    if (!tok || backupSelectedCodes.length === 0) return;
+    setBulkBackupBusy(true);
+    setBulkBackupMsg('');
+    try {
+      const blob = await apiMasterShopsBackupArchiveBlob(backupSelectedCodes, tok);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dokanyar_shops_server_${backupSelectedCodes.length}_${Date.now()}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setBulkBackupMsg(
+        `ZIP سمت سرور (${backupSelectedCodes.length} فروشگاه) دانلود شد — بدون حلقهٔ درخواست از مرورگر.`,
+      );
+    } catch (e) {
+      setBulkBackupMsg(e instanceof Error ? e.message : 'خطا در ZIP سرور');
+    } finally {
+      setBulkBackupBusy(false);
+    }
+  };
+
+  const downloadPlatformSnapshotBrowser = async () => {
+    if (!tok) return;
+    setBulkBackupBusy(true);
+    setBulkBackupMsg('');
+    try {
+      const blob = await apiMasterPlatformSnapshotBlob(tok);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `dokanyar_platform_snapshot_${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setBulkBackupMsg(
+        'اسنپ‌شات JSON کامل پلتفرم دانلود شد. بازیابی سطح پلتفرم با ابزار جداست؛ بکاپ تک‌دکان از JSON هر فروشگاه در تب بکاپ.',
+      );
+    } catch (e) {
+      setBulkBackupMsg(e instanceof Error ? e.message : 'خطا در دانلود اسنپ‌شات');
     } finally {
       setBulkBackupBusy(false);
     }
@@ -838,8 +908,10 @@ export default function TenantsPage() {
       {activeTab === 'bulkbackup' && isSuperAdmin && (
         <div className="space-y-4">
           <p className="text-slate-400 text-sm leading-relaxed">
-            <span className="text-white font-semibold">بکاپ دسته‌جمعی:</span> یک بار کپی فایل SQLite کل پلتفرم روی سرور، یا انتخاب تا{' '}
-            <span className="text-amber-200 font-semibold">۱۰۰ فروشگاه</span> و دانلود پشت‌سرهم فایل JSON هر کدام (مناسب آرشیو یا مهاجرت تکی).
+            <span className="text-white font-semibold">بکاپ دسته‌جمعی:</span> روی PostgreSQL، «بکاپ یکجا» یعنی{' '}
+            <span className="text-emerald-200">اسنپ‌شات JSON</span> روی دیسک سرور (مثل <span className="font-mono text-slate-300">server/backups/platform-*.json</span>
+            )؛ نه فایل SQLite. می‌توانید همان اسنپ‌شات را مستقیم در مرورگر هم بگیرید. برای چند فروشگاه، یک{' '}
+            <span className="text-amber-200">ZIP</span> حاوی JSON هر دکان + <span className="text-indigo-200">MANIFEST</span> با checksum؛ ترجیحاً دکمهٔ <b className="text-violet-200">ZIP سمت سرور</b> (یک درخواست). «ZIP مرورگر» فقط اگر سرور در دسترس نبود.
           </p>
           {bulkBackupMsg && (
             <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/25 text-indigo-100 text-sm whitespace-pre-wrap">
@@ -853,7 +925,15 @@ export default function TenantsPage() {
               onClick={() => void runPlatformBackup()}
               className="inline-flex items-center gap-2 glass px-4 py-2.5 rounded-xl text-sm text-slate-200 hover:text-white border border-white/10 disabled:opacity-50"
             >
-              <Database size={16} /> بکاپ یکجای پایگاه روی سرور
+              <Database size={16} /> بکاپ یکجا روی دیسک سرور
+            </button>
+            <button
+              type="button"
+              disabled={!tok || bulkBackupBusy}
+              onClick={() => void downloadPlatformSnapshotBrowser()}
+              className="inline-flex items-center gap-2 glass px-4 py-2.5 rounded-xl text-sm text-emerald-200 hover:text-white border border-emerald-500/25 disabled:opacity-50"
+            >
+              <Download size={16} /> دانلود اسنپ‌شات JSON (مرورگر)
             </button>
             <button
               type="button"
@@ -880,10 +960,18 @@ export default function TenantsPage() {
             <button
               type="button"
               disabled={!tok || bulkBackupBusy || backupSelectedCodes.length === 0}
+              onClick={() => void downloadServerZipForSelection()}
+              className="inline-flex items-center gap-2 bg-violet-600 hover:bg-violet-500 text-white px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
+            >
+              <Download size={16} /> ZIP سمت سرور ({backupSelectedCodes.length})
+            </button>
+            <button
+              type="button"
+              disabled={!tok || bulkBackupBusy || backupSelectedCodes.length === 0}
               onClick={() => void runSelectedShopBackups()}
               className="inline-flex items-center gap-2 btn-primary text-white px-4 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50"
             >
-              <Download size={16} /> دانلود JSON ({backupSelectedCodes.length})
+              <Download size={16} /> ZIP در مرورگر (fallback)
             </button>
           </div>
           <div className="glass rounded-2xl overflow-hidden max-h-[min(52dvh,480px)] overflow-y-auto">

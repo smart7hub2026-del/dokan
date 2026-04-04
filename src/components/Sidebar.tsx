@@ -3,11 +3,11 @@ import {
   Megaphone, FileText, Building2, LogOut,
   BarChart3, Package, Bell, DollarSign,
   UserCheck, CreditCard, ChevronLeft, Shield, BookOpen, Truck,
-  Tags, ClipboardList, Warehouse,
-} from 'lucide-react';
+  Tags, ClipboardList, Warehouse, Newspaper, } from 'lucide-react';
 
 import { useApp } from '../context/AppContext';
 import { useStore } from '../store/useStore';
+import { NAV_ICON_COLORS, NAV_ROW_ACTIVE_DARK, NAV_ROW_ACTIVE_LIGHT } from '../config/navigationTheme';
 
 interface SidebarUser {
   id: number;
@@ -33,6 +33,7 @@ const superAdminLinks = [
   { id: 'billing', icon: CreditCard, labelKey: 'billing' },
   { id: 'admin-notifications', icon: Megaphone, labelKey: 'broadcast_notifications' },
   { id: 'reports', icon: FileText, labelKey: 'general_reports' },
+  { id: 'customers', icon: Users, labelKey: 'customers_crm_hub_title' },
   { id: 'settings', icon: Settings, labelKey: 'settings' },
 ];
 
@@ -42,13 +43,14 @@ const adminLinks = [
   { id: 'invoices', icon: FileText, labelKey: 'invoices' },
   { id: 'products', icon: Package, labelKey: 'products' },
   { id: 'warehouse', icon: Warehouse, labelKey: 'warehouse_page' },
-  { id: 'customers', icon: Users, labelKey: 'customers' },
+  { id: 'customers', icon: Users, labelKey: 'customers_crm_hub_title' },
   { id: 'suppliers', icon: Truck, labelKey: 'suppliers' },
   { id: 'debts', icon: CreditCard, labelKey: 'debts' },
   { id: 'accounting', icon: DollarSign, labelKey: 'accounting' },
   { id: 'staff', icon: UserCheck, labelKey: 'staff_payroll' },
   { id: 'pending', icon: Bell, labelKey: 'pending_sales' },
   { id: 'reminders', icon: BookOpen, labelKey: 'reminders' },
+  { id: 'journal', icon: Newspaper, labelKey: 'shop_journal' },
   { id: 'reports', icon: BarChart3, labelKey: 'reports' },
   { id: 'product-sales-ranking', icon: BarChart3, labelKey: 'product_sales_ranking' },
   { id: 'reorder-list', icon: ClipboardList, labelKey: 'reorder_list_title' },
@@ -62,6 +64,7 @@ const sellerLinks = [
   { id: 'invoices', icon: FileText, labelKey: 'invoices' },
   { id: 'products', icon: Package, labelKey: 'products' },
   { id: 'customers', icon: Users, labelKey: 'customers' },
+  { id: 'journal', icon: Newspaper, labelKey: 'shop_journal' },
   { id: 'debts', icon: CreditCard, labelKey: 'debts' },
   { id: 'notifications', icon: Bell, labelKey: 'notifications' },
 ];
@@ -75,6 +78,7 @@ const accountantLinks = [
   { id: 'suppliers', icon: Truck, labelKey: 'suppliers' },
   { id: 'staff', icon: UserCheck, labelKey: 'staff_payroll' },
   { id: 'reports', icon: BarChart3, labelKey: 'reports' },
+  { id: 'journal', icon: Newspaper, labelKey: 'shop_journal' },
   { id: 'notifications', icon: Bell, labelKey: 'notifications' },
 ];
 
@@ -83,6 +87,7 @@ const stockLinks = [
   { id: 'products', icon: Package, labelKey: 'inventory_management' },
   { id: 'warehouse', icon: Warehouse, labelKey: 'warehouse_page' },
   { id: 'reorder-list', icon: ClipboardList, labelKey: 'reorder_list_title' },
+  { id: 'journal', icon: Newspaper, labelKey: 'shop_journal' },
   { id: 'suppliers', icon: Truck, labelKey: 'suppliers' },
   { id: 'invoices', icon: FileText, labelKey: 'purchase_invoices' },
   { id: 'reports', icon: FileText, labelKey: 'inventory_reports' },
@@ -91,30 +96,6 @@ const stockLinks = [
 
 const ICON_STROKE = 1.75;
 const ICON_STROKE_ACTIVE = 2;
-
-const MENU_ICON_COLORS: Record<string, string> = {
-  dashboard: 'text-sky-500',
-  sales: 'text-emerald-500',
-  invoices: 'text-violet-500',
-  products: 'text-amber-500',
-  warehouse: 'text-cyan-500',
-  customers: 'text-rose-500',
-  suppliers: 'text-orange-500',
-  debts: 'text-red-500',
-  accounting: 'text-indigo-500',
-  staff: 'text-lime-500',
-  pending: 'text-fuchsia-500',
-  reminders: 'text-teal-500',
-  reports: 'text-blue-500',
-  notifications: 'text-pink-500',
-  settings: 'text-slate-500',
-  tenants: 'text-purple-500',
-  billing: 'text-green-600',
-  'business-types': 'text-yellow-600',
-  'admin-notifications': 'text-red-600',
-  'product-sales-ranking': 'text-blue-600',
-  'reorder-list': 'text-cyan-600',
-};
 
 export default function Sidebar({ currentUser, activePage, onPageChange, onLogout, collapsed, onToggle, notifCount = 0 }: SidebarProps) {
   const { isOnline, t, isDark } = useApp();
@@ -232,32 +213,27 @@ export default function Sidebar({ currentUser, activePage, onPageChange, onLogou
           const isActive = activePage === link.id;
           const hasNotif = link.id === 'notifications' && notifCount > 0;
           const inactiveText = isDark ? 'text-white/80 hover:text-white' : 'text-slate-600 hover:text-slate-900';
+          const activeRow = isDark
+            ? NAV_ROW_ACTIVE_DARK[link.id] ?? 'bg-white/10 border-white/15'
+            : NAV_ROW_ACTIVE_LIGHT[link.id] ?? 'bg-slate-100 border-slate-200';
           return (
             <button
               key={link.id}
               type="button"
               onClick={() => onPageChange(link.id)}
-              className={`sidebar-link w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all ${
-                isActive ? `active ${isDark ? 'text-white font-bold' : 'font-bold'}` : inactiveText
+              className={`sidebar-link w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all border ${
+                isActive
+                  ? `${activeRow} ${isDark ? 'text-white font-bold' : 'font-bold text-slate-900'}`
+                  : `border-transparent ${inactiveText}`
               } ${collapsed ? 'justify-center' : ''} ${!isDark && !isActive ? 'hover:bg-slate-50' : ''}`}
               title={collapsed ? t(link.labelKey) : ''}
             >
               <div className="relative shrink-0 flex items-center justify-center">
-                <span
-                  className={`rounded-lg flex items-center justify-center ${
-                    isActive
-                      ? isDark
-                        ? 'p-0 text-white'
-                        : 'bg-blue-100 p-1.5 text-[#1e3a8a]'
-                      : isDark
-                        ? 'p-0 text-white/90'
-                        : 'p-0 text-slate-500'
-                  }`}
-                >
+                <span className="rounded-lg flex items-center justify-center p-0">
                   <Icon
                     size={18}
                     strokeWidth={isActive ? ICON_STROKE_ACTIVE : ICON_STROKE}
-                    className={isActive ? (isDark ? 'text-white' : 'text-[#1e3a8a]') : (MENU_ICON_COLORS[link.id] || '')}
+                    className={NAV_ICON_COLORS[link.id] || (isDark ? 'text-slate-300' : 'text-slate-500')}
                   />
                 </span>
                 {hasNotif && collapsed && (

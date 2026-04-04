@@ -3,6 +3,8 @@ node_modules/
 dist/
 server/prisma/*.db
 server/prisma/*.db-*
+backend/prisma/*.db
+backend/prisma/*.db-*
 server/backups/
 backups/
 server/data/database.json

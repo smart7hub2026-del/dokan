@@ -7,6 +7,28 @@ import { useToast } from './Toast';
 import type { Product } from '../data/mockData';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
 import { bookToProductForSale } from '../utils/bookInventory';
+import { getBinQty } from '../utils/warehouseBins';
+
+function ensureBinMap(p: Product, warehouses: { id: number }[]): Record<string, number> {
+  const raw = p.warehouse_stock_by_id && typeof p.warehouse_stock_by_id === 'object' ? { ...p.warehouse_stock_by_id } : {};
+  const firstId = warehouses[0]?.id;
+  const out: Record<string, number> = {};
+  for (const w of warehouses) {
+    const k = String(w.id);
+    if (Object.prototype.hasOwnProperty.call(raw, k)) {
+      out[k] = Math.max(0, Number(raw[k]) || 0);
+    } else if (w.id === firstId) {
+      out[k] = Math.max(0, p.stock_warehouse);
+    } else {
+      out[k] = 0;
+    }
+  }
+  return out;
+}
+
+function sumBins(map: Record<string, number>): number {
+  return Object.values(map).reduce((a, b) => a + Math.max(0, Number(b) || 0), 0);
+}
 
 export default function WarehousePage() {
   const { t, formatPrice, isDark } = useApp();
@@ -19,11 +41,16 @@ export default function WarehousePage() {
   const warehouses = useStore(s => s.warehouses);
   const addWarehouse = useStore(s => s.addWarehouse);
   const removeWarehouse = useStore(s => s.removeWarehouse);
+  const getWarehouseBinStockTotal = useStore(s => s.getWarehouseBinStockTotal);
   const currentUser = useStore(s => s.currentUser);
   const addPendingApproval = useStore(s => s.addPendingApproval);
   const reportStaffActivityToAdmins = useStore(s => s.reportStaffActivityToAdmins);
   const [search, setSearch] = useState('');
-  const [moveTarget, setMoveTarget] = useState<{ product: Product; direction: 'to_shop' | 'to_warehouse' } | null>(null);
+  const [moveTarget, setMoveTarget] = useState<{
+    product: Product;
+    direction: 'to_shop' | 'to_warehouse';
+    binId: number;
+  } | null>(null);
   const [moveQty, setMoveQty] = useState('');
   const [newBinName, setNewBinName] = useState('');
 
@@ -48,20 +75,34 @@ export default function WarehousePage() {
 
   const confirmMove = () => {
     if (!moveTarget) return;
-    const { product, direction } = moveTarget;
+    const { product, direction, binId } = moveTarget;
     const n = Math.floor(Number(moveQty));
     if (!n || n < 1) {
       error('خطا', 'تعداد معتبر وارد کنید');
       return;
     }
-    if (direction === 'to_shop') {
-      if (n > product.stock_warehouse) {
-        error('خطا', 'موجودی انبار کافی نیست');
+
+    if (shopSettings.business_type === 'bookstore') {
+      if (direction === 'to_shop') {
+        if (n > product.stock_warehouse) {
+          error('خطا', 'موجودی انبار کافی نیست');
+          return;
+        }
+      } else if (n > product.stock_shop) {
+        error('خطا', 'موجودی مغازه کافی نیست');
         return;
       }
-    } else if (n > product.stock_shop) {
-      error('خطا', 'موجودی مغازه کافی نیست');
-      return;
+    } else {
+      const binQ = getBinQty(product, binId, warehouses);
+      if (direction === 'to_shop') {
+        if (n > binQ) {
+          error('خطا', 'در این انبار موجودی کافی نیست');
+          return;
+        }
+      } else if (n > product.stock_shop) {
+        error('خطا', 'موجودی مغازه کافی نیست');
+        return;
+      }
     }
 
     if (currentUser?.role === 'admin') {
@@ -82,24 +123,37 @@ export default function WarehousePage() {
             });
           }
         }
-      } else if (direction === 'to_shop') {
-        updateProduct({
-          ...product,
-          stock_warehouse: product.stock_warehouse - n,
-          stock_shop: product.stock_shop + n,
-        });
       } else {
-        updateProduct({
-          ...product,
-          stock_shop: product.stock_shop - n,
-          stock_warehouse: product.stock_warehouse + n,
-        });
+        const map = ensureBinMap(product, warehouses);
+        const k = String(binId);
+        const cur = Math.max(0, Number(map[k]) || 0);
+        if (direction === 'to_shop') {
+          map[k] = cur - n;
+          updateProduct({
+            ...product,
+            stock_shop: product.stock_shop + n,
+            warehouse_stock_by_id: map,
+            stock_warehouse: sumBins(map),
+          });
+        } else {
+          map[k] = cur + n;
+          updateProduct({
+            ...product,
+            stock_shop: product.stock_shop - n,
+            warehouse_stock_by_id: map,
+            stock_warehouse: sumBins(map),
+          });
+        }
       }
+      const whName = warehouses.find((w) => w.id === binId)?.name || 'انبار';
       success(
         'انتقال انجام شد',
-        direction === 'to_shop' ? `${n} واحد از انبار به مغازه` : `${n} واحد از مغازه به انبار`
+        direction === 'to_shop'
+          ? `${n} واحد از «${whName}» به مغازه`
+          : `${n} واحد از مغازه به «${whName}»`,
       );
     } else {
+      const whName = warehouses.find((w) => w.id === binId)?.name || 'انبار';
       addPendingApproval({
         type: 'warehouse_transfer',
         title:
@@ -108,22 +162,24 @@ export default function WarehousePage() {
             : `انتقال به انبار: ${product.name}`,
         description:
           direction === 'to_shop'
-            ? `${n} واحد از انبار به مغازه`
-            : `${n} واحد از مغازه به انبار`,
+            ? `${n} واحد از «${whName}» به مغازه`
+            : `${n} واحد از مغازه به «${whName}»`,
         data: {
           product_id: product.id,
           product_name: product.name,
           quantity: n,
           direction,
+          warehouse_bin_id: binId,
+          warehouse_bin_name: whName,
         },
         submitted_by: currentUser?.full_name || 'کاربر',
         submitted_by_role: currentUser?.role || '',
       });
       reportStaffActivityToAdmins(
         direction === 'to_shop' ? 'درخواست انتقال انبار → مغازه' : 'درخواست انتقال مغازه → انبار',
-        `${currentUser?.full_name}: ${n} عدد «${product.name}» — ${direction === 'to_shop' ? 'به مغازه' : 'به انبار'}.`,
+        `${currentUser?.full_name}: ${n} عدد «${product.name}» — ${direction === 'to_shop' ? 'به مغازه' : `به ${whName}`}.`,
         currentUser?.id ?? 0,
-        currentUser?.full_name || 'کاربر'
+        currentUser?.full_name || 'کاربر',
       );
       success('ارسال شد', 'تا تأیید مدیر در «تأیید فعالیت»، موجودی تغییر نمی‌کند.');
     }
@@ -161,7 +217,7 @@ export default function WarehousePage() {
           <div>
             <h2 className={`text-sm font-bold ${textMain}`}>انباربندی (چند انبار)</h2>
             <p className={`text-xs mt-0.5 ${textSub}`}>
-              نام انبارها برای سازمان‌دهی است؛ موجودی کل همان ستون «انبار» در کالاهاست.
+              برای هر کالا می‌توانید موجودی جدا در انبار ۱، انبار ۲ و … داشته باشید؛ در فرم ویرایش کالا هم per انبار قابل ورود است. انتقال را از اینجا با انتخاب انبار مبدأ/مقصد انجام دهید.
             </p>
           </div>
           <div className="flex flex-wrap gap-2 items-center">
@@ -194,8 +250,17 @@ export default function WarehousePage() {
               {w.id !== 1 && (
                 <button
                   type="button"
-                  title="حذف"
+                  title="حذف انبار"
                   onClick={() => {
+                    const qty = getWarehouseBinStockTotal(w.id);
+                    if (qty > 0) {
+                      error(
+                        'حذف ممکن نیست',
+                        `در «${w.name}» مجموعاً ${qty.toLocaleString('fa-IR')} عدد کالا ثبت شده؛ ابتدا موجودی را منتقل یا تعدیل کنید.`
+                      );
+                      return;
+                    }
+                    if (!window.confirm(`انبار «${w.name}» حذف شود؟`)) return;
                     removeWarehouse(w.id);
                     success('حذف شد', w.name);
                   }}
@@ -237,7 +302,7 @@ export default function WarehousePage() {
           <table className="w-full text-sm min-w-[640px]">
             <thead>
               <tr className={isDark ? 'bg-slate-800/60 border-b border-white/10' : 'bg-slate-50 border-b border-slate-200'}>
-                {['کالا', 'کد', 'موجودی انبار', 'مغازه', 'حداقل', 'انتقال'].map(h => (
+                {['کالا', 'کد', 'موجودی per انبار', 'مغازه', 'حداقل', 'انتقال'].map(h => (
                   <th key={h || 'a'} className={`text-right py-3 px-3 font-medium ${textSub} text-xs`}>
                     {h}
                   </th>
@@ -263,7 +328,26 @@ export default function WarehousePage() {
                       {p.product_code}
                     </td>
                     <td className="py-3 px-3">
-                      <span className="text-amber-400 font-bold tabular-nums">{p.stock_warehouse}</span>
+                      {shopSettings.business_type === 'bookstore' ? (
+                        <span className="text-amber-400 font-bold tabular-nums">{p.stock_warehouse}</span>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap gap-1 justify-end max-w-[240px] ml-auto">
+                            {warehouses.map((w) => (
+                              <span
+                                key={w.id}
+                                className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums border ${
+                                  isDark ? 'bg-amber-500/15 border-amber-500/30 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-900'
+                                }`}
+                                title={w.name}
+                              >
+                                {w.name}: {getBinQty(p, w.id, warehouses)}
+                              </span>
+                            ))}
+                          </div>
+                          <p className={`text-[10px] mt-1 text-right ${textSub}`}>جمع: {p.stock_warehouse}</p>
+                        </>
+                      )}
                     </td>
                     <td className={`py-3 px-3 tabular-nums ${textSub}`}>{p.stock_shop}</td>
                     <td className={`py-3 px-3 tabular-nums ${textSub}`}>{p.min_stock}</td>
@@ -273,8 +357,17 @@ export default function WarehousePage() {
                           type="button"
                           disabled={p.stock_warehouse <= 0}
                           onClick={() => {
-                            setMoveTarget({ product: p, direction: 'to_shop' });
-                            setMoveQty(String(Math.min(1, p.stock_warehouse) || 1));
+                            const firstWith =
+                              shopSettings.business_type === 'bookstore'
+                                ? warehouses[0]
+                                : warehouses.find((w) => getBinQty(p, w.id, warehouses) > 0);
+                            const bid = firstWith?.id ?? warehouses[0]?.id ?? 1;
+                            setMoveTarget({ product: p, direction: 'to_shop', binId: bid });
+                            const maxQ =
+                              shopSettings.business_type === 'bookstore'
+                                ? p.stock_warehouse
+                                : getBinQty(p, bid, warehouses);
+                            setMoveQty(String(Math.min(1, maxQ) || 1));
                           }}
                           className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-40 disabled:pointer-events-none"
                         >
@@ -285,7 +378,11 @@ export default function WarehousePage() {
                           type="button"
                           disabled={p.stock_shop <= 0}
                           onClick={() => {
-                            setMoveTarget({ product: p, direction: 'to_warehouse' });
+                            setMoveTarget({
+                              product: p,
+                              direction: 'to_warehouse',
+                              binId: warehouses[0]?.id ?? 1,
+                            });
                             setMoveQty(String(Math.min(1, p.stock_shop) || 1));
                           }}
                           className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[11px] font-bold bg-cyan-700 text-white hover:bg-cyan-600 disabled:opacity-40 disabled:pointer-events-none"
@@ -324,18 +421,33 @@ export default function WarehousePage() {
                     {p.product_code}
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="space-y-2 text-center text-xs">
                   <div className={`rounded-lg py-2 ${isDark ? 'bg-slate-800/60' : 'bg-white border border-slate-100'}`}>
-                    <span className={textSub}>انبار</span>
-                    <p className="text-amber-400 font-black tabular-nums">{p.stock_warehouse}</p>
+                    <span className={textSub}>انبار (per سطل)</span>
+                    <div className="flex flex-wrap gap-1 justify-center mt-1">
+                      {shopSettings.business_type === 'bookstore' ? (
+                        <p className="text-amber-400 font-black tabular-nums">{p.stock_warehouse}</p>
+                      ) : (
+                        warehouses.map((w) => (
+                          <span key={w.id} className="text-[10px] font-bold text-amber-400 tabular-nums">
+                            {w.name}: {getBinQty(p, w.id, warehouses)}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                    {shopSettings.business_type !== 'bookstore' ? (
+                      <p className={`text-[10px] mt-1 ${textSub}`}>جمع {p.stock_warehouse}</p>
+                    ) : null}
                   </div>
-                  <div className={`rounded-lg py-2 ${isDark ? 'bg-slate-800/60' : 'bg-white border border-slate-100'}`}>
-                    <span className={textSub}>مغازه</span>
-                    <p className={`font-bold tabular-nums ${textMain}`}>{p.stock_shop}</p>
-                  </div>
-                  <div className={`rounded-lg py-2 ${isDark ? 'bg-slate-800/60' : 'bg-white border border-slate-100'}`}>
-                    <span className={textSub}>حداقل</span>
-                    <p className={`font-bold tabular-nums ${textSub}`}>{p.min_stock}</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className={`rounded-lg py-2 ${isDark ? 'bg-slate-800/60' : 'bg-white border border-slate-100'}`}>
+                      <span className={textSub}>مغازه</span>
+                      <p className={`font-bold tabular-nums ${textMain}`}>{p.stock_shop}</p>
+                    </div>
+                    <div className={`rounded-lg py-2 ${isDark ? 'bg-slate-800/60' : 'bg-white border border-slate-100'}`}>
+                      <span className={textSub}>حداقل</span>
+                      <p className={`font-bold tabular-nums ${textSub}`}>{p.min_stock}</p>
+                    </div>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -343,8 +455,17 @@ export default function WarehousePage() {
                     type="button"
                     disabled={p.stock_warehouse <= 0}
                     onClick={() => {
-                      setMoveTarget({ product: p, direction: 'to_shop' });
-                      setMoveQty(String(Math.min(1, p.stock_warehouse) || 1));
+                      const firstWith =
+                        shopSettings.business_type === 'bookstore'
+                          ? warehouses[0]
+                          : warehouses.find((w) => getBinQty(p, w.id, warehouses) > 0);
+                      const bid = firstWith?.id ?? warehouses[0]?.id ?? 1;
+                      setMoveTarget({ product: p, direction: 'to_shop', binId: bid });
+                      const maxQ =
+                        shopSettings.business_type === 'bookstore'
+                          ? p.stock_warehouse
+                          : getBinQty(p, bid, warehouses);
+                      setMoveQty(String(Math.min(1, maxQ) || 1));
                     }}
                     className="inline-flex items-center justify-center gap-1 rounded-xl py-2.5 text-[11px] font-bold bg-indigo-600 text-white disabled:opacity-40"
                   >
@@ -355,7 +476,11 @@ export default function WarehousePage() {
                     type="button"
                     disabled={p.stock_shop <= 0}
                     onClick={() => {
-                      setMoveTarget({ product: p, direction: 'to_warehouse' });
+                      setMoveTarget({
+                        product: p,
+                        direction: 'to_warehouse',
+                        binId: warehouses[0]?.id ?? 1,
+                      });
                       setMoveQty(String(Math.min(1, p.stock_shop) || 1));
                     }}
                     className="inline-flex items-center justify-center gap-1 rounded-xl py-2.5 text-[11px] font-bold bg-cyan-700 text-white disabled:opacity-40"
@@ -411,22 +536,71 @@ export default function WarehousePage() {
         {moveTarget ? (
           <div className="space-y-4 text-right">
             <p className={`text-xs ${textSub}`}>
-              {moveTarget.direction === 'to_shop' ? (
+              {shopSettings.business_type === 'bookstore' ? (
+                moveTarget.direction === 'to_shop' ? (
+                  <>
+                    جمع انبار:{' '}
+                    <strong className={isDark ? 'text-amber-300' : 'text-amber-700'}>
+                      {moveTarget.product.stock_warehouse}
+                    </strong>
+                    {' — '}مغازه: {moveTarget.product.stock_shop}
+                  </>
+                ) : (
+                  <>
+                    مغازه:{' '}
+                    <strong className={isDark ? 'text-cyan-300' : 'text-cyan-800'}>{moveTarget.product.stock_shop}</strong>
+                    {' — '}جمع انبار: {moveTarget.product.stock_warehouse}
+                  </>
+                )
+              ) : moveTarget.direction === 'to_shop' ? (
                 <>
-                  موجودی انبار:{' '}
-                  <strong className={isDark ? 'text-amber-300' : 'text-amber-700'}>{moveTarget.product.stock_warehouse}</strong>
-                  {' — '}مغازه: {moveTarget.product.stock_shop}
+                  در انبار انتخاب‌شده:{' '}
+                  <strong className={isDark ? 'text-amber-300' : 'text-amber-700'}>
+                    {getBinQty(moveTarget.product, moveTarget.binId, warehouses)}
+                  </strong>
+                  {' — '}جمع انبار: {moveTarget.product.stock_warehouse} — مغازه: {moveTarget.product.stock_shop}
                 </>
               ) : (
                 <>
-                  موجودی مغازه:{' '}
+                  مغازه:{' '}
                   <strong className={isDark ? 'text-cyan-300' : 'text-cyan-800'}>{moveTarget.product.stock_shop}</strong>
-                  {' — '}انبار: {moveTarget.product.stock_warehouse}
+                  {' — '}به انبار: {warehouses.find((w) => w.id === moveTarget.binId)?.name || moveTarget.binId}
                 </>
               )}
               {' — '}
               قیمت فروش: {formatPrice(moveTarget.product.sale_price)}
             </p>
+            {shopSettings.business_type !== 'bookstore' && warehouses.length > 1 ? (
+              <div>
+                <label className={`${textSub} text-xs block mb-1`}>
+                  {moveTarget.direction === 'to_shop' ? 'انبار مبدا (کدام سطل؟)' : 'انبار مقصد (کدام سطل؟)'}
+                </label>
+                <select
+                  value={moveTarget.binId}
+                  onChange={(e) => {
+                    const id = Number(e.target.value);
+                    const maxQ =
+                      moveTarget.direction === 'to_shop'
+                        ? getBinQty(moveTarget.product, id, warehouses)
+                        : moveTarget.product.stock_shop;
+                    setMoveTarget({ ...moveTarget, binId: id });
+                    setMoveQty((prev) => {
+                      const n = Math.floor(Number(prev) || 1);
+                      return String(Math.min(Math.max(1, n), Math.max(1, maxQ)));
+                    });
+                  }}
+                  className={`w-full rounded-xl border px-3 py-2.5 text-sm ${
+                    isDark ? 'bg-slate-800/50 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'
+                  }`}
+                >
+                  {warehouses.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} — موجودی: {getBinQty(moveTarget.product, w.id, warehouses)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
             <div>
               <label className={`${textSub} text-xs block mb-1`}>
                 {moveTarget.direction === 'to_shop' ? 'تعداد انتقال به مغازه' : 'تعداد انتقال به انبار'}
@@ -436,7 +610,9 @@ export default function WarehousePage() {
                 min={1}
                 max={
                   moveTarget.direction === 'to_shop'
-                    ? moveTarget.product.stock_warehouse
+                    ? shopSettings.business_type === 'bookstore'
+                      ? moveTarget.product.stock_warehouse
+                      : getBinQty(moveTarget.product, moveTarget.binId, warehouses)
                     : moveTarget.product.stock_shop
                 }
                 value={moveQty}

@@ -11,23 +11,13 @@ import {
 } from 'lucide-react';
 type Role = 'super_admin' | 'admin' | 'seller' | 'stock_keeper' | 'accountant';
 import { PAGE_TO_PATH } from '../config/pageRoutes';
+import { NAV_ICON_COLORS, NAV_ROW_ACTIVE_DARK, NAV_ROW_ACTIVE_LIGHT } from '../config/navigationTheme';
 import { useApp } from '../context/AppContext';
 
 type NavDef = { page: string; icon: typeof LayoutDashboard; labelKey: string };
 
 const ICON = 1.75;
 const ICON_ACTIVE = 2;
-const MOBILE_ICON_COLORS: Record<string, string> = {
-  dashboard: 'text-sky-500',
-  sales: 'text-emerald-500',
-  products: 'text-amber-500',
-  customers: 'text-rose-500',
-  pending: 'text-fuchsia-500',
-  tenants: 'text-purple-500',
-  reports: 'text-blue-500',
-  billing: 'text-green-600',
-  settings: 'text-slate-500',
-};
 
 /** موبایل فروشگاه: داشبورد، محصولات، فروش (وسط)، مشتری، تأیید فعالیت — بقیه فقط منو */
 const SHOP_NAV_BEFORE: NavDef[] = [
@@ -80,20 +70,22 @@ export default function MobileBottomNav({
         key={item.page}
         type="button"
         onClick={() => onNavigate(item.page)}
-        className={`flex min-w-0 max-w-[4.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-0.5 py-1.5 transition-all ${
+        className={`flex min-w-0 max-w-[4.25rem] flex-1 flex-col items-center justify-center gap-0.5 rounded-xl border px-0.5 py-1.5 transition-all ${
           active
             ? isDark
-              ? 'bg-emerald-500/10 text-emerald-400'
-              : 'bg-blue-50 text-[#1e3a8a]'
-            : isDark
-              ? 'text-slate-500 hover:bg-white/[0.04] hover:text-slate-200'
-              : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+              ? `${NAV_ROW_ACTIVE_DARK[item.page] ?? 'bg-white/10 border-white/10'} font-bold text-white`
+              : `${NAV_ROW_ACTIVE_LIGHT[item.page] ?? 'bg-slate-100 border-slate-200'} font-bold text-slate-900`
+            : `border-transparent ${
+                isDark
+                  ? 'text-slate-500 hover:bg-white/[0.04] hover:text-slate-200'
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'
+              }`
         }`}
       >
         <Icon
           size={20}
           strokeWidth={active ? ICON_ACTIVE : ICON}
-          className={`shrink-0 ${active ? '' : MOBILE_ICON_COLORS[item.page] || ''}`}
+          className={`shrink-0 ${NAV_ICON_COLORS[item.page] || (isDark ? 'text-slate-400' : 'text-slate-500')}`}
         />
         <span className="max-w-[4rem] truncate text-center text-[9px] font-bold leading-tight">{t(item.labelKey)}</span>
       </button>

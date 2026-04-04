@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Smartphone, Monitor, Apple, ChevronRight } from 'lucide-react';
+import { Smartphone, Monitor, Apple, ChevronRight, CheckCircle2, Shield } from 'lucide-react';
 import { DOWNLOAD_URLS } from '../config/downloads';
 import BrandLogo from './BrandLogo';
 
@@ -65,46 +65,82 @@ export default function WelcomeDownloadPage({ onBack, onLogin, onRegister }: Pro
       <main className="relative z-10 flex-1 min-h-0 flex items-center justify-center px-4 py-8 sm:py-12">
         <div className="w-full max-w-6xl">
           <h2 className="text-center text-white font-black text-2xl sm:text-3xl mb-2">دانلود نسخه مناسب دستگاه شما</h2>
-          <p className="text-center text-slate-300 text-sm mb-8">هر سه مسیر کامل است: اندروید، iOS (نسخه وب‌اپ)، ویندوز</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <p className="text-center text-slate-300 text-sm mb-2 max-w-xl mx-auto leading-relaxed">
+            همان حساب وب؛ فقط مسیر نصب بسته به سیستم‌عامل فرق می‌کند. فایل‌ها از سرور رسمی دکان‌یار ارائه می‌شوند.
+          </p>
+          <div className="flex items-center justify-center gap-2 text-[11px] text-slate-500 mb-8">
+            <Shield size={14} className="text-emerald-400/90 shrink-0" aria-hidden />
+            <span>اتصال رمزنگاری‌شده (HTTPS) — همیشه از همین دامنه رسمی دانلود کنید</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
           <a
             href={DOWNLOAD_URLS.apk}
             download="dokanyar.apk"
-            className="group min-h-[280px] flex flex-col items-center justify-center text-center gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-7 transition-all hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+            className="group min-h-[220px] sm:min-h-[240px] flex flex-col items-center text-center gap-2.5 rounded-2xl border border-white/10 bg-white/[0.06] p-5 sm:p-6 transition-all hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
             aria-label="دانلود اپ اندروید"
           >
-            <div className="flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-900 shadow-lg ring-1 ring-white/20">
-              <Smartphone size={44} className="text-white sm:w-[52px] sm:h-[52px]" strokeWidth={1.5} />
+            <div className="flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-900 shadow-md ring-1 ring-white/20">
+              <Smartphone size={26} className="text-white sm:w-7 sm:h-7" strokeWidth={1.75} />
             </div>
-            <span className="text-sm font-black text-emerald-200">Android APK</span>
-            <span className="text-xs text-slate-300">دانلود مستقیم فایل نصب</span>
+            <span className="text-sm font-black text-emerald-200 pt-1">Android APK</span>
+            <span className="text-[11px] text-slate-400 leading-snug">نصب مستقیم · مناسب موبایل و تبلت اندروید</span>
+            <ul className="mt-2 w-full text-right text-[11px] text-slate-500 space-y-1">
+              <li className="flex items-start gap-1.5 justify-end">
+                <span>بدون وابستگی به فروشگاه اپ</span>
+                <CheckCircle2 size={14} className="text-emerald-500/80 shrink-0 mt-0.5" aria-hidden />
+              </li>
+              <li className="flex items-start gap-1.5 justify-end">
+                <span>به‌روزرسانی از همین صفحه</span>
+                <CheckCircle2 size={14} className="text-emerald-500/80 shrink-0 mt-0.5" aria-hidden />
+              </li>
+            </ul>
           </a>
 
           <a
             href={iosHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="group min-h-[280px] flex flex-col items-center justify-center text-center gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-7 transition-all hover:border-slate-400/40 hover:bg-white/[0.09] hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+            className="group min-h-[220px] sm:min-h-[240px] flex flex-col items-center text-center gap-2.5 rounded-2xl border border-white/10 bg-white/[0.06] p-5 sm:p-6 transition-all hover:border-slate-400/40 hover:bg-white/[0.09] hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
             aria-label="باز کردن در مرورگر برای نصب وب‌اپ آیفون"
           >
-            <div className="flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-600 to-slate-900 shadow-lg ring-1 ring-white/15">
-              <Apple size={44} className="text-white sm:w-[52px] sm:h-[52px]" strokeWidth={1.5} />
+            <div className="flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-xl bg-gradient-to-br from-slate-600 to-slate-900 shadow-md ring-1 ring-white/15">
+              <Apple size={26} className="text-white sm:w-7 sm:h-7" strokeWidth={1.75} />
             </div>
-            <span className="text-sm font-black text-slate-100">iPhone / iPad</span>
-            <span className="text-xs text-slate-300">باز شدن نسخه وب برای Add to Home Screen</span>
+            <span className="text-sm font-black text-slate-100 pt-1">iPhone / iPad</span>
+            <span className="text-[11px] text-slate-400 leading-snug">وب‌اپ PWA — افزودن به صفحهٔ اصلی از Safari</span>
+            <ul className="mt-2 w-full text-right text-[11px] text-slate-500 space-y-1">
+              <li className="flex items-start gap-1.5 justify-end">
+                <span>بدون نیاز به اپ‌استور محلی</span>
+                <CheckCircle2 size={14} className="text-slate-400 shrink-0 mt-0.5" aria-hidden />
+              </li>
+              <li className="flex items-start gap-1.5 justify-end">
+                <span>همان دادهٔ حساب وب شما</span>
+                <CheckCircle2 size={14} className="text-slate-400 shrink-0 mt-0.5" aria-hidden />
+              </li>
+            </ul>
           </a>
 
           <a
             href={DOWNLOAD_URLS.windowsSetup}
             download="Dokanyar-Setup.exe"
-            className="group min-h-[280px] flex flex-col items-center justify-center text-center gap-3 rounded-3xl border border-white/10 bg-white/[0.06] p-7 transition-all hover:border-blue-500/40 hover:bg-blue-500/10 hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+            className="group min-h-[220px] sm:min-h-[240px] flex flex-col items-center text-center gap-2.5 rounded-2xl border border-white/10 bg-white/[0.06] p-5 sm:p-6 transition-all hover:border-blue-500/40 hover:bg-blue-500/10 hover:scale-[1.01] focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             aria-label="دانلود نسخه ویندوز"
           >
-            <div className="flex h-20 w-20 sm:h-24 sm:w-24 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-950 shadow-lg ring-1 ring-white/20">
-              <Monitor size={44} className="text-white sm:w-[52px] sm:h-[52px]" strokeWidth={1.5} />
+            <div className="flex h-12 w-12 sm:h-14 sm:w-14 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-950 shadow-md ring-1 ring-white/20">
+              <Monitor size={26} className="text-white sm:w-7 sm:h-7" strokeWidth={1.75} />
             </div>
-            <span className="text-sm font-black text-blue-100">Windows PC</span>
-            <span className="text-xs text-slate-300">دانلود فایل Setup ویندوز</span>
+            <span className="text-sm font-black text-blue-100 pt-1">Windows PC</span>
+            <span className="text-[11px] text-slate-400 leading-snug">نصب‌کنندهٔ ویندوز · دسکتاپ کامل</span>
+            <ul className="mt-2 w-full text-right text-[11px] text-slate-500 space-y-1">
+              <li className="flex items-start gap-1.5 justify-end">
+                <span>مناسب دفتر و صندوق ثابت</span>
+                <CheckCircle2 size={14} className="text-blue-400/80 shrink-0 mt-0.5" aria-hidden />
+              </li>
+              <li className="flex items-start gap-1.5 justify-end">
+                <span>به‌روزرسانی از طریق همین لینک</span>
+                <CheckCircle2 size={14} className="text-blue-400/80 shrink-0 mt-0.5" aria-hidden />
+              </li>
+            </ul>
           </a>
         </div>
         </div>

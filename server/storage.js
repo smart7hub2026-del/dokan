@@ -1,19 +1,194 @@
 import bcrypt from 'bcryptjs';
-import prismaClientPkg from '@prisma/client';
-import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+import { PrismaPg } from '@prisma/adapter-pg';
+import { PrismaClient } from '@prisma/client';
+import { validateShopCustomersArray } from './customerValidation.js';
+import {
+  loadStateByShopFromRelational,
+  migrateLegacyStateByShopTx,
+  persistStateByShopTx,
+  preparePlatformStateBlob,
+  refreshShopStateVersions,
+  backfillCustomersFromShopPayload,
+} from './stateByShopPersistence.js';
 
-const { PrismaClient } = prismaClientPkg;
+/** لوکال: Docker Compose (postgres:16). تست: معمولاً dokanyar_test از طریق env Vitest. */
+const DEFAULT_DEV_DATABASE_URL =
+  'postgresql://postgres:postgres@127.0.0.1:5432/dokanyar';
 
-// Prisma reads this at runtime. If the user didn't set DATABASE_URL yet,
-// we fall back to a local SQLite file under server/prisma/.
-process.env.DATABASE_URL =
-  process.env.DATABASE_URL || 'file:./server/prisma/dev.db';
+if (!String(process.env.DATABASE_URL || '').trim()) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'DATABASE_URL must be set to a PostgreSQL connection string (e.g. from Render Postgres or Neon).',
+    );
+  }
+  process.env.DATABASE_URL = DEFAULT_DEV_DATABASE_URL;
+}
 
-const adapter = new PrismaBetterSqlite3({ url: process.env.DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
+const resolvedDatabaseUrl = String(process.env.DATABASE_URL || '').trim();
+if (process.env.NODE_ENV === 'production' && resolvedDatabaseUrl) {
+  const u = resolvedDatabaseUrl.toLowerCase();
+  if (u.startsWith('file:') || u.startsWith('sqlite:')) {
+    throw new Error(
+      'DATABASE_URL in production must be PostgreSQL; file: or sqlite: URLs are not allowed (ephemeral disk would lose data).',
+    );
+  }
+}
+
+/** Prisma 7: اتصال PostgreSQL فقط با driver adapter (نه `new PrismaClient()` خالی). */
+const prisma = new PrismaClient({
+  adapter: new PrismaPg({ connectionString: resolvedDatabaseUrl }),
+});
 let writeQueue = Promise.resolve();
 
+/**
+ * تراکنش تعاملی Prisma پیش‌فرض timeout=5000ms است؛ ذخیرهٔ پلتفرم (همهٔ Shop + stateByShop)
+ * روی دادهٔ زیاد یا شبکهٔ کند (مثلاً Render) از آن بیشتر طول می‌کشد و ورود/ثبت‌نام خطا می‌دهد.
+ * maxWait: زمان انتظار برای گرفتن اسلات تراکنش از استخر اتصال.
+ */
+const LONG_PRISMA_TRANSACTION = {
+  maxWait: 30_000,
+  timeout: 120_000,
+};
+
+/** تبدیل خطای یکتایی DB به پیام امن برای کاربر (بدون جزئیات فنی). */
+function rethrowIfDuplicateActiveCustomerPhone(err) {
+  if (!err || err.code !== 'P2002') throw err;
+  const targets = Array.isArray(err.meta?.target) ? err.meta.target : [];
+  const t = targets.map(String).join(' ').toLowerCase();
+  const idx = String(err.meta?.constraint || err.meta?.modelName || '').toLowerCase();
+  if (
+    t.includes('phone_key') ||
+    t.includes('phone') ||
+    idx.includes('shop_customers') ||
+    idx.includes('active_phone')
+  ) {
+    const e = new Error('DUPLICATE_ACTIVE_CUSTOMER_PHONE');
+    e.code = 'DUPLICATE_CUSTOMER_PHONE';
+    e.messageFa = 'در این دکان مشتری فعال دیگری با همین شماره موبایل ثبت شده است.';
+    throw e;
+  }
+  throw err;
+}
+
 const PLATFORM_STATE_ID = 1;
+
+/** جایگزینی کامل جداول Shop / ShopUser داخل تراکنش ارسالی. */
+async function persistShopsFullReplaceTx(tx, shops) {
+  const list = Array.isArray(shops) ? shops : [];
+  await tx.shopUser.deleteMany();
+  await tx.shop.deleteMany();
+  for (const shop of list) {
+    if (!shop || shop.code == null) continue;
+    const code = String(shop.code).trim().toUpperCase();
+    if (!code) continue;
+    const tid = Number(shop.tenantId);
+    if (!Number.isFinite(tid)) {
+      throw new Error(`[storage] shop "${code}" has invalid tenantId`);
+    }
+    const users = Array.isArray(shop.users) ? shop.users : [];
+    const { users: _drop, ...shopRest } = shop;
+    /** ردیف Shop اول؛ سپس ShopUser با shopCode صریح — nested create گاهی FK را با adapter/pg خراب می‌کند */
+    await tx.shop.create({
+      data: {
+        code,
+        tenantId: tid,
+        payload: { ...shopRest, code },
+      },
+    });
+    if (users.length > 0) {
+      await tx.shopUser.createMany({
+        data: users.map((u) => {
+          const id = Number(u.id);
+          if (!Number.isFinite(id)) {
+            throw new Error(`[storage] user in shop "${code}" has invalid id`);
+          }
+          return { id, shopCode: code, payload: u };
+        }),
+      });
+    }
+  }
+}
+
+async function persistShopsFullReplace(shops) {
+  await prisma.$transaction(
+    async (tx) => {
+      await persistShopsFullReplaceTx(tx, shops);
+    },
+    LONG_PRISMA_TRANSACTION,
+  );
+}
+
+async function loadShopsFromRelational() {
+  const rows = await prisma.shop.findMany({
+    include: { users: true },
+    orderBy: { tenantId: 'asc' },
+  });
+  return rows.map((s) => {
+    const uList = (s.users || [])
+      .slice()
+      .sort((a, b) => a.id - b.id)
+      .map((u) => {
+        const p = u.payload && typeof u.payload === 'object' ? u.payload : {};
+        return { ...p, id: u.id };
+      });
+    const p = s.payload && typeof s.payload === 'object' ? s.payload : {};
+    return {
+      ...p,
+      code: s.code,
+      tenantId: s.tenantId,
+      users: uList,
+    };
+  });
+}
+
+/**
+ * اگر ردیفی در Shop هست → بارگذاری از PG.
+ * وگرنه اگر در JSON هنوز shops[] هست → یک‌بار مهاجرت به PG و خالی کردن shops در سند state.
+ */
+async function hydrateShops(db) {
+  const count = await prisma.shop.count();
+  if (count > 0) {
+    db.shops = await loadShopsFromRelational();
+    return;
+  }
+  const fromJson = Array.isArray(db.shops) ? db.shops : [];
+  if (fromJson.length > 0) {
+    await persistShopsFullReplace(fromJson);
+    const stateBlob = { ...db, shops: [] };
+    await prisma.platformState.update({
+      where: { id: PLATFORM_STATE_ID },
+      data: { state: stateBlob },
+    });
+    db.shops = await loadShopsFromRelational();
+    return;
+  }
+  db.shops = [];
+}
+
+/** stateByShop از جداول؛ مهاجرت یک‌باره از JSON قدیمی. */
+async function hydrateStateByShop(db) {
+  const n = await prisma.shopStateRow.count();
+  const legacyRaw = db.stateByShop && typeof db.stateByShop === 'object' ? db.stateByShop : {};
+  const legacy = { ...legacyRaw };
+  if (n === 0 && Object.keys(legacy).length > 0) {
+    await prisma.$transaction(
+      async (tx) => {
+        await migrateLegacyStateByShopTx(tx, db, legacy, PLATFORM_STATE_ID);
+      },
+      LONG_PRISMA_TRANSACTION,
+    );
+  }
+  const n2 = await prisma.shopStateRow.count();
+  if (n2 > 0) {
+    await backfillCustomersFromShopPayload(prisma);
+    db.stateByShop = await loadStateByShopFromRelational(prisma);
+    await refreshShopStateVersions(prisma, db);
+  } else {
+    db.stateByShop = {};
+    db.__shopStateVersions = {};
+  }
+}
+
 const USE_DEV_DEFAULTS = process.env.NODE_ENV !== 'production';
 
 /** یک رمز برای هر سه: سوپرادمین، کد ریست، pending — روی Render فقط همین را بگذار اگر سه متغیر جدا سخت است */
@@ -160,10 +335,10 @@ const DEFAULT_BUSINESS_TYPES = [
     name: 'زرگری و طلا',
     code: 'gold_jewelry',
     icon: '💍',
-    is_active: false,
+    is_active: true,
     features: ['karat', 'weight', 'serial'],
     metadata: {
-      specialty_fa: 'عیار ۱۸/۲۱/۲۴، وزن گرم و مثقال، اجرت ساخت، قیمت روز (API)',
+      specialty_fa: 'عیار ۱۸/۲۱/۲۴، وزن گرم و مثقال، اجرت ساخت، قیمت روز طلا (افغانستان)',
       region: 'AF',
     },
   },
@@ -286,7 +461,7 @@ const ensureShopRoleSlots = (db) => {
 const ensurePlatformState = async () => {
   await prisma.platformState.upsert({
     where: { id: PLATFORM_STATE_ID },
-    create: { id: PLATFORM_STATE_ID, state: seededDatabase },
+    create: { id: PLATFORM_STATE_ID, state: seededDatabase, version: 0 },
     update: {},
   });
 };
@@ -299,6 +474,15 @@ export const loadDatabase = async () => {
 
   // Prisma returns JSON as a JS value.
   const db = (row && row.state) ? row.state : {};
+
+  await hydrateShops(db);
+  await hydrateStateByShop(db);
+
+  const pvRow = await prisma.platformState.findUnique({
+    where: { id: PLATFORM_STATE_ID },
+    select: { version: true },
+  });
+  db.__platformVersion = pvRow?.version ?? 0;
 
   let changed = false;
   if (!db.systemSettings || typeof db.systemSettings !== 'object') {
@@ -370,6 +554,10 @@ export const loadDatabase = async () => {
     db.broadcasts = [];
     changed = true;
   }
+  if (!Array.isArray(db.branchRequests)) {
+    db.branchRequests = [];
+    changed = true;
+  }
   if (ensureShopRoleSlots(db)) {
     changed = true;
   }
@@ -379,22 +567,121 @@ export const loadDatabase = async () => {
   return db;
 };
 
+/**
+ * بازیابی کامل پلتفرم از اسنپ‌شات JSON (همان خروجی loadDatabase پس از دانلود ابرادمین).
+ * تمام جداول دکان و stateByShop از نو نوشته می‌شود.
+ */
+export async function restorePlatformFromMasterSnapshot(snapshotIn) {
+  const snap =
+    snapshotIn && typeof snapshotIn === 'object'
+      ? JSON.parse(JSON.stringify(snapshotIn))
+      : null;
+  if (!snap) throw new Error('اسنپ‌شات نامعتبر است');
+  delete snap.__platformVersion;
+  delete snap.__shopStateVersions;
+  if (!Array.isArray(snap.shops)) throw new Error('snapshot.shops باید آرایه باشد');
+  const sb = snap.stateByShop && typeof snap.stateByShop === 'object' ? snap.stateByShop : {};
+  for (const shop of snap.shops) {
+    const code = shop?.code;
+    if (!code || code === 'SUPERADMIN') continue;
+    const st = sb[code];
+    if (st && Array.isArray(st.customers)) {
+      validateShopCustomersArray(st.customers);
+    }
+  }
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.shopCrmEmailTemplate.deleteMany();
+        await tx.shopCrmContactLog.deleteMany();
+        await tx.shopCrmTask.deleteMany();
+        await tx.shopCrmDeal.deleteMany();
+        await tx.shopBook.deleteMany();
+        await tx.shopInvoice.deleteMany();
+        await tx.shopProduct.deleteMany();
+        await tx.shopCustomer.deleteMany();
+        await tx.shopStateRow.deleteMany();
+        await tx.shopUser.deleteMany();
+        await tx.shop.deleteMany();
+        const dbWorking = { ...snap, shops: snap.shops, stateByShop: sb };
+        await persistShopsFullReplaceTx(tx, dbWorking.shops);
+        await persistStateByShopTx(tx, dbWorking, {});
+        const blob = preparePlatformStateBlob(dbWorking);
+        const pRow = await tx.platformState.findUnique({ where: { id: PLATFORM_STATE_ID } });
+        await tx.platformState.update({
+          where: { id: PLATFORM_STATE_ID },
+          data: { state: blob, version: (pRow?.version ?? 0) + 1 },
+        });
+      },
+      LONG_PRISMA_TRANSACTION,
+    );
+  } catch (err) {
+    rethrowIfDuplicateActiveCustomerPhone(err);
+  }
+}
+
 export const saveDatabase = async (db) => {
-  const nextWrite = writeQueue.then(() =>
-    prisma.platformState.update({
-      where: { id: PLATFORM_STATE_ID },
-      data: { state: db },
-    })
-  );
-  // Keep queue alive even if one write fails.
+  const shops = Array.isArray(db.shops) ? db.shops : [];
+  if (shops.length === 0) {
+    const n = await prisma.shop.count();
+    if (n > 0) {
+      throw new Error(
+        '[storage] saveDatabase: shops[] is empty but Shop table has rows — refusing to wipe tenants.',
+      );
+    }
+  }
+  const nextWrite = writeQueue.then(async () => {
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          const pRow = await tx.platformState.findUnique({ where: { id: PLATFORM_STATE_ID } });
+          const expectedPv = db.__platformVersion ?? 0;
+          if ((pRow?.version ?? 0) !== expectedPv) {
+            throw new Error('STORAGE_CONFLICT:PLATFORM');
+          }
+          await persistShopsFullReplaceTx(tx, shops);
+          await persistStateByShopTx(tx, db, db.__shopStateVersions || {});
+          const stateBlob = preparePlatformStateBlob(db);
+          await tx.platformState.update({
+            where: { id: PLATFORM_STATE_ID },
+            data: { state: stateBlob, version: expectedPv + 1 },
+          });
+        },
+        LONG_PRISMA_TRANSACTION,
+      );
+      db.__platformVersion = (db.__platformVersion ?? 0) + 1;
+      await refreshShopStateVersions(prisma, db);
+    } catch (err) {
+      rethrowIfDuplicateActiveCustomerPhone(err);
+    }
+  });
   writeQueue = nextWrite.catch(() => {});
   await nextWrite;
 };
 
 export const resetDatabase = async () => {
-  await prisma.platformState.upsert({
-    where: { id: PLATFORM_STATE_ID },
-    create: { id: PLATFORM_STATE_ID, state: seededDatabase },
-    update: { state: seededDatabase },
-  });
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.masterBackupAuditLog.deleteMany();
+      await tx.shopCrmEmailTemplate.deleteMany();
+      await tx.shopCrmContactLog.deleteMany();
+      await tx.shopCrmTask.deleteMany();
+      await tx.shopCrmDeal.deleteMany();
+      await tx.shopBook.deleteMany();
+      await tx.shopInvoice.deleteMany();
+      await tx.shopProduct.deleteMany();
+      await tx.shopCustomer.deleteMany();
+      await tx.shopStateRow.deleteMany();
+      await tx.shopUser.deleteMany();
+      await tx.shop.deleteMany();
+      await tx.platformState.upsert({
+        where: { id: PLATFORM_STATE_ID },
+        create: { id: PLATFORM_STATE_ID, state: seededDatabase, version: 0 },
+        update: { state: seededDatabase, version: 0 },
+      });
+    },
+    LONG_PRISMA_TRANSACTION,
+  );
 };
+
+export { prisma };

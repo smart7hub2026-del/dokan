@@ -1,10 +1,18 @@
-import { useState, useEffect } from 'react';
-import { Plus, Search, Edit2, Trash2, X, Phone, MapPin, MessageCircle, Mail, Bell, BellOff, Eye, Printer, Send, History, TrendingDown, TrendingUp, ChevronRight, Mic, MicOff } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import {
+  Plus, Search, Edit2, Trash2, X, Phone, MapPin, MessageCircle, Mail, Bell, BellOff, Eye, Printer, Send, History,
+  TrendingDown, TrendingUp, ChevronRight, ChevronDown, Mic, MicOff, Upload, GitMerge, RotateCcw, FileDown,
+  AlertTriangle,
+} from 'lucide-react';
 import { Customer, Invoice, Debt } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import { useStore } from '../store/useStore';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
 import FormModal from './ui/FormModal';
+import { useToast } from './Toast';
+import { toWhatsAppDialNumber, customerPhoneKey } from '../utils/customerPhone';
+import { customerOpenDebtBalanceMismatch, openDebtRemainingTotal } from '../utils/customerDebtBalance';
 
 type PrintSize = 'A4' | 'A5' | '80mm' | '58mm';
 
@@ -27,7 +35,7 @@ function DeleteConfirmModal({ name, onConfirm, onClose }: { name: string; onConf
         <p className="text-rose-400 text-xs mb-2">این عمل قابل بازگشت نیست.</p>
         <p className="text-amber-400 text-xs mb-6">⚠️ سوابق خرید این مشتری محفوظ می‌ماند.</p>
         <div className="flex gap-3">
-          <button onClick={onConfirm} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2.5 rounded-xl transition-colors">بله، حذف شود</button>
+          <button onClick={onConfirm} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2.5 rounded-xl transition-colors">بله، آرشیو شود</button>
           <button onClick={onClose} className="flex-1 glass text-slate-300 py-2.5 rounded-xl hover:text-white">انصراف</button>
         </div>
       </div>
@@ -35,22 +43,47 @@ function DeleteConfirmModal({ name, onConfirm, onClose }: { name: string; onConf
   );
 }
 
-function SendMessageModal({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+function SendMessageModal({
+  customer,
+  dialCode,
+  formatPrice,
+  onClose,
+}: {
+  customer: Customer;
+  dialCode: string;
+  formatPrice: (amount: number) => string;
+  onClose: () => void;
+}) {
   const [method, setMethod] = useState<'whatsapp' | 'email'>('whatsapp');
-  const [msg, setMsg] = useState(
-    `مشتری گرامی ${customer.name}، ${Math.abs(customer.balance).toLocaleString()} افغانی بدهی شما سررسید شده است. لطفاً برای تسویه حساب اقدام فرمایید.`
-  );
+  const [msg, setMsg] = useState('');
   const [sent, setSent] = useState(false);
 
+  useEffect(() => {
+    setMsg(
+      `مشتری گرامی ${customer.name}، ماندهٔ حساب شما ${formatPrice(Math.abs(customer.balance))} است. در صورت بدهی لطفاً برای تسویه اقدام فرمایید.`,
+    );
+    if (customer.whatsapp || customer.phone) setMethod('whatsapp');
+    else if (customer.email) setMethod('email');
+  }, [customer, formatPrice]);
+
   const handleSend = () => {
-    if (method === 'whatsapp' && customer.whatsapp) {
+    if (method === 'whatsapp' && (customer.whatsapp || customer.phone)) {
+      const raw = String(customer.whatsapp || customer.phone);
+      const waDigits = toWhatsAppDialNumber(raw, dialCode);
+      if (!waDigits) return;
       const text = encodeURIComponent(msg);
-      window.open(`https://wa.me/${customer.whatsapp.replace(/^0/, '93')}?text=${text}`, '_blank');
+      window.open(`https://wa.me/${waDigits}?text=${text}`, '_blank');
     } else if (method === 'email' && customer.email) {
-      window.open(`mailto:${customer.email}?subject=یادآوری بدهی&body=${encodeURIComponent(msg)}`, '_blank');
+      window.open(
+        `mailto:${customer.email}?subject=${encodeURIComponent('یادآوری حساب')}&body=${encodeURIComponent(msg)}`,
+        '_blank',
+      );
     }
     setSent(true);
-    setTimeout(() => { setSent(false); onClose(); }, 1500);
+    setTimeout(() => {
+      setSent(false);
+      onClose();
+    }, 1500);
   };
 
   return (
@@ -62,7 +95,7 @@ function SendMessageModal({ customer, onClose }: { customer: Customer; onClose: 
         </div>
         <div className="p-5 space-y-4">
           <div className="flex gap-3">
-            {customer.whatsapp && (
+            {(customer.whatsapp || customer.phone) && (
               <button onClick={() => setMethod('whatsapp')}
                 className={`flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border transition-all ${method === 'whatsapp' ? 'bg-green-600/20 border-green-500 text-green-400' : 'glass border-white/10 text-slate-400'}`}>
                 <MessageCircle size={18} /> واتساپ
@@ -80,10 +113,13 @@ function SendMessageModal({ customer, onClose }: { customer: Customer; onClose: 
             <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={5}
               className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none resize-none" />
           </div>
+          <p className="text-slate-500 text-[11px] leading-relaxed">
+            واتساپ فقط لینک wa.me در مرورگر باز می‌کند؛ ایمیل از طریق برنامهٔ ایمیل دستگاه. ارسال انبوه یا قالب رسمی سروری نیست. رضایت بازاریابی را در پروندهٔ مشتری ثبت کنید.
+          </p>
           <div className="flex gap-3">
             <button onClick={handleSend} disabled={sent}
               className={`flex-1 py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${sent ? 'bg-emerald-600 text-white' : 'btn-primary text-white'}`}>
-              {sent ? '✓ ارسال شد!' : <><Send size={16} /> ارسال پیام</>}
+              {sent ? '✓ باز شد' : <><Send size={16} /> باز کردن واتساپ / ایمیل</>}
             </button>
             <button onClick={onClose} className="px-5 glass text-slate-300 py-2.5 rounded-xl hover:text-white">انصراف</button>
           </div>
@@ -93,13 +129,19 @@ function SendMessageModal({ customer, onClose }: { customer: Customer; onClose: 
   );
 }
 
-function CustomerHistoryModal({ customer, invoices, debts, onClose }: {
-  customer: Customer; invoices: Invoice[]; debts: Debt[]; onClose: () => void;
+function CustomerHistoryModal({ customer, invoices, debts, formatMoney, onClose }: {
+  customer: Customer; invoices: Invoice[]; debts: Debt[]; formatMoney: (n: number) => string; onClose: () => void;
 }) {
   const [printSize, setPrintSize] = useState<PrintSize>('A4');
   const [printPickOpen, setPrintPickOpen] = useState(false);
   const custInvoices = invoices.filter(i => i.customer_id === customer.id);
   const custDebts = debts.filter(d => d.customer_id === customer.id);
+  const custOpenDebts = useMemo(
+    () => custDebts.filter((d) => d.remaining_amount > 0.5),
+    [custDebts],
+  );
+  const debtBalanceMismatch = customerOpenDebtBalanceMismatch(customer, debts);
+  const openDebtTotal = openDebtRemainingTotal(customer.id, debts);
 
   const handlePrint = () => {
     const sizeMap = { 'A4': 'a4', 'A5': 'a5', '80mm': '80mm', '58mm': '58mm' };
@@ -132,9 +174,9 @@ function CustomerHistoryModal({ customer, invoices, debts, onClose }: {
         <div class="info-item"><div class="label">آدرس</div><div class="value">${customer.address || '-'}</div></div>
         <div class="info-item"><div class="label">واتساپ</div><div class="value">${customer.whatsapp || '-'}</div></div>
         <div class="info-item"><div class="label">ایمیل</div><div class="value">${customer.email || '-'}</div></div>
-        <div class="info-item"><div class="label">کل خرید</div><div class="value">${customer.total_purchases.toLocaleString()} ؋</div></div>
+        <div class="info-item"><div class="label">کل خرید</div><div class="value">${formatMoney(customer.total_purchases)}</div></div>
         <div class="info-item"><div class="label">موجودی حساب</div>
-          <div class="value ${customer.balance < 0 ? 'debt' : 'paid'}">${customer.balance < 0 ? Math.abs(customer.balance).toLocaleString() + ' ؋ بدهکار' : customer.balance > 0 ? customer.balance.toLocaleString() + ' ؋ بستانکار' : 'تسویه'}</div>
+          <div class="value ${customer.balance < 0 ? 'debt' : 'paid'}">${customer.balance < 0 ? formatMoney(Math.abs(customer.balance)) + ' بدهکار' : customer.balance > 0 ? formatMoney(customer.balance) + ' بستانکار' : 'تسویه'}</div>
         </div>
       </div>
       <h2>سوابق فاکتورها (${custInvoices.length} فاکتور)</h2>
@@ -144,23 +186,23 @@ function CustomerHistoryModal({ customer, invoices, debts, onClose }: {
           <tr>
             <td>${inv.invoice_number}</td>
             <td>${inv.invoice_date}</td>
-            <td>${inv.total.toLocaleString()} ؋</td>
-            <td>${inv.paid_amount.toLocaleString()} ؋</td>
-            <td class="${inv.due_amount > 0 ? 'debt' : 'paid'}">${inv.due_amount.toLocaleString()} ؋</td>
+            <td>${formatMoney(inv.total)}</td>
+            <td>${formatMoney(inv.paid_amount)}</td>
+            <td class="${inv.due_amount > 0 ? 'debt' : 'paid'}">${formatMoney(inv.due_amount)}</td>
             <td>${inv.payment_method === 'cash' ? 'نقدی' : 'نسیه'}</td>
           </tr>
         `).join('')}
       </table>
-      ${custDebts.length > 0 ? `
-        <h2>بدهی‌های فعال (${custDebts.length} مورد)</h2>
+      ${custOpenDebts.length > 0 ? `
+        <h2>قرض با مانده (${custOpenDebts.length} مورد)</h2>
         <table>
           <tr><th>فاکتور</th><th>مبلغ اصلی</th><th>پرداخت شده</th><th>مانده</th><th>سررسید</th><th>وضعیت</th></tr>
-          ${custDebts.map(d => `
+          ${custOpenDebts.map(d => `
             <tr>
               <td>${d.invoice_number}</td>
-              <td>${d.amount.toLocaleString()} ؋</td>
-              <td>${d.paid_amount.toLocaleString()} ؋</td>
-              <td class="debt">${d.remaining_amount.toLocaleString()} ؋</td>
+              <td>${formatMoney(d.amount)}</td>
+              <td>${formatMoney(d.paid_amount)}</td>
+              <td class="debt">${formatMoney(d.remaining_amount)}</td>
               <td>${d.due_date}</td>
               <td>${d.status === 'overdue' ? '⚠️ معوق' : d.status === 'partial' ? 'جزئی' : 'در انتظار'}</td>
             </tr>
@@ -197,13 +239,24 @@ function CustomerHistoryModal({ customer, invoices, debts, onClose }: {
         </div>
 
         <div className="p-5 space-y-5">
+          {debtBalanceMismatch && (
+            <div className="rounded-xl border border-amber-500/35 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-100">
+              <p className="font-bold text-amber-300 mb-1 flex items-center gap-1.5">
+                <AlertTriangle size={14} className="shrink-0" />
+                ناسازگاری ماندهٔ حساب با قرض‌های باز
+              </p>
+              <p className="text-amber-100/90 leading-relaxed">
+                ماندهٔ ثبت‌شده برای این مشتری با جمع ماندهٔ قرض‌های باز ({formatMoney(openDebtTotal)}) یکی نیست. اگر واردات یا ویرایش دستی داشتید، یکی از دو طرف را اصلاح کنید؛ فروش نسیهٔ جدید معمولاً خودکار هماهنگ می‌ماند.
+              </p>
+            </div>
+          )}
           {/* Customer Info */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
-              { label: 'کل خرید', value: `${customer.total_purchases.toLocaleString()} ؋`, color: 'text-blue-400' },
-              { label: 'موجودی', value: customer.balance < 0 ? `${Math.abs(customer.balance).toLocaleString()} ؋ بدهکار` : customer.balance > 0 ? `${customer.balance.toLocaleString()} ؋ بستانکار` : 'تسویه', color: customer.balance < 0 ? 'text-rose-400' : customer.balance > 0 ? 'text-emerald-400' : 'text-slate-400' },
+              { label: 'کل خرید', value: formatMoney(customer.total_purchases), color: 'text-blue-400' },
+              { label: 'موجودی', value: customer.balance < 0 ? `${formatMoney(Math.abs(customer.balance))} بدهکار` : customer.balance > 0 ? `${formatMoney(customer.balance)} بستانکار` : 'تسویه', color: customer.balance < 0 ? 'text-rose-400' : customer.balance > 0 ? 'text-emerald-400' : 'text-slate-400' },
               { label: 'تعداد فاکتور', value: custInvoices.length, color: 'text-purple-400' },
-              { label: 'بدهی فعال', value: custDebts.filter(d => d.status !== 'paid').length, color: 'text-amber-400' },
+              { label: 'قرض باز', value: custOpenDebts.length, color: 'text-amber-400' },
             ].map(s => (
               <div key={s.label} className="glass rounded-xl p-3 text-center">
                 <p className={`text-lg font-bold ${s.color}`}>{s.value}</p>
@@ -241,8 +294,8 @@ function CustomerHistoryModal({ customer, invoices, debts, onClose }: {
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-white font-bold">{inv.total.toLocaleString()} ؋</p>
-                      {inv.due_amount > 0 && <p className="text-rose-400 text-xs">مانده: {inv.due_amount.toLocaleString()} ؋</p>}
+                      <p className="text-white font-bold">{formatMoney(inv.total)}</p>
+                      {inv.due_amount > 0 && <p className="text-rose-400 text-xs">مانده: {formatMoney(inv.due_amount)}</p>}
                     </div>
                   </div>
                 ))}
@@ -251,21 +304,21 @@ function CustomerHistoryModal({ customer, invoices, debts, onClose }: {
           </div>
 
           {/* Active Debts */}
-          {custDebts.length > 0 && (
+          {custOpenDebts.length > 0 && (
             <div>
               <h3 className="text-white font-semibold flex items-center gap-2 mb-3">
-                <TrendingDown size={16} className="text-rose-400" /> بدهی‌های فعال ({custDebts.length})
+                <TrendingDown size={16} className="text-rose-400" /> قرض‌های با مانده ({custOpenDebts.length})
               </h3>
               <div className="space-y-2">
-                {custDebts.map(d => (
+                {custOpenDebts.map(d => (
                   <div key={d.id} className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-4 flex items-center justify-between">
                     <div>
                       <p className="text-white text-sm font-medium">{d.invoice_number}</p>
                       <p className="text-slate-400 text-xs">سررسید: {d.due_date}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-rose-400 font-bold">{d.remaining_amount.toLocaleString()} ؋ مانده</p>
-                      <p className="text-slate-500 text-xs">پرداخت شده: {d.paid_amount.toLocaleString()} ؋</p>
+                      <p className="text-rose-400 font-bold">{formatMoney(d.remaining_amount)} مانده</p>
+                      <p className="text-slate-500 text-xs">پرداخت شده: {formatMoney(d.paid_amount)}</p>
                     </div>
                   </div>
                 ))}
@@ -305,8 +358,9 @@ function CustomerHistoryModal({ customer, invoices, debts, onClose }: {
   );
 }
 
-export default function CustomersPage() {
-  const { isDark, t } = useApp();
+export default function CustomersPage({ embedInHub = false }: { embedInHub?: boolean } = {}) {
+  const { isDark, t, formatPrice } = useApp();
+  const { success: toastSuccess } = useToast();
   const customers = useStore(s => s.customers);
   const invoices = useStore(s => s.invoices);
   const debts = useStore(s => s.debts);
@@ -314,6 +368,8 @@ export default function CustomersPage() {
   const addCustomer = useStore(s => s.addCustomer);
   const updateCustomer = useStore(s => s.updateCustomer);
   const deleteCustomer = useStore(s => s.deleteCustomer);
+  const mergeCustomers = useStore(s => s.mergeCustomers);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
@@ -323,11 +379,25 @@ export default function CustomersPage() {
   const [deleteItem, setDeleteItem] = useState<Customer | null>(null);
   const [listPrintOpen, setListPrintOpen] = useState(false);
   const [listPrintSize, setListPrintSize] = useState<PrintSize>('A4');
+  const [waDialCode, setWaDialCode] = useState(() => localStorage.getItem('dokanyar_wa_cc') || '93');
+  const [hideArchived, setHideArchived] = useState(true);
+  const [mergePrimary, setMergePrimary] = useState<Customer | null>(null);
+  const [mergeRemoveId, setMergeRemoveId] = useState<number>(0);
+  const importRef = useRef<HTMLInputElement>(null);
 
   const [form, setForm] = useState({
     name: '', phone: '', whatsapp: '', email: '', address: '',
     reminder_enabled: true, reminder_days_before: 3,
+    marketing_consent: true,
   });
+
+  useEffect(() => {
+    localStorage.setItem('dokanyar_wa_cc', waDialCode);
+  }, [waDialCode]);
+
+  useEffect(() => {
+    if (filter === 'archived') setHideArchived(false);
+  }, [filter]);
 
   const { isListening, startListening, stopListening, supported } = useVoiceSearch((text) => {
     setSearch(text);
@@ -340,33 +410,129 @@ export default function CustomersPage() {
     ? 'w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none'
     : 'w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-slate-800 text-sm focus:border-indigo-500 outline-none';
 
-  const filtered = customers.filter(c => {
-    const matchSearch = c.name.includes(search) || c.phone.includes(search) || c.customer_code.includes(search);
-    const matchFilter = filter === 'all' || c.status === filter ||
-      (filter === 'debtor' && c.balance < 0) ||
-      (filter === 'creditor' && c.balance > 0) ||
-      (filter === 'reminder' && c.reminder_enabled);
-    return matchSearch && matchFilter;
-  });
+  const dormantIds = useMemo(() => {
+    const limit = new Date();
+    limit.setDate(limit.getDate() - 90);
+    const ymd = limit.toISOString().slice(0, 10);
+    const ids = new Set<number>();
+    for (const c of customers) {
+      if (c.archived_at) continue;
+      const invs = invoices.filter((i) => i.customer_id === c.id);
+      const last = invs.reduce((m, i) => (i.invoice_date > m ? i.invoice_date : m), '');
+      if (invs.length === 0 || last < ymd) ids.add(c.id);
+    }
+    return ids;
+  }, [customers, invoices]);
 
-  const totalDebt = customers.filter(c => c.balance < 0).reduce((s, c) => s + Math.abs(c.balance), 0);
-  const totalCredit = customers.filter(c => c.balance > 0).reduce((s, c) => s + c.balance, 0);
+  const purchaseMedian = useMemo(() => {
+    const active = customers.filter((c) => !c.archived_at);
+    if (!active.length) return 0;
+    const sorted = [...active].map((c) => c.total_purchases).sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)] ?? 0;
+  }, [customers]);
+
+  const filtered = useMemo(
+    () =>
+      customers.filter((c) => {
+        if (hideArchived && c.archived_at) return false;
+        const matchSearch =
+          c.name.includes(search) ||
+          c.phone.includes(search) ||
+          c.customer_code.includes(search);
+        let matchFilter = true;
+        if (filter === 'archived') matchFilter = Boolean(c.archived_at);
+        else if (filter === 'active') matchFilter = c.status === 'active' && !c.archived_at;
+        else if (filter === 'inactive') matchFilter = c.status === 'inactive' && !c.archived_at;
+        else if (filter === 'debtor') matchFilter = c.balance < 0;
+        else if (filter === 'creditor') matchFilter = c.balance > 0;
+        else if (filter === 'reminder') matchFilter = c.reminder_enabled;
+        else if (filter === 'dormant') matchFilter = dormantIds.has(c.id);
+        else if (filter === 'high_value') {
+          matchFilter = !c.archived_at && purchaseMedian > 0 && c.total_purchases >= purchaseMedian;
+        }
+        return matchSearch && matchFilter;
+      }),
+    [customers, search, filter, hideArchived, dormantIds, purchaseMedian],
+  );
+
+  const debtSyncWarnings = useMemo(() => {
+    const s = new Set<number>();
+    for (const c of customers) {
+      if (customerOpenDebtBalanceMismatch(c, debts)) s.add(c.id);
+    }
+    return s;
+  }, [customers, debts]);
+
+  useEffect(() => {
+    const raw = searchParams.get('customer');
+    if (!raw || !/^\d+$/.test(raw)) return;
+    const id = Number(raw);
+    const c = customers.find((x) => x.id === id);
+    if (!c) {
+      setSearchParams(
+        (prev) => {
+          const p = new URLSearchParams(prev);
+          p.delete('customer');
+          return p;
+        },
+        { replace: true },
+      );
+      return;
+    }
+    setHistoryCustomer(c);
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.delete('customer');
+        return p;
+      },
+      { replace: true },
+    );
+  }, [searchParams, customers, setSearchParams]);
+
+  const totalDebt = customers.filter(c => !c.archived_at && c.balance < 0).reduce((s, c) => s + Math.abs(c.balance), 0);
+  const totalCredit = customers.filter(c => !c.archived_at && c.balance > 0).reduce((s, c) => s + c.balance, 0);
 
   const openAdd = () => {
     setEditItem(null);
-    setForm({ name: '', phone: '', whatsapp: '', email: '', address: '', reminder_enabled: true, reminder_days_before: 3 });
+    setForm({
+      name: '', phone: '', whatsapp: '', email: '', address: '',
+      reminder_enabled: true, reminder_days_before: 3, marketing_consent: true,
+    });
     setShowModal(true);
   };
 
   const openEdit = (c: Customer) => {
     setEditItem(c);
-    setForm({ name: c.name, phone: c.phone, whatsapp: c.whatsapp || '', email: c.email || '', address: c.address, reminder_enabled: c.reminder_enabled, reminder_days_before: c.reminder_days_before });
+    setForm({
+      name: c.name,
+      phone: c.phone,
+      whatsapp: c.whatsapp || '',
+      email: c.email || '',
+      address: c.address,
+      reminder_enabled: c.reminder_enabled,
+      reminder_days_before: c.reminder_days_before,
+      marketing_consent: c.marketing_consent !== false,
+    });
     setShowModal(true);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const tenantId = currentUser?.tenant_id ?? 1;
+    const key = customerPhoneKey(form.phone);
+    if (
+      key &&
+      customers.some(
+        (x) =>
+          !x.archived_at &&
+          x.id !== editItem?.id &&
+          customerPhoneKey(x.phone) === key,
+      )
+    ) {
+      window.alert('این شماره موبایل برای مشتری دیگری ثبت شده است.');
+      return;
+    }
     if (editItem) {
       updateCustomer({
         ...editItem,
@@ -377,9 +543,11 @@ export default function CustomersPage() {
         address: form.address,
         reminder_enabled: form.reminder_enabled,
         reminder_days_before: form.reminder_days_before,
+        marketing_consent: form.marketing_consent,
       });
+      toastSuccess('مشتری', 'تغییرات ذخیره شد.');
     } else {
-      addCustomer({
+      const created = addCustomer({
         name: form.name,
         phone: form.phone,
         whatsapp: form.whatsapp || undefined,
@@ -391,7 +559,13 @@ export default function CustomersPage() {
         reminder_enabled: form.reminder_enabled,
         reminder_days_before: form.reminder_days_before,
         tenant_id: tenantId,
+        marketing_consent: form.marketing_consent,
       });
+      if (!created) {
+        window.alert('شماره موبایل تکراری است.');
+        return;
+      }
+      toastSuccess('مشتری', 'ثبت شد.');
     }
     setShowModal(false);
   };
@@ -401,6 +575,90 @@ export default function CustomersPage() {
       deleteCustomer(deleteItem.id);
       setDeleteItem(null);
     }
+  };
+
+  const exportAccountantCsv = () => {
+    const rows = [
+      ['customer_code', 'name', 'phone', 'email', 'balance', 'total_purchases', 'archived', 'marketing_consent', 'notes_ui'],
+    ];
+    for (const c of customers) {
+      rows.push([
+        c.customer_code,
+        c.name.replace(/"/g, '""'),
+        customerPhoneKey(c.phone),
+        c.email || '',
+        String(c.balance),
+        String(c.total_purchases),
+        c.archived_at ? 'yes' : 'no',
+        c.marketing_consent === false ? 'no' : 'yes',
+        '',
+      ]);
+    }
+    const csv = rows.map((r) => r.map((x) => `"${String(x)}"`).join(',')).join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `customers_accountant_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const parseCsvLine = (line: string): string[] => {
+    const out: string[] = [];
+    let cur = '';
+    let q = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i];
+      if (ch === '"') {
+        q = !q;
+      } else if ((ch === ',' && !q) || ch === ';' && !q) {
+        out.push(cur.trim());
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur.trim());
+    return out.map((s) => s.replace(/^"|"$/g, ''));
+  };
+
+  const handleImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const tenantId = currentUser?.tenant_id ?? 1;
+    void file.text().then((text) => {
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      if (!lines.length) return;
+      let start = 0;
+      const h = lines[0].toLowerCase();
+      if (h.includes('name') && h.includes('phone')) start = 1;
+      let n = 0;
+      for (let i = start; i < lines.length; i += 1) {
+        const cols = parseCsvLine(lines[i]);
+        const name = cols[0] || '';
+        const phone = cols[1] || cols[2] || '';
+        if (!name || !phone) continue;
+        const email = cols[2]?.includes('@') ? cols[2] : cols[3]?.includes('@') ? cols[3] : undefined;
+        const address = cols[3] && !cols[3].includes('@') ? cols[3] : cols[4] || '';
+        const created = addCustomer({
+          name,
+          phone,
+          ...(email ? { email } : {}),
+          address: address || '',
+          balance: 0,
+          total_purchases: 0,
+          status: 'active',
+          reminder_enabled: true,
+          reminder_days_before: 3,
+          tenant_id: tenantId,
+          marketing_consent: true,
+        });
+        if (created) n += 1;
+      }
+      window.alert(n ? `${n} مشتری وارد شد (رد شدگان: شماره تکراری).` : 'هیچ ردیفی وارد نشد. فرمت: نام,موبایل یا سربرگ name,phone');
+    });
+    e.target.value = '';
   };
 
   const handlePrintAll = () => {
@@ -433,12 +691,12 @@ export default function CustomersPage() {
             <td>${c.name}</td>
             <td>${c.phone}</td>
             <td>${c.address || '-'}</td>
-            <td class="${c.balance < 0 ? 'debt' : c.balance > 0 ? 'credit' : ''}">${c.balance < 0 ? Math.abs(c.balance).toLocaleString() + ' ؋ بدهکار' : c.balance > 0 ? c.balance.toLocaleString() + ' ؋ بستانکار' : 'تسویه'}</td>
-            <td>${c.total_purchases.toLocaleString()} ؋</td>
+            <td class="${c.balance < 0 ? 'debt' : c.balance > 0 ? 'credit' : ''}">${c.balance < 0 ? formatPrice(Math.abs(c.balance)) + ' بدهکار' : c.balance > 0 ? formatPrice(c.balance) + ' بستانکار' : 'تسویه'}</td>
+            <td>${formatPrice(c.total_purchases)}</td>
           </tr>
         `).join('')}
       </table>
-      <div class="footer">جمع کل بدهی: ${totalDebt.toLocaleString()} ؋ | جمع کل بستانکاری: ${totalCredit.toLocaleString()} ؋</div>
+      <div class="footer">جمع کل بدهی: ${formatPrice(totalDebt)} | جمع کل بستانکاری: ${formatPrice(totalCredit)}</div>
       <script>window.onload=()=>{window.print();}</script>
       </body></html>
     `);
@@ -448,28 +706,87 @@ export default function CustomersPage() {
 
   return (
     <div className="space-y-6 fade-in">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className={`text-2xl font-bold ${textColor}`}>{t('manage_customers')}</h1>
-          <p className={`${subText} text-sm mt-1`}>{customers.length} مشتری ثبت‌شده</p>
-        </div>
-        <div className="flex gap-2">
-          <button type="button" onClick={() => setListPrintOpen(true)} className="flex items-center gap-2 px-4 py-2.5 rounded-xl glass text-slate-300 hover:text-white text-sm transition-all">
-            <Printer size={16} /> چاپ لیست
-          </button>
-          <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-white px-5 py-2.5 rounded-xl text-sm font-medium">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        {!embedInHub ? (
+          <div>
+            <h1 className={`text-2xl font-bold ${textColor}`}>{t('manage_customers')}</h1>
+            <p className={`${subText} text-sm mt-1`}>
+              {customers.filter((c) => !c.archived_at).length} فعال در لیست
+              {customers.some((c) => c.archived_at) ? ` · ${customers.filter((c) => c.archived_at).length} آرشیو` : ''}
+            </p>
+          </div>
+        ) : (
+          <div>
+            <h2 className={`text-lg font-bold ${textColor}`}>{t('customers_crm_directory_heading')}</h2>
+            <p className={`${subText} text-xs mt-0.5`}>
+              {customers.filter((c) => !c.archived_at).length} فعال
+              {customers.some((c) => c.archived_at) ? ` · ${customers.filter((c) => c.archived_at).length} آرشیو` : ''}
+            </p>
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2 justify-end items-center">
+          <input ref={importRef} type="file" accept=".csv,.txt,text/csv" className="hidden" onChange={handleImportFile} />
+          <details className={`relative group ${isDark ? '' : '[&[open]]:z-10'}`}>
+            <summary
+              className={`list-none cursor-pointer flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all border ${
+                isDark
+                  ? 'glass text-slate-300 hover:text-white border-white/10'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-200'
+              } [&::-webkit-details-marker]:hidden`}
+            >
+              <FileDown size={16} className="opacity-80" />
+              خروجی و واردات
+              <ChevronDown size={16} className="opacity-70 group-open:rotate-180 transition-transform" />
+            </summary>
+            <div
+              className={`absolute end-0 top-[calc(100%+0.35rem)] min-w-[14rem] rounded-xl border p-2 shadow-lg flex flex-col gap-1 z-20 ${
+                isDark ? 'glass border-white/10' : 'bg-white border-slate-200'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={() => importRef.current?.click()}
+                className={`flex items-center gap-2 w-full text-start px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isDark ? 'text-slate-200 hover:bg-white/10' : 'text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                <Upload size={16} /> واردات CSV
+              </button>
+              <button
+                type="button"
+                onClick={exportAccountantCsv}
+                className={`flex items-center gap-2 w-full text-start px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isDark ? 'text-slate-200 hover:bg-white/10' : 'text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                <FileDown size={16} /> خروجی حسابدار
+              </button>
+              <button
+                type="button"
+                onClick={() => setListPrintOpen(true)}
+                className={`flex items-center gap-2 w-full text-start px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                  isDark ? 'text-slate-200 hover:bg-white/10' : 'text-slate-800 hover:bg-slate-100'
+                }`}
+              >
+                <Printer size={16} /> چاپ لیست
+              </button>
+            </div>
+          </details>
+          <button onClick={openAdd} className="btn-primary flex items-center gap-2 text-white px-5 py-2.5 rounded-xl text-sm font-medium shrink-0">
             <Plus size={18} /> مشتری جدید
           </button>
         </div>
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
         {[
-          { label: 'کل مشتریان', value: customers.length, color: textColor },
-          { label: 'مشتریان فعال', value: customers.filter(c => c.status === 'active').length, color: 'text-emerald-400' },
-          { label: 'کل بدهکاری', value: `${(totalDebt / 1000).toFixed(1)}K ؋`, color: 'text-rose-400' },
-          { label: 'کل بستانکاری', value: `${(totalCredit / 1000).toFixed(1)}K ؋`, color: 'text-amber-400' },
+          { label: 'کل (بدون آرشیو)', value: customers.filter((c) => !c.archived_at).length, color: textColor },
+          { label: 'راکد ۹۰ روز', value: dormantIds.size, color: 'text-amber-400' },
+          { label: 'ارزش بالا (≥ میانه خرید)', value: customers.filter((c) => !c.archived_at && purchaseMedian > 0 && c.total_purchases >= purchaseMedian).length, color: 'text-indigo-400' },
+          { label: 'مشتریان فعال', value: customers.filter(c => c.status === 'active' && !c.archived_at).length, color: 'text-emerald-400' },
+          { label: 'جمع بدهکاری', value: formatPrice(totalDebt), color: 'text-rose-400' },
+          { label: 'جمع بستانکاری', value: formatPrice(totalCredit), color: 'text-amber-400' },
         ].map(s => (
           <div key={s.label} className={`${cardBg} p-4 text-center`}>
             <p className={`text-xl font-bold ${s.color}`}>{s.value}</p>
@@ -478,27 +795,141 @@ export default function CustomersPage() {
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1 flex items-center">
-          <Search size={16} className="absolute right-3 text-slate-400" />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="جستجو (نام، موبایل، کد)..."
-            className={`${inputClass} pr-10 ${supported ? 'pl-10' : ''}`} />
+      <details className={`group ${cardBg} p-4 rounded-xl border ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+        <summary className={`cursor-pointer text-sm font-bold ${textColor} list-none flex items-center justify-between gap-2 [&::-webkit-details-marker]:hidden`}>
+          <span>یادداشت برای مدیر (محدودیت‌ها و تکرارها)</span>
+          <ChevronDown size={18} className={`${subText} shrink-0 opacity-70 group-open:rotate-180 transition-transform`} />
+        </summary>
+        <ul className={`${subText} text-xs space-y-1.5 leading-relaxed list-disc pr-5 mt-3`}>
+          <li>
+            <span className="text-amber-500 font-semibold">تکرار نسبی:</span> خروجی‌ها (چاپ، CSV حسابدار، واردات) در منوی «خروجی و واردات» جمع شده‌اند؛ هرکدام هدف جدا دارد.
+          </li>
+          <li>
+            <span className="text-emerald-600 dark:text-emerald-400 font-semibold">کمبودهای متداول:</span> CRM کامل سرور، پیامک/ایمیل انبوه با صف، و تاریخچهٔ تماس خودکار برای هر مشتری در این لایه کامل نیست.
+          </li>
+          <li>
+            <span className={`font-semibold ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>آرشیو:</span> حذف فیزیکی نیست؛ ادغام تکراری و نگهداری داده را با مدیر هماهنگ کنید.
+          </li>
+        </ul>
+      </details>
+
+      <div
+        className={`${cardBg} p-4 flex flex-col sm:flex-row flex-wrap gap-4 items-start sm:items-center border ${isDark ? 'border-white/10' : 'border-slate-200'}`}
+      >
+        <div className="flex flex-col gap-1 shrink-0">
+          <span className={`${subText} text-xs`}>کد کشور واتساپ</span>
+          <select
+            value={waDialCode}
+            onChange={(e) => setWaDialCode(e.target.value)}
+            className={`${inputClass} max-w-[200px] py-2 text-xs`}
+          >
+            <option value="93">افغانستان (+93)</option>
+            <option value="98">ایران (+98)</option>
+            <option value="92">پاکستان (+92)</option>
+            <option value="966">عربستان (+966)</option>
+            <option value="971">امارات (+971)</option>
+            <option value="">خالی — فقط ارقام ذخیره‌شده</option>
+          </select>
+        </div>
+        <label className="flex items-center gap-2 text-sm cursor-pointer shrink-0">
+          <input type="checkbox" checked={hideArchived} onChange={(e) => setHideArchived(e.target.checked)} className="rounded border-slate-500" />
+          <span className={subText}>پنهان کردن آرشیو</span>
+        </label>
+        <details className={`group w-full sm:flex-1 sm:min-w-[12rem] ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
+          <summary className="cursor-pointer text-xs font-medium list-none flex items-center gap-1 [&::-webkit-details-marker]:hidden">
+            <span className={subText}>توضیح کوتاه نقش این صفحه</span>
+            <ChevronDown size={14} className="opacity-60 group-open:rotate-180 transition-transform" />
+          </summary>
+          <p className={`text-xs ${subText} mt-2 leading-relaxed max-w-2xl`}>
+            {embedInHub
+              ? 'پرونده، یادآوری، واتساپ/ایمیل و آرشیو اینجاست؛ معاملات، وظایف و RFM در تب‌های بالا.'
+              : 'پرونده و یادآوری محلی و تماس از دستگاه؛ Pipeline کامل سرور اینجا نیست. بکاپ در تب بکاپ.'}
+          </p>
+        </details>
+      </div>
+
+      <div className={`${cardBg} p-4 space-y-3 border ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
+        <div className="relative flex items-center">
+          <Search size={16} className="absolute right-3 text-slate-400 pointer-events-none" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="جستجو: نام، موبایل، کد…"
+            className={`${inputClass} pr-10 w-full ${supported ? 'pl-10' : ''}`}
+          />
           {supported && (
-            <button 
+            <button
+              type="button"
               onClick={isListening ? stopListening : startListening}
               className={`absolute left-2 p-1.5 rounded-lg transition-all ${isListening ? 'bg-rose-500/20 text-rose-500 animate-pulse' : 'text-slate-400 hover:text-emerald-500 hover:bg-emerald-500/10'}`}
-              title={isListening ? "توقف جستجوی صوتی" : "جستجوی صوتی (فارسی، پشتو، انگلیسی)"}
+              title={isListening ? 'توقف جستجوی صوتی' : 'جستجوی صوتی'}
             >
               {isListening ? <MicOff size={16} /> : <Mic size={16} />}
             </button>
           )}
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {[['all', 'همه'], ['active', 'فعال'], ['inactive', 'غیرفعال'], ['debtor', 'بدهکار'], ['creditor', 'بستانکار'], ['reminder', 'یادآوری']].map(([v, l]) => (
-            <button key={v} onClick={() => setFilter(v)} className={`px-3 py-2 rounded-xl text-xs font-medium transition-all ${filter === v ? 'bg-indigo-600 text-white' : 'glass text-slate-400 hover:text-white'}`}>{l}</button>
-          ))}
+        <div>
+          <p className={`${subText} text-[11px] font-semibold mb-2`}>فیلتر سریع</p>
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                ['all', 'همه'],
+                ['active', 'فعال'],
+                ['archived', 'آرشیو'],
+                ['debtor', 'بدهکار'],
+                ['creditor', 'بستانکار'],
+              ] as const
+            ).map(([v, l]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setFilter(v)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  filter === v
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : isDark
+                      ? 'bg-white/5 text-slate-300 hover:bg-white/10'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
         </div>
+        <details className="group">
+          <summary
+            className={`cursor-pointer list-none text-[11px] font-semibold flex items-center gap-1 w-fit [&::-webkit-details-marker]:hidden ${subText}`}
+          >
+            فیلترهای بیشتر
+            <ChevronDown size={14} className="opacity-70 group-open:rotate-180 transition-transform" />
+          </summary>
+          <div className={`flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-dashed ${isDark ? 'border-white/15' : 'border-slate-200'}`}>
+            {(
+              [
+                ['inactive', 'غیرفعال'],
+                ['reminder', 'یادآوری'],
+                ['dormant', 'راکد ۹۰روز'],
+                ['high_value', 'ارزش بالا'],
+              ] as const
+            ).map(([v, l]) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setFilter(v)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  filter === v
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : isDark
+                      ? 'bg-white/5 text-slate-300 hover:bg-white/10'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+        </details>
       </div>
 
       {/* Table / کارت موبایل */}
@@ -535,29 +966,47 @@ export default function CustomersPage() {
                     </div>
                   </td>
                   <td className="py-3 px-4">
-                    <span className={`font-bold text-sm ${c.balance < 0 ? 'text-rose-400' : c.balance > 0 ? 'text-emerald-400' : subText}`}>
-                      {c.balance < 0 ? `${Math.abs(c.balance).toLocaleString()} ؋ بدهکار` : c.balance > 0 ? `${c.balance.toLocaleString()} ؋ بستانکار` : 'تسویه'}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`font-bold text-sm ${c.balance < 0 ? 'text-rose-400' : c.balance > 0 ? 'text-emerald-400' : subText}`}>
+                        {c.balance < 0 ? `${formatPrice(Math.abs(c.balance))} بدهکار` : c.balance > 0 ? `${formatPrice(c.balance)} بستانکار` : 'تسویه'}
+                      </span>
+                      {debtSyncWarnings.has(c.id) && (
+                        <span title="ماندهٔ حساب با جمع قرض‌های باز هم‌خوان نیست" className="text-amber-500 inline-flex shrink-0">
+                          <AlertTriangle size={15} strokeWidth={2.25} />
+                        </span>
+                      )}
+                    </div>
                   </td>
-                  <td className={`py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{c.total_purchases.toLocaleString()} ؋</td>
+                  <td className={`py-3 px-4 ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>{formatPrice(c.total_purchases)}</td>
                   <td className="py-3 px-4">
                     {c.reminder_enabled
                       ? <span className="flex items-center gap-1 text-xs text-amber-400"><Bell size={12} /> {c.reminder_days_before} روز قبل</span>
                       : <span className="flex items-center gap-1 text-xs text-slate-600"><BellOff size={12} /> غیرفعال</span>}
                   </td>
                   <td className="py-3 px-4">
-                    <span className={`text-xs px-2 py-1 rounded-full ${c.status === 'active' ? 'badge-green' : 'badge-red'}`}>
-                      {c.status === 'active' ? 'فعال' : 'غیرفعال'}
-                    </span>
+                    <div className="flex flex-col gap-1">
+                      <span className={`text-xs px-2 py-1 rounded-full w-fit ${c.status === 'active' ? 'badge-green' : 'badge-red'}`}>
+                        {c.status === 'active' ? 'فعال' : 'غیرفعال'}
+                      </span>
+                      {c.archived_at && <span className="text-[10px] text-amber-400">آرشیو</span>}
+                    </div>
                   </td>
                   <td className="py-3 px-4">
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 flex-wrap">
                       <button onClick={() => setHistoryCustomer(c)} title="سوابق" className="p-1.5 rounded-lg glass text-slate-400 hover:text-purple-400 transition-colors"><Eye size={14} /></button>
                       <button onClick={() => openEdit(c)} title="ویرایش" className="p-1.5 rounded-lg glass text-slate-400 hover:text-blue-400 transition-colors"><Edit2 size={14} /></button>
-                      {(c.whatsapp || c.email) && c.balance < 0 && (
-                        <button onClick={() => setMsgCustomer(c)} title="ارسال پیام" className="p-1.5 rounded-lg glass text-slate-400 hover:text-green-400 transition-colors"><Send size={14} /></button>
+                      {!c.archived_at && (
+                        <button type="button" onClick={() => { setMergePrimary(c); setMergeRemoveId(0); }} title="ادغام با مشتری دیگر" className="p-1.5 rounded-lg glass text-slate-400 hover:text-cyan-400 transition-colors"><GitMerge size={14} /></button>
                       )}
-                      <button onClick={() => setDeleteItem(c)} title="حذف" className="p-1.5 rounded-lg glass text-slate-400 hover:text-rose-400 transition-colors"><Trash2 size={14} /></button>
+                      {c.archived_at && (
+                        <button type="button" onClick={() => updateCustomer({ ...c, archived_at: undefined, status: 'active' })} title="بازگردانی از آرشیو" className="p-1.5 rounded-lg glass text-slate-400 hover:text-emerald-400 transition-colors"><RotateCcw size={14} /></button>
+                      )}
+                      {(c.whatsapp || c.phone || c.email) && (
+                        <button onClick={() => setMsgCustomer(c)} title="واتساپ / ایمیل" className="p-1.5 rounded-lg glass text-slate-400 hover:text-green-400 transition-colors"><Send size={14} /></button>
+                      )}
+                      {!c.archived_at && (
+                        <button onClick={() => setDeleteItem(c)} title="آرشیو" className="p-1.5 rounded-lg glass text-slate-400 hover:text-rose-400 transition-colors"><Trash2 size={14} /></button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -593,24 +1042,31 @@ export default function CustomersPage() {
                 </div>
               </button>
               <div className={`mt-3 pt-3 border-t space-y-2 ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
-                <div className="flex justify-between text-sm">
+                <div className="flex justify-between items-center text-sm gap-2">
                   <span className={subText}>حساب</span>
-                  <span
-                    className={`font-bold tabular-nums ${
-                      c.balance < 0 ? 'text-rose-500' : c.balance > 0 ? 'text-emerald-600' : subText
-                    }`}
-                  >
-                    {c.balance < 0
-                      ? `${Math.abs(c.balance).toLocaleString()} ؋ بدهکار`
-                      : c.balance > 0
-                        ? `${c.balance.toLocaleString()} ؋ بستانکار`
-                        : 'تسویه'}
+                  <span className="inline-flex items-center gap-1 font-bold tabular-nums">
+                    <span
+                      className={
+                        c.balance < 0 ? 'text-rose-500' : c.balance > 0 ? 'text-emerald-600' : subText
+                      }
+                    >
+                      {c.balance < 0
+                        ? `${formatPrice(Math.abs(c.balance))} بدهکار`
+                        : c.balance > 0
+                          ? `${formatPrice(c.balance)} بستانکار`
+                          : 'تسویه'}
+                    </span>
+                    {debtSyncWarnings.has(c.id) && (
+                      <span title="مانده با قرض‌های باز هم‌خوان نیست" className="text-amber-500">
+                        <AlertTriangle size={14} strokeWidth={2.25} />
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className={subText}>خرید کل</span>
                   <span className={`tabular-nums ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                    {c.total_purchases.toLocaleString()} ؋
+                    {formatPrice(c.total_purchases)}
                   </span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -653,7 +1109,7 @@ export default function CustomersPage() {
                 >
                   <Edit2 size={16} />
                 </button>
-                {(c.whatsapp || c.email) && c.balance < 0 && (
+                {(c.whatsapp || c.phone || c.email) && (
                   <button
                     type="button"
                     onClick={() => setMsgCustomer(c)}
@@ -663,14 +1119,36 @@ export default function CustomersPage() {
                     <Send size={16} />
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setDeleteItem(c)}
-                  title="حذف"
-                  className={`p-2 rounded-xl ${isDark ? 'glass' : 'bg-white border border-slate-200'} text-rose-500`}
-                >
-                  <Trash2 size={16} />
-                </button>
+                {!c.archived_at && (
+                  <button
+                    type="button"
+                    onClick={() => { setMergePrimary(c); setMergeRemoveId(0); }}
+                    title="ادغام"
+                    className={`p-2 rounded-xl ${isDark ? 'glass' : 'bg-white border border-slate-200'} text-cyan-500`}
+                  >
+                    <GitMerge size={16} />
+                  </button>
+                )}
+                {c.archived_at && (
+                  <button
+                    type="button"
+                    onClick={() => updateCustomer({ ...c, archived_at: undefined, status: 'active' })}
+                    title="بازگردانی"
+                    className={`p-2 rounded-xl ${isDark ? 'glass' : 'bg-white border border-slate-200'} text-emerald-600`}
+                  >
+                    <RotateCcw size={16} />
+                  </button>
+                )}
+                {!c.archived_at && (
+                  <button
+                    type="button"
+                    onClick={() => setDeleteItem(c)}
+                    title="آرشیو"
+                    className={`p-2 rounded-xl ${isDark ? 'glass' : 'bg-white border border-slate-200'} text-rose-500`}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -705,7 +1183,7 @@ export default function CustomersPage() {
                 </div>
                 <div>
                   <label className="text-slate-400 text-xs mb-1 block"><MessageCircle size={11} className="inline ml-1 text-green-400" />واتساپ <span className="text-slate-500">(اختیاری)</span></label>
-                  <input value={form.whatsapp} onChange={e => setForm({ ...form, whatsapp: e.target.value })} className={inputClass} placeholder="مثال: 0791234567" />
+                  <input value={form.whatsapp} onChange={e => setForm({ ...form, whatsapp: e.target.value })} className={inputClass} placeholder="07xxxxxxx" />
                 </div>
                 <div className="col-span-2">
                   <label className="text-slate-400 text-xs mb-1 block"><Mail size={11} className="inline ml-1 text-blue-400" />ایمیل <span className="text-slate-500">(اختیاری)</span></label>
@@ -714,6 +1192,16 @@ export default function CustomersPage() {
                 <div className="col-span-2">
                   <label className="text-slate-400 text-xs mb-1 block"><MapPin size={11} className="inline ml-1" />آدرس</label>
                   <input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} className={inputClass} />
+                </div>
+                <div className="col-span-2 flex items-center justify-between bg-slate-500/10 border border-white/10 rounded-xl px-4 py-3">
+                  <span className="text-slate-300 text-sm">رضایت بازاریابی (پیامک/ایمیل از اپ دستگاه)</span>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, marketing_consent: !form.marketing_consent })}
+                    className={`w-10 h-5 rounded-full transition-all relative ${form.marketing_consent ? 'bg-emerald-600' : 'bg-slate-600'}`}
+                  >
+                    <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${form.marketing_consent ? 'right-0.5' : 'left-0.5'}`} />
+                  </button>
                 </div>
               </div>
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 space-y-3">
@@ -770,9 +1258,73 @@ export default function CustomersPage() {
       )}
 
       {/* Modals */}
-      {historyCustomer && <CustomerHistoryModal customer={historyCustomer} invoices={invoices} debts={debts} onClose={() => setHistoryCustomer(null)} />}
-      {msgCustomer && <SendMessageModal customer={msgCustomer} onClose={() => setMsgCustomer(null)} />}
+      {historyCustomer && (
+        <CustomerHistoryModal
+          customer={historyCustomer}
+          invoices={invoices}
+          debts={debts}
+          formatMoney={(n) => formatPrice(n)}
+          onClose={() => setHistoryCustomer(null)}
+        />
+      )}
+      {msgCustomer && (
+        <SendMessageModal
+          customer={msgCustomer}
+          dialCode={waDialCode}
+          formatPrice={formatPrice}
+          onClose={() => setMsgCustomer(null)}
+        />
+      )}
       {deleteItem && <DeleteConfirmModal name={deleteItem.name} onConfirm={doDelete} onClose={() => setDeleteItem(null)} />}
+      {mergePrimary && (
+        <FormModal
+          open
+          onClose={() => { setMergePrimary(null); setMergeRemoveId(0); }}
+          title={`ادغام: نگه‌داشتن «${mergePrimary.name}»`}
+          size="md"
+          footer={
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="flex-1 btn-primary text-white py-2.5 rounded-xl text-sm font-bold"
+                onClick={() => {
+                  if (!mergeRemoveId || mergeRemoveId === mergePrimary.id) {
+                    window.alert('مشتری دوم را انتخاب کنید.');
+                    return;
+                  }
+                  if (!window.confirm('فاکتورها و بدهی‌ها به مشتری نگه‌داشته‌شده منتقل می‌شود. ادامه؟')) return;
+                  const ok = mergeCustomers(mergePrimary.id, mergeRemoveId);
+                  setMergePrimary(null);
+                  setMergeRemoveId(0);
+                  if (!ok) window.alert('ادغام انجام نشد.');
+                }}
+              >
+                تأیید ادغام
+              </button>
+              <button type="button" className="px-4 glass rounded-xl text-sm" onClick={() => { setMergePrimary(null); setMergeRemoveId(0); }}>
+                انصراف
+              </button>
+            </div>
+          }
+        >
+          <p className="text-slate-400 text-sm mb-3">مشتری دوم حذف می‌شود؛ مانده و خرید کل جمع می‌شود.</p>
+          <label className="text-slate-400 text-xs block mb-1">ادغام با</label>
+          <select
+            className={inputClass}
+            value={mergeRemoveId || ''}
+            onChange={(e) => setMergeRemoveId(Number(e.target.value))}
+          >
+            <option value="">— انتخاب —</option>
+            {customers
+              .filter((c) => c.id !== mergePrimary.id && !c.archived_at)
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.customer_code} — {c.name} ({c.phone})
+                </option>
+              ))}
+          </select>
+        </FormModal>
+      )}
     </div>
   );
 }

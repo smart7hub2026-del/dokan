@@ -93,7 +93,12 @@ export default function BackupPage() {
         a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
-        showMsg('ok', 'فایل پایگاه داده SQLite دانلود شد');
+        showMsg(
+          'ok',
+          filename.endsWith('.json')
+            ? 'اسنپ‌شات JSON کل پلتفرم (PostgreSQL) دانلود شد'
+            : 'فایل SQLite (.db) پلتفرم دانلود شد',
+        );
         void fetchHistory();
       } else {
         const res = await fetch(`${API}/api/settings/backup/export`, { credentials: 'include', headers });
@@ -267,7 +272,7 @@ export default function BackupPage() {
               <button type="button" onClick={() => setExportFormat('db')}
                 className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all font-bold text-sm ${exportFormat === 'db' ? 'border-violet-500 bg-violet-500/15 text-violet-300' : 'border-slate-600/40 text-slate-400 hover:border-slate-500'}`}>
                 <Database size={18} />
-                SQLite (.db)
+                کل پلتفرم
               </button>
             )}
           </div>
@@ -278,14 +283,14 @@ export default function BackupPage() {
               ? 'فایل JSON شامل تمام داده‌های فروشگاه است و برای بازیابی کامل مناسب است.'
               : exportFormat === 'csv'
                 ? 'فایل CSV شامل محصولات، مشتریان و فاکتورها است — قابل باز کردن در Excel.'
-                : 'فایل SQLite کل پایگاه پلتفرم است (تمام فروشگاه‌ها و کاربران). بسیار حساس است؛ فقط مدیر پلتفرم (سوپرادمین) و آرشیو امن.'}
+                : 'روی PostgreSQL: دانلود اسنپ‌شات JSON تمام پلتفرم. روی SQLite قدیمی: فایل .db. بسیار حساس؛ فقط سوپرادمین و آرشیو امن. بازیابی این فایل با بازیابی JSON تک‌دکان فرق دارد.'}
           </div>
 
           <button onClick={() => void handleExport()} disabled={isExporting}
             className="w-full flex items-center justify-center gap-2 btn-primary text-white py-3 rounded-xl font-bold text-sm disabled:opacity-60 transition-all">
             {isExporting
               ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> در حال آماده‌سازی...</>
-              : <><Download size={16} /> دانلود بکاپ {exportFormat === 'db' ? 'SQLite' : exportFormat.toUpperCase()}</>}
+              : <><Download size={16} /> دانلود {exportFormat === 'db' ? 'پلتفرم (JSON یا .db)' : exportFormat.toUpperCase()}</>}
           </button>
         </div>
 

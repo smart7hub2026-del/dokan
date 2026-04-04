@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useToast } from './Toast';
 import { User } from '../App';
@@ -23,11 +23,14 @@ import {
 import SecurityPage from './SecurityPage';
 import BackupPage from './BackupPage';
 import UsersPage from './UsersPage';
+import BranchRequestShopPanel from './BranchRequestShopPanel';
+import WarehouseBinsSettingsPanel from './WarehouseBinsSettingsPanel';
 import PrintSettingsPage from './PrintSettingsPage';
 import OfflinePage from './OfflinePage';
 import SupportPage from './SupportPage';
 import ActiveSessionsPage from './ActiveSessionsPage';
 import { useStore } from '../store/useStore';
+import creatorConfig from '../config/creator.json';
 
 type SettingsTab =
   | 'general'
@@ -157,6 +160,9 @@ export default function SettingsPage({
       <div className="pt-2">
         {activeTab === 'general' && (
           <div className="space-y-6">
+            <p className="text-slate-400 text-sm leading-relaxed max-w-3xl">
+              در این تب مشخصات حساب، تقویم نمایش تاریخ در پنل، و نمای کلی قابلیت‌های سازمانی را می‌بینید. زبان، ارز و تم ظاهری از منوی اصلی «زبان و ارز» تغییر می‌کنند.
+            </p>
             <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-4">
               <h2 className="text-white font-semibold">اطلاعات کاربر</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -214,6 +220,8 @@ export default function SettingsPage({
               </div>
             )}
 
+            {currentUser.role === 'admin' && !isSuper && <WarehouseBinsSettingsPanel />}
+
             {!isSuper && (
               <div
                 className={`rounded-2xl p-6 space-y-5 border ${
@@ -239,6 +247,7 @@ export default function SettingsPage({
                         body: 'نقش‌های از پیش تعریف‌شده (مدیر، فروشنده، انباردار، حسابدار) فعال است. کنترل ریز per-page و per-action برای نسخهٔ سازمانی در حال تکمیل است.',
                         action: { label: 'کاربران و نقش‌ها', tab: 'users' as const },
                         tone: 'violet',
+                        badge: 'partial' as const,
                       },
                       {
                         icon: KeyRound,
@@ -246,6 +255,7 @@ export default function SettingsPage({
                         body: 'اعتبارسنجی رمز قوی، احراز دو مرحله‌ای و مدیریت نشست در تب امنیت و نشست‌های فعال در دسترس است؛ انقضای اجباری نشست و قفل پس از تلاش ناموفق روی سرور قابل سخت‌گیری بیشتر است.',
                         action: { label: 'امنیت', tab: 'security' as const },
                         tone: 'emerald',
+                        badge: 'partial' as const,
                       },
                       {
                         icon: ScrollText,
@@ -253,6 +263,7 @@ export default function SettingsPage({
                         body: 'لاگ اقدامات حساس تنظیمات و بکاپ در سرور ثبت می‌شود؛ گزارش جستجوپذیر سراسری برای همهٔ دکان‌ها در پنل ابرادمین توسعه می‌یابد.',
                         action: { label: 'پشتیبان‌گیری', tab: 'backup' as const },
                         tone: 'amber',
+                        badge: 'partial' as const,
                       },
                       {
                         icon: Webhook,
@@ -260,6 +271,7 @@ export default function SettingsPage({
                         body: 'یکپارچگی پرداخت (مثلاً HesabPay) و مسیرهای REST برای فروشگاه فعال است؛ صدور API Key اختصاصی فروشگاه و وب‌هوک رویدادها برای نسخهٔ تجاری برنامه‌ریزی شده است.',
                         action: { label: 'پشتیبانی', tab: 'support' as const },
                         tone: 'sky',
+                        badge: 'partial' as const,
                       },
                       {
                         icon: Percent,
@@ -267,6 +279,7 @@ export default function SettingsPage({
                         body: 'چند ارز و نرخ تبدیل در «زبان و ارز» مدیریت می‌شود؛ قوانین مالیاتی پیچیده و چند نرخ همزمان روی فاکتور در نقشهٔ محصول است.',
                         action: { label: 'زبان و ارز از منو', tab: null },
                         tone: 'rose',
+                        badge: 'partial' as const,
                       },
                       {
                         icon: Clock,
@@ -274,6 +287,7 @@ export default function SettingsPage({
                         body: 'بکاپ دستی و خروجی JSON/پایگاه از تب پشتیبان در دسترس است؛ زمان‌بندی خودکار، نگهداری چند نسخه و اعلان خطا به مدیر در نسخهٔ میزبان اختصاصی اضافه می‌شود.',
                         action: { label: 'پشتیبان‌گیری', tab: 'backup' as const },
                         tone: 'cyan',
+                        badge: 'planned' as const,
                       },
                     ] as const
                   ).map((row) => {
@@ -339,10 +353,16 @@ export default function SettingsPage({
                             <h3 className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{row.title}</h3>
                             <span
                               className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                isDark ? 'bg-white/10 text-slate-300' : 'bg-slate-200/80 text-slate-700'
+                                row.badge === 'planned'
+                                  ? isDark
+                                    ? 'bg-amber-500/15 text-amber-200 ring-1 ring-amber-500/25'
+                                    : 'bg-amber-100 text-amber-900 ring-1 ring-amber-200'
+                                  : isDark
+                                    ? 'bg-white/10 text-slate-300'
+                                    : 'bg-slate-200/80 text-slate-700'
                               }`}
                             >
-                              نقشه راه / بخشی فعال
+                              {row.badge === 'planned' ? 'آیندهٔ محصول' : 'بخشی فعال / توسعه'}
                             </span>
                           </div>
                           <p className={`text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
@@ -374,16 +394,30 @@ export default function SettingsPage({
 
             {currentUser.role === 'super_admin' && (
               <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-4">
-                <h2 className="text-white font-semibold">تنظیمات سیستم</h2>
+                <h2 className="text-white font-semibold">مرجع پلتفرم (فقط خواندنی)</h2>
+                <p className="text-slate-400 text-xs leading-relaxed">
+                  رمز ابرادمین و تنظیمات حیاتی در <strong className="text-slate-200">متغیرهای محیطی سرور</strong> (مثلاً{' '}
+                  <span className="font-mono text-[10px]" dir="ltr">SEED_SUPERADMIN_PASSWORD</span>
+                  ) ذخیره می‌شوند؛ این فرم دیگر ذخیرهٔ ساختگی نشان نمی‌دهد.
+                </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {[['ارز پیش‌فرض', 'AFN'], ['تلفن پشتیبانی', '0795074175'], ['نسخه سیستم', 'v3.0.0']].map(([k, v]) => (
-                    <div key={k}>
-                      <label className="text-slate-400 text-xs block mb-1">{k}</label>
-                      <input defaultValue={v} className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm focus:border-emerald-500" />
+                  <div>
+                    <label className="text-slate-400 text-xs block mb-1">ارز پیش‌فرض نمایشی</label>
+                    <div className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm">AFN</div>
+                  </div>
+                  <div>
+                    <label className="text-slate-400 text-xs block mb-1">تلفن پشتیبانی (creator.json)</label>
+                    <div className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-white text-sm" dir="ltr">
+                      {String(creatorConfig.social?.phone || '—')}
                     </div>
-                  ))}
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-slate-400 text-xs block mb-1">نسخهٔ فرانت‌اند (build)</label>
+                    <div className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-slate-200 text-sm font-mono" dir="ltr">
+                      {__APP_VERSION__}
+                    </div>
+                  </div>
                 </div>
-                <button onClick={() => success('ذخیره شد', 'تنظیمات با موفقیت ذخیره شد')} className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2.5 rounded-xl text-sm font-medium transition-colors">ذخیره تنظیمات</button>
               </div>
             )}
           </div>
@@ -392,8 +426,32 @@ export default function SettingsPage({
         {activeTab === 'profile' && (
           <div className="space-y-6 max-w-xl">
             {currentUser.role === 'super_admin' ? (
-              <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 text-slate-300 text-sm">
-                {t('profile_super_readonly')}
+              <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-4 text-slate-300 text-sm leading-relaxed">
+                <p className="text-white font-semibold text-base">پروفایل ابرادمین</p>
+                <p>{t('profile_super_readonly')}</p>
+                <p className="text-slate-400 text-xs">
+                  نام نمایشی و سیاست‌های حساس در سطح پلتفرم از مسیرهای تخصصی (مدیریت دکان‌ها، اعلان، بکاپ) انجام می‌شود؛ رمز و ۲FA در تب امنیت.
+                </p>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <Link
+                    to="/dashboard"
+                    className="inline-flex items-center justify-center rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20 transition-colors"
+                  >
+                    داشبورد
+                  </Link>
+                  <Link
+                    to="/tenants"
+                    className="inline-flex items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-white/5 transition-colors"
+                  >
+                    مدیریت دکان‌ها
+                  </Link>
+                  <Link
+                    to="/settings?section=security"
+                    className="inline-flex items-center justify-center rounded-xl border border-white/15 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-white/5 transition-colors"
+                  >
+                    امنیت و ۲FA
+                  </Link>
+                </div>
               </div>
             ) : (
               <>
@@ -412,7 +470,10 @@ export default function SettingsPage({
                   </div>
                   {currentUser.role === 'admin' && (
                     <div>
-                      <label className="text-slate-400 text-xs block mb-1">نام نقش مدیر (پیش‌فرض: admin)</label>
+                      <label className="text-slate-400 text-xs block mb-1">عنوان نمایشی نقش مدیر در پنل (پیش‌فرض: admin)</label>
+                      <p className="text-slate-500 text-[10px] leading-relaxed mb-2">
+                        این فقط برچسب نمایشی است؛ نام کاربری واقعیِ ورود برای مدیر در «کاربران فروشگاه» تنظیم می‌شود و با <span className="font-mono" dir="ltr">admin-کدکوچک</span> قابل استفاده است.
+                      </p>
                       <input
                         value={shopSettings.admin_role_name || 'admin'}
                         onChange={(e) => updateShopSettings({ admin_role_name: e.target.value || 'admin' })}
@@ -431,7 +492,7 @@ export default function SettingsPage({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('security')}
+                  onClick={() => goTab('security')}
                   className="w-full sm:w-auto flex items-center gap-2 text-emerald-400 text-sm hover:text-emerald-300"
                 >
                   <ChevronLeft size={16} className="rotate-180" />
@@ -444,24 +505,60 @@ export default function SettingsPage({
 
         {activeTab === 'users' && currentUser.role === 'admin' && (
           <div className="space-y-4">
-            <p className="text-slate-400 text-sm max-w-2xl">
-              فعال‌سازی نقش‌ها، وضعیت معلق و تنظیم رمز همان API واقعی صفحه «کاربران» است.
+            <p className="text-slate-400 text-sm max-w-2xl leading-relaxed">
+              مدیریت حرفه‌ای تیم فروشگاه: هر نقش رمز جدا، نام کاربری انگلیسی، و وضعیت فعال/معلق دارد. تغییرات از طریق API سرور ذخیره می‌شود و در ورود دو مرحله‌ای اعمال می‌گردد.
             </p>
+            <BranchRequestShopPanel />
             <UsersPage embedded />
           </div>
         )}
 
-        {activeTab === 'print' && shopSettingsTabs && <PrintSettingsPage />}
-        {activeTab === 'offline' && shopSettingsTabs && <OfflinePage />}
-        {activeTab === 'support' && <SupportPage />}
+        {activeTab === 'print' && shopSettingsTabs && (
+          <div className="space-y-4">
+            <p className="text-slate-400 text-sm leading-relaxed max-w-3xl">
+              هویت بصری دکان روی فاکتور و پیش‌نمایش چاپ: لوگو، بنر، شماره تماس، پایگاه کاغذ حرارتی/A4 و گزینه‌های نمایش روی رسید.
+            </p>
+            <PrintSettingsPage />
+          </div>
+        )}
+        {activeTab === 'offline' && shopSettingsTabs && (
+          <div className="space-y-4">
+            <p className="text-slate-400 text-sm leading-relaxed max-w-3xl">
+              رفتار پنل هنگام قطع اینترنت و همگام‌سازی بعدی با سرور؛ مناسب کار در مغازه با اتصال ناپایدار.
+            </p>
+            <OfflinePage />
+          </div>
+        )}
+        {activeTab === 'support' && (
+          <div className="space-y-4">
+            <p className="text-slate-400 text-sm leading-relaxed max-w-3xl">
+              ثبت تیکت برای تیم پلتفرم، پیگیری وضعیت، و در نقش ابرادمین پاسخ‌گویی متمرکز به همهٔ دکان‌ها.
+            </p>
+            <SupportPage />
+          </div>
+        )}
 
-        {activeTab === 'security' && <SecurityPage twoFactorEnabled={currentUser.two_factor_enabled} />}
+        {activeTab === 'security' && (
+          <div className="space-y-4">
+            <SecurityPage twoFactorEnabled={currentUser.two_factor_enabled} />
+          </div>
+        )}
         {activeTab === 'sessions' && (
-          <div className="max-w-5xl pb-6 md:pb-0">
+          <div className="max-w-5xl pb-6 md:pb-0 space-y-4">
+            <p className="text-slate-400 text-sm leading-relaxed max-w-3xl">
+              نشست‌های فعال روی دستگاه‌ها و مراجع اخیر؛ برای امنیت پس از کار روی رایانه اشتراکی، نشست‌های غیرضروری را ببندید.
+            </p>
             <ActiveSessionsPage embedded />
           </div>
         )}
-        {activeTab === 'backup' && <BackupPage />}
+        {activeTab === 'backup' && (
+          <div className="space-y-4">
+            <p className="text-slate-400 text-sm leading-relaxed max-w-3xl">
+              خروجی پشتیبان دکان، تاریخچه عملیات، و در نقش ابرادمین ابزارهای پشتیبان در سطح پلتفرم؛ زمان‌بندی خودکار معمولاً روی میزبان اختصاصی پیکربندی می‌شود.
+            </p>
+            <BackupPage />
+          </div>
+        )}
       </div>
 
     </div>

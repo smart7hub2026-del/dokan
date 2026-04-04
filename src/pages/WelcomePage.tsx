@@ -18,6 +18,9 @@ import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import ShopGateModal from '../components/ShopGateModal';
 import WelcomeDownloadPage from '../components/WelcomeDownloadPage';
 import BrandLogo from '../components/BrandLogo';
+import AuthPremiumBackground from '../components/auth/AuthPremiumBackground';
+import AuthHeroVideoCard from '../components/auth/AuthHeroVideoCard';
+import LoginRoadmapHero from '../components/auth/LoginRoadmapHero';
 import {
   ONBOARDING_BUSINESS_TYPES,
   DEFAULT_BUSINESS_TYPE,
@@ -43,8 +46,18 @@ const ONBOARDING_LUCIDE: Record<OnboardingLucideIconName, LucideIcon> = {
   Croissant,
 };
 
+type ViewType = 'landing' | 'download' | 'login' | 'register' | 'info' | 'payment-pending' | 'demo-limit' | 'demo-register';
+
 interface WelcomePageProps {
-  onLogin: (shopCode: string, shopPassword: string, role: string, rolePassword: string, captchaToken?: string, deviceName?: string) => boolean | Promise<{ ok: boolean; message?: string; code?: string; twoFactorRequired?: boolean; pendingToken?: string }>;
+  onLogin: (
+    shopCode: string,
+    shopPassword: string,
+    role: string,
+    rolePassword: string,
+    captchaToken?: string,
+    deviceName?: string,
+    loginUsername?: string
+  ) => boolean | Promise<{ ok: boolean; message?: string; code?: string; twoFactorRequired?: boolean; pendingToken?: string }>;
   onGoogleLogin: (email: string, fullName: string, deviceName?: string) => Promise<{ ok: boolean; message?: string; code?: string }>;
   onDemoLogin: (payload: {
     mode?: 'register' | 'login';
@@ -65,6 +78,7 @@ interface WelcomePageProps {
         shopCode: string;
         shopPassword: string;
         adminFullName: string;
+        adminUsername?: string;
         adminRoleTitle: string;
         adminRolePassword: string;
         message?: string;
@@ -72,14 +86,42 @@ interface WelcomePageProps {
     | { ok: false; message?: string; code?: string }
   >;
   onTwoFactorVerify: (pendingToken: string, totpCode: string) => Promise<{ ok: boolean; message?: string; code?: string }>;
+  /** باز کردن مستقیم از مسیرهای `/login` یا `/register` */
+  initialAuthView?: ViewType | 'creator';
 }
-
-type ViewType = 'landing' | 'download' | 'login' | 'register' | 'info' | 'payment' | 'payment-pending' | 'demo-limit' | 'demo-register';
-type AuthScene = 'landing' | 'info' | 'creator' | 'login' | 'register' | 'payment-pending' | 'demo-limit';
 
 const REMEMBER_SHOP_CODE_KEY = 'dokanyar_remember_shop_code';
 const REMEMBER_SHOP_PASSWORD_KEY = 'dokanyar_remember_shop_password';
+const REMEMBER_LOGIN_USERNAME_KEY = 'dokanyar_remember_login_username';
 const RECAPTCHA_SITE_KEY = String(import.meta.env.VITE_RECAPTCHA_SITE_KEY || '').trim();
+
+function isPwaStandaloneClient(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (window.matchMedia('(display-mode: standalone)').matches) return true;
+    if ((window.navigator as Navigator & { standalone?: boolean }).standalone) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+function formatAuthClientError(err: unknown): string {
+  const e = err as Error & { status?: number; code?: string };
+  const msg = (e?.message || '').trim();
+  if (e.status === 429 || e.code === 'RATE_LIMITED') {
+    return msg || 'تعداد درخواست بیش از حد است؛ کمی صبر کنید و دوباره تلاش کنید.';
+  }
+  return msg || 'خطا در ارتباط با سرور';
+}
+
+function normalizeLoginUsernameKey(s: string) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/g, '-')
+    .replace(/_/g, '-');
+}
 
 const PAYMENT_INFO: Record<string, { image: string; description: string; steps: string[] }> = {
   bank_transfer: {
@@ -114,53 +156,28 @@ const PAYMENT_INFO: Record<string, { image: string; description: string; steps: 
   },
   other_try: {
     image: 'https://images.unsplash.com/photo-1556761175-b413da4baf72?q=80&w=1200&auto=format&fit=crop',
-    description: 'اگر هیچ‌کدام از روش‌های فوق برای شما مناسب یا در دسترس نیست، تیم پشتیبانی SmartHub Digital Solutions آماده راهنمایی است. از طریق تلفن یا واتساپ با شماره ۰۷۹۵۰۷۴۱۷۵ تماس بگیرید تا سریع‌ترین و مناسب‌ترین روش پرداخت برای منطقه و شرایط شما معرفی شود. پاسخگوی ۲۴ ساعته هستیم.',
-    steps: ['با شماره ۰۷۹۵۰۷۴۱۷۵ تماس بگیرید یا واتساپ کنید', 'نام طرح انتخابی و موقعیت جغرافیایی خود را بگویید', 'روش پرداخت مناسب برای شما معرفی می‌شود', 'راهنمایی کامل مرحله به مرحله دریافت کنید'],
+    description:
+      'مسیر پیش‌فرض: واتساپ و حواله‌های داخلی. با شمارهٔ ۰۷۹۵۰۷۴۱۷۵ در واتساپ یا تماس بگیرید؛ برای حواله به حساب یا صرافی، زمان واریز را با همان خط هماهنگ کنید. تیم پشتیبانی در صورت نیاز مسیر دقیق را برای منطقهٔ شما توضیح می‌دهد.',
+    steps: [
+      'واتساپ به ۰۷۹۵۰۷۴۱۷۵ — نام طرح و نام فروشگاه را بفرستید',
+      'در صورت حوالهٔ داخلی، مبلغ و رسید را نگه دارید',
+      'راهنمایی شمارهٔ مقصد یا صرافی را از پشتیبانی بگیرید',
+      'پس از واریز، در کارت «جزئیات تراکنش» اطلاعات را تکمیل کنید',
+    ],
   },
 };
 
-const SCENE_IMAGE: Record<AuthScene, string> = {
-  landing: 'https://images.unsplash.com/photo-1520607162513-77705c0f0d4a?q=75&w=1280&auto=format&fit=crop',
-  info: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?q=75&w=1280&auto=format&fit=crop',
-  creator: 'https://images.unsplash.com/photo-1542744095-fcf48d80b0fd?q=75&w=1280&auto=format&fit=crop',
-  login: 'https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?q=75&w=1280&auto=format&fit=crop',
-  register: 'https://images.unsplash.com/photo-1553729784-e91953dec042?q=75&w=1280&auto=format&fit=crop',
-  'payment-pending': 'https://images.unsplash.com/photo-1579621970563-ebec7560ff3e?q=75&w=1280&auto=format&fit=crop',
-  'demo-limit': 'https://images.unsplash.com/photo-1556741533-f6acd647d2fb?q=75&w=1280&auto=format&fit=crop',
-};
-
-const AnimatedBg: React.FC<{ full?: boolean; scene?: AuthScene }> = ({ full = false, scene = 'login' }) => {
-  return (
-  <div className="absolute inset-0 z-0 pointer-events-none">
-    <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-indigo-900 animate-fade-in" />
-    <div 
-      className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MCIgaGVpZ2h0PSI0MCI+PHJlY3Qgd2lkdGg9IjQwIiBoZWlnaHQ9IjQwIiBmaWxsPSJub25lIiBzdHJva2U9IiMyYTM0NTciIHN0cm9rZS13aWR0aD0iMC41IiBvcGFjaXR5PSIwLjMiLz48L3N2Zz4=')] bg-repeat animate-pan-slow animation-delay-500 opacity-0 animate-fade-in-late"
-      style={{ backgroundSize: '40px 40px' }}
-    />
-    <div
-      className="absolute inset-0 bg-cover bg-center opacity-[0.12] mix-blend-soft-light"
-      style={{ backgroundImage: `url(${SCENE_IMAGE[scene]})` }}
-    />
-    {full && (
-      <>
-        <div 
-          className="absolute inset-0 bg-cover bg-center mix-blend-soft-light opacity-0 animate-fade-in-slow animation-delay-1000"
-          style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1556740738-b6a63e27c4df?q=80&w=2070&auto=format&fit=crop)' }}
-        />
-      </>
-    )}
-    <div className="absolute -top-1/4 -right-1/4 w-1/2 h-1/2 bg-indigo-500/30 rounded-full blur-3xl opacity-0 animate-glow animation-delay-3000" />
-    <div className="absolute -bottom-1/4 -left-1/4 w-1/2 h-1/2 bg-emerald-500/20 rounded-full blur-3xl opacity-0 animate-glow animation-delay-3500" />
-  </div>
-  );
-};
-
-const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDemoLogin, onTwoFactorVerify }) => {
-  const { t } = useApp();
+const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDemoLogin, onTwoFactorVerify, initialAuthView }) => {
+  const { t, isOnline } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [suspendedGate, setSuspendedGate] = useState<{ open: boolean; message?: string }>({ open: false });
-  const [view, setView] = useState<ViewType | 'creator'>('landing');
+  const [view, setView] = useState<ViewType | 'creator'>(() => {
+    if (initialAuthView === 'login') return 'login';
+    if (initialAuthView === 'register') return 'register';
+    if (typeof window !== 'undefined' && isPwaStandaloneClient()) return 'login';
+    return 'landing';
+  });
   const [registerStep, setRegisterStep] = useState(1);
   const [showPassword, setShowPassword] = useState(false);
   useEffect(() => {
@@ -204,6 +221,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
     shopCode: string;
     shopPassword: string;
     adminFullName: string;
+    adminUsername: string;
     adminRoleTitle: string;
     adminRolePassword: string;
   }>(null);
@@ -241,7 +259,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   const handleDemoRegisterApi = async () => {
     setDemoError('');
     if (!DEMO_DATABASE_BUSINESS_TYPE_IDS.has(demoBusinessType)) {
-      setDemoError('ثبت‌نام آزمایشی با دیتابیس فقط برای «فروشگاه عمومی» یا «کتابفروشی» است؛ سایر صنوف از طرح‌های پولی.');
+      setDemoError(
+        'ثبت‌نام آزمایشی با دیتابیس فقط برای صنوفی است که برچسب «دمو ۳ روز» دارند؛ بقیه از طرح‌های پولی.',
+      );
       return;
     }
     if (!validateDemoFormFields()) {
@@ -274,6 +294,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
           shopCode: res.shopCode,
           shopPassword: res.shopPassword,
           adminFullName: res.adminFullName,
+          adminUsername: res.adminUsername ?? `admin-${String(res.shopCode).toLowerCase()}`,
           adminRoleTitle: res.adminRoleTitle,
           adminRolePassword: res.adminRolePassword,
         });
@@ -288,7 +309,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         }
       }
     } catch (e: unknown) {
-      setDemoError(e instanceof Error ? e.message : 'خطا در ارتباط با سرور');
+      setDemoError(formatAuthClientError(e));
     } finally {
       setIsDemoLoading(false);
     }
@@ -303,7 +324,12 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   const [loginStep, setLoginStep] = useState<1 | 2>(1);
   const [shopCodeInput, setShopCodeInput] = useState('');
   const [shopPassInput, setShopPassInput] = useState('');
+  /** نام کاربری انگلیسی — در مرحلهٔ ۲ ورود وارد و تأیید می‌شود */
+  const [loginUsernameInput, setLoginUsernameInput] = useState('');
   const [rolePassInput, setRolePassInput] = useState('');
+  /** نقش‌های فعال فروشگاه پس از check-shop — تا قبل از تطبیق نام کاربری در مرحلهٔ ۲ */
+  const [loginShopRolesPool, setLoginShopRolesPool] = useState<ShopRole[]>([]);
+  const [loginStep2UsernameOk, setLoginStep2UsernameOk] = useState(false);
   const [loginCaptchaToken, setLoginCaptchaToken] = useState('');
   const [demoCaptchaToken, setDemoCaptchaToken] = useState('');
   const loginCaptchaRef = useRef<ReCAPTCHA | null>(null);
@@ -326,6 +352,17 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   });
   const [rememberShopCode, setRememberShopCode] = useState(false);
   const [showForgotModal, setShowForgotModal] = useState(false);
+  /** پیش‌پر کد دکان از query: ?shop= یا ?shopCode= (مثلاً لینک از پشتیبانی) */
+  useEffect(() => {
+    if (view !== 'login') return;
+    const q = searchParams.get('shop') || searchParams.get('shopCode');
+    if (!q?.trim()) return;
+    setShopCodeInput((prev) => {
+      const next = q.trim().toUpperCase();
+      if (prev.trim().toUpperCase() === next) return prev;
+      return next;
+    });
+  }, [view, searchParams]);
 
   useEffect(() => {
     if (view !== 'login') return;
@@ -340,6 +377,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
       if (p && c) {
         setShopPassInput((prev) => (prev.trim() ? prev : p));
       }
+      const u = localStorage.getItem(REMEMBER_LOGIN_USERNAME_KEY);
+      if (u) setLoginUsernameInput((prev) => (prev.trim() ? prev : u));
     } catch {
       /* ignore */
     }
@@ -353,12 +392,30 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         const code = shopCodeInput.trim();
         if (code) localStorage.setItem(REMEMBER_SHOP_CODE_KEY, code.toUpperCase());
         if (shopPassInput) localStorage.setItem(REMEMBER_SHOP_PASSWORD_KEY, shopPassInput);
+        const lu = loginUsernameInput.trim();
+        if (lu) localStorage.setItem(REMEMBER_LOGIN_USERNAME_KEY, lu);
       } catch {
         /* ignore */
       }
     }, 400);
     return () => window.clearTimeout(t);
-  }, [view, rememberShopCode, shopCodeInput, shopPassInput]);
+  }, [view, rememberShopCode, shopCodeInput, shopPassInput, loginUsernameInput]);
+
+  /** PWA نصب‌شده: مستقیم ورود؛ اگر کد/رمز فروشگاه ذخیره شده، از مرحلهٔ رمز نقش شروع شود (مناسب آفلاین نسبی) */
+  useEffect(() => {
+    if (view !== 'login') return;
+    if (!isPwaStandaloneClient()) return;
+    try {
+      const c = localStorage.getItem(REMEMBER_SHOP_CODE_KEY);
+      const p = localStorage.getItem(REMEMBER_SHOP_PASSWORD_KEY);
+      if (c && p) {
+        setLoginStep(2);
+        setShopNameResult((prev) => (prev.trim() ? prev : `فروشگاه ${c}`));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [view]);
 
   const handleCheckShop = async () => {
     if (!shopCodeInput.trim() || !shopPassInput.trim()) {
@@ -369,8 +426,12 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
     setIsCheckingShop(true);
     try {
       const res = await apiCheckShop(shopCodeInput.trim(), shopPassInput.trim());
+      const step1CodeUpper = shopCodeInput.trim().toUpperCase();
+      const rolesForUi =
+        step1CodeUpper === 'SUPERADMIN'
+          ? res.roles.filter((r) => r.role === 'super_admin')
+          : res.roles.filter((r) => r.role !== 'super_admin');
       setShopNameResult(res.shopName);
-      setShopRolesResult(res.roles);
       setAdminRoleTitleFromShop(String(res.admin_role_name || 'admin').trim() || 'admin');
 
       const normalizedCode = shopCodeInput.trim().toUpperCase();
@@ -381,64 +442,98 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         } else {
           localStorage.removeItem(REMEMBER_SHOP_CODE_KEY);
           localStorage.removeItem(REMEMBER_SHOP_PASSWORD_KEY);
+          localStorage.removeItem(REMEMBER_LOGIN_USERNAME_KEY);
         }
       } catch {
         /* ignore */
       }
-      if (normalizedCode === 'SUPERADMIN' && res.roles.length === 1) {
-        // SUPERADMIN has a single role — auto-login using the shop password
-        const autoRole = res.roles[0].role;
-        setSelectedRole(autoRole);
-        setIsLoggingIn(true);
-        try {
-          if (RECAPTCHA_SITE_KEY && !loginCaptchaToken) {
-            setLoginError('لطفاً کپچا را تکمیل کنید');
-            return;
-          }
-          const result = await onLogin(normalizedCode, shopPassInput.trim(), autoRole, shopPassInput.trim(), loginCaptchaToken || undefined, deviceNameInput || undefined);
-          if (typeof result === 'boolean') {
-            if (!result) setLoginError('رمز عبور نادرست است');
-          } else if (result && !result.ok) {
-            if (result.twoFactorRequired && result.pendingToken) {
-              setTwoFactorRequired(true);
-              setPendingToken2fa(result.pendingToken);
-              setTotpCode('');
-              setTotpError('');
-              setLoginStep(2);
-            } else if (result.code === 'SHOP_SUSPENDED') {
-              setSuspendedGate({ open: true, message: result.message });
-            } else {
-              setLoginError(result.message || 'خطا در ورود');
-            }
-          }
-        } catch {
-          setLoginError('خطا در ارتباط با سرور');
-        } finally {
-          setIsLoggingIn(false);
-        }
-        return;
-      }
 
-      if (res.roles.length === 0) {
+      if (rolesForUi.length === 0) {
         setCheckShopError(
           'هیچ کاربر فعالی برای این فروشگاه ثبت نشده. مدیر دکان از تنظیمات → کاربران فروشگاه، نقش‌ها را فعال کند و برای هر نقش رمز تعیین کند.',
         );
         return;
       }
 
-      // سایر فروشگاه‌ها — مرحلهٔ انتخاب نقش (فقط همان کاربران فعال سرور)
-      const firstOk = res.roles.find(r => r.status !== 'inactive') ?? res.roles[0];
-      setSelectedRole(firstOk.role);
+      setLoginShopRolesPool(rolesForUi);
+      setLoginError('');
+      setRolePassInput('');
+
+      if (step1CodeUpper === 'SUPERADMIN') {
+        const superRow = rolesForUi.find((r) => r.role === 'super_admin');
+        if (!superRow) {
+          setCheckShopError('کاربر ابرادمین فعال برای این دکان یافت نشد.');
+          return;
+        }
+        const un = (String(superRow.username || 'superadmin').trim() || 'superadmin');
+        setLoginUsernameInput(un);
+        setShopRolesResult([superRow]);
+        setSelectedRole('super_admin');
+        setLoginStep2UsernameOk(true);
+        try {
+          if (rememberShopCode) {
+            localStorage.setItem(REMEMBER_LOGIN_USERNAME_KEY, un);
+          }
+        } catch {
+          /* ignore */
+        }
+      } else {
+        setShopRolesResult([]);
+        setLoginStep2UsernameOk(false);
+      }
+
       setLoginStep(2);
     } catch (err: unknown) {
       const e = err as Error & { code?: string };
       if (e.code === 'SHOP_SUSPENDED') {
         setSuspendedGate({ open: true, message: e.message });
       } else {
-        setCheckShopError(e?.message || 'کد فروشگاه یا رمز عبور نادرست است');
+        setCheckShopError(formatAuthClientError(err));
       }
     } finally {
       setIsCheckingShop(false);
+    }
+  };
+
+  const handleConfirmStep2Username = () => {
+    setLoginError('');
+    const uRaw = loginUsernameInput.trim();
+    if (!uRaw) {
+      setLoginError('نام نقش (نام کاربری انگلیسی) الزامی است');
+      return;
+    }
+    if (!/^[a-zA-Z0-9@._-]{2,80}$/.test(uRaw)) {
+      setLoginError('نام نقش: فقط حروف انگلیسی، اعداد و . _ - @ (۲ تا ۸۰ کاراکتر).');
+      return;
+    }
+    const lu = normalizeLoginUsernameKey(uRaw);
+    const codeUpper = shopCodeInput.trim().toUpperCase();
+    const matches = loginShopRolesPool.filter((r) => {
+      const un = normalizeLoginUsernameKey(r.username || '');
+      if (un && un === lu) return true;
+      if (r.role === 'admin') {
+        const alias = normalizeLoginUsernameKey(`admin-${codeUpper.toLowerCase()}`);
+        if (lu === alias) return true;
+      }
+      if (r.role === 'super_admin' && lu === 'superadmin') return true;
+      return false;
+    });
+    if (matches.length === 0) {
+      setLoginError(
+        'این نام نقش با هیچ نقش فعال این فروشگاه مطابقت ندارد. نام کاربری هر نقش در تنظیمات → کاربران فروشگاه (و در پنل ادمین برای هر دکان) ثبت شده است.',
+      );
+      return;
+    }
+    const picked = matches[0];
+    setShopRolesResult([picked]);
+    setSelectedRole(picked.role);
+    setLoginStep2UsernameOk(true);
+    try {
+      if (rememberShopCode) {
+        localStorage.setItem(REMEMBER_LOGIN_USERNAME_KEY, uRaw);
+      }
+    } catch {
+      /* ignore */
     }
   };
 
@@ -446,11 +541,23 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
     setLoginError('');
     setIsLoggingIn(true);
     try {
+      if (!loginStep2UsernameOk || shopRolesResult.length === 0) {
+        setLoginError('ابتدا نام نقش را در همین صفحه تأیید کنید');
+        return;
+      }
       if (RECAPTCHA_SITE_KEY && !loginCaptchaToken) {
         setLoginError('لطفاً کپچا را تکمیل کنید');
         return;
       }
-      const result = await onLogin(shopCodeInput.trim(), shopPassInput.trim(), selectedRole, rolePassInput, loginCaptchaToken || undefined, deviceNameInput || undefined);
+      const result = await onLogin(
+        shopCodeInput.trim(),
+        shopPassInput.trim(),
+        selectedRole,
+        rolePassInput,
+        loginCaptchaToken || undefined,
+        deviceNameInput || undefined,
+        loginUsernameInput.trim() || undefined
+      );
       if (typeof result === 'boolean') {
         if (!result) setLoginError('رمز نقش اشتباه است');
       } else if (result && !result.ok) {
@@ -465,8 +572,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
           setLoginError(result.message || 'خطا در ورود');
         }
       }
-    } catch {
-      setLoginError('خطا در ارتباط با سرور');
+    } catch (err: unknown) {
+      setLoginError(formatAuthClientError(err));
     } finally {
       setIsLoggingIn(false);
     }
@@ -485,6 +592,20 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   const [googleError, setGoogleError] = useState('');
   const [googleLoading, setGoogleLoading] = useState(false);
 
+  useEffect(() => {
+    if (!initialAuthView) return;
+    if (initialAuthView === 'register') setRegisterStep(1);
+    if (initialAuthView === 'login') {
+      setLoginStep(1);
+      setLoginShopRolesPool([]);
+      setLoginStep2UsernameOk(false);
+      setTwoFactorRequired(false);
+      setTotpCode('');
+      setTotpError('');
+    }
+    setView(initialAuthView as ViewType | 'creator');
+  }, [initialAuthView]);
+
   // Register state (پرداخت — چندمرحله‌ای)
   interface RegisterData {
     plan: string;
@@ -501,7 +622,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
 
   const [regData, setRegData] = useState<RegisterData>({
     plan: 'basic_monthly',
-    payMethod: 'bank_transfer',
+    payMethod: 'other_try',
     shopName: '',
     ownerFirstName: '',
     ownerFamily: '',
@@ -517,6 +638,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [paymentError, setPaymentError] = useState('');
   const [createdPayment, setCreatedPayment] = useState<{ id: number; status: string; checkoutUrl?: string | null } | null>(null);
+  /** false = پیش‌فرض واتساپ و حواله داخلی؛ true = انتخاب بانک، موبایل‌پیسه و … */
+  const [registerPayUseAdvancedMethods, setRegisterPayUseAdvancedMethods] = useState(false);
 
   const cardBg = 'bg-black/30 backdrop-blur-lg border border-white/10 shadow-2xl';
   const textPrimary = 'text-white';
@@ -693,13 +816,15 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   const plans = [
     {
       id: 'free', name: 'آزمایشی رایگان', nameEn: 'Free trial',
-      price: '$0', period: '۳ روز',
+      price: '۰ افغانی', period: '۳ روز',
       color: 'slate', badge: '۳ روز',
       features: [
         'ثبت‌نام با موبایل + رمز (بدون کد پیامک)',
         '۳ روز دسترسی کامل به امکانات',
         'ورود مجدد با همان شماره و رمز',
         'داده‌های شما ذخیره می‌شود (مثل حساب رسمی)',
+        'SKU یکتا در هر فروشگاه (بر پایه بارکد)، وضعیت کالا و زمان آخرین ویرایش در سرور',
+        'پایگاه PostgreSQL با جداول مجزا و همگام‌سازی خوش‌بینانه',
         'پس از اتمام: تمدید از طریق اشتراک یا پشتیبانی',
       ]
     },
@@ -711,9 +836,11 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         '۴ کاربر (مدیر + ۳ نقش مجزا)',
         'حداکثر ۲۰۰۰ محصول در انبار',
         'حداکثر ۲۵۰ مشتری وفادار',
+        'SKU یکتا، وضعیت کالا (فعال / پیش‌نویس / متوقف)، فیلدهای audit',
+        'چند انبار نام‌گذاری‌شده با تفکیک موجودی در فرم محصول',
         'پشتیبانی استاندارد تیکتی',
         'چاپ فاکتور (۴ سایز استاندارد)',
-        'بکاپ‌گیری خودکار هفتگی',
+        'بکاپ‌گیری خودکار هفتگی روی PostgreSQL',
       ]
     },
     {
@@ -725,6 +852,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         'صرفه‌جویی ۳۰٪ در هزینه سالانه',
         'پشتیبانی اولویت‌دار تلفنی',
         'حداکثر ۵۰۰۰ محصول در انبار',
+        'SKU یکتا و یکپارچگی داده در جداول رابطه‌ای',
         'بکاپ‌گیری خودکار روزانه',
         'امنیت SSL و رمزنگاری داده‌ها',
       ]
@@ -737,6 +865,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
         'کاربران نامحدود (بدون محدودیت)',
         'محصولات نامحدود (بدون محدودیت)',
         'مشتریان نامحدود (بدون محدودیت)',
+        'SKU یکتا، audit کامل، آماده مقیاس‌پذیری روی PostgreSQL',
         'پشتیبانی ۲۴/۷ اختصاصی VIP',
         'گزارش‌گیری پیشرفته + نمودارهای تحلیلی',
         'سیستم حسابداری کامل و حرفه‌ای',
@@ -872,7 +1001,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
       <>
         {suspendedGateModal}
       <div className="min-h-screen font-vazir relative flex items-center justify-center p-4 overflow-hidden" dir="rtl">
-        <AnimatedBg scene="demo-limit" />
+        <AuthPremiumBackground scene="demo-limit" />
         <div
           className={`relative z-10 w-full mx-auto ${
             demoRegisterCredentials || demoRegPhase === 'business' ? 'max-w-6xl' : 'max-w-md'
@@ -894,14 +1023,13 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
 
           <div className="bg-black/40 backdrop-blur-lg border border-white/10 rounded-3xl shadow-2xl overflow-hidden">
             <div className="bg-gradient-to-r from-indigo-600/80 to-blue-600/80 px-6 py-5 text-right relative overflow-hidden">
-              <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'url(https://images.unsplash.com/photo-1556741533-6e6a62bd8b49?q=80&w=800&auto=format&fit=crop)', backgroundSize: 'cover', backgroundPosition: 'center' }} />
               <div className="relative z-10">
                 <div className="text-3xl mb-2">🚀</div>
                 <h2 className="text-xl font-black text-white">ثبت‌نام آزمایشی رایگان — ۳ روز</h2>
                 <p className="text-indigo-100 text-xs mt-2 opacity-90 leading-relaxed">
                   {demoRegPhase === 'business'
-                    ? 'فروشگاه عمومی و کتابفروشی هر کدام دیتابیس جدا دارند (کالاها در عمومی، کتاب‌ها در کتابفروشی) — قاطی نمی‌شوند.'
-                    : 'ابتدا مشخصات را وارد کنید؛ سپس «فروشگاه عمومی» یا «کتابفروشی» را برای دمو ۳ روزه انتخاب کنید.'}
+                    ? 'فروشگاه عمومی، کتابفروشی و زرگری/طلا هر کدام دیتابیس و نمونهٔ کالا/کتاب/طلا جدا دارند — با هم قاطی نمی‌شوند.'
+                    : 'ابتدا مشخصات را وارد کنید؛ سپس یکی از صنوف با برچسب «دمو ۳ روز» را انتخاب کنید.'}
                 </p>
               </div>
             </div>
@@ -925,6 +1053,12 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                         <p className="text-white font-bold text-base mt-1">{demoRegisterCredentials.adminFullName}</p>
                       </div>
                       <div>
+                        <p className="text-slate-400 text-xs font-bold">نام کاربری انگلیسی مدیر (مرحلهٔ دوم ورود)</p>
+                        <p className="text-cyan-200 font-mono font-black text-base break-all text-left mt-1" dir="ltr">
+                          {demoRegisterCredentials.adminUsername}
+                        </p>
+                      </div>
+                      <div>
                         <p className="text-slate-400 text-xs font-bold">رمز نقش مدیر (در ورود زیر «مدیر دکان»)</p>
                         <p className="text-amber-200 font-mono font-black text-base break-all text-left mt-1" dir="ltr">{demoRegisterCredentials.adminRolePassword}</p>
                       </div>
@@ -933,19 +1067,22 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                   <p className="text-slate-500 text-[11px] leading-relaxed">
                     نقش‌های فروشنده، انباردار و حسابدار به‌صورت پیش‌فرض در ورود نمایش داده نمی‌شوند تا مدیر از تنظیمات → کاربران فروشگاه آن‌ها را فعال و رمز تعیین کند.
                   </p>
-                  <p className="text-slate-400 text-xs leading-relaxed">
-                    در صفحهٔ «ورود»: کد و رمز فروشگاه؛ نقش مدیر دکان و رمز نقش مدیر را وارد کنید.
+                  <p className="text-slate-500 text-[11px] leading-relaxed border-t border-white/10 pt-3">
+                    <b className="text-slate-400">مدیر هر دکان (دیمو)</b> فقط پنل همان فروشگاه را می‌بیند. با دکمهٔ زیر به صفحهٔ ورود بروید و اطلاعات نمایش‌داده‌شده در همین کارت را وارد کنید.
                   </p>
                   <button
                     type="button"
                     onClick={() => {
                       setShopCodeInput(demoRegisterCredentials.shopCode);
                       setShopPassInput(demoRegisterCredentials.shopPassword);
+                      setLoginUsernameInput(demoRegisterCredentials.adminUsername);
                       setDemoRegisterCredentials(null);
                       setDemoError('');
                       setDemoRegPhase('form');
                       setView('login');
                       setLoginStep(1);
+                      setLoginShopRolesPool([]);
+                      setLoginStep2UsernameOk(false);
                     }}
                     className="w-full py-3.5 rounded-xl text-base font-black flex items-center justify-center gap-2 bg-indigo-600 text-white hover:bg-indigo-500 shadow-lg shadow-indigo-500/20"
                   >
@@ -966,15 +1103,17 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                 <div className="space-y-5">
                   <div>
                     <h3 className="text-white text-lg font-black mb-0.5">نوع کسب‌وکار</h3>
-                    <p className="text-slate-500 text-[11px]">فعلاً فقط «سوپرمارکیت» فعال است؛ سایر صنوف بزودی فعال می‌شوند.</p>
+                    <p className="text-slate-500 text-[11px]">
+                      چند صنف با دمو ۳ روزه فعال است؛ بقیهٔ کارت‌ها «بزودی» یا «طرح کامل» هستند.
+                    </p>
                   </div>
                   {demoError && (
                     <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm font-bold flex items-center gap-2 flex-row-reverse text-right">
                       <AlertTriangle size={16} className="shrink-0" /> <span>{demoError}</span>
                     </div>
                   )}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3">
-                    {ONBOARDING_BUSINESS_TYPES.map((bt) => {
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+                    {ONBOARDING_BUSINESS_TYPES.filter((bt) => bt.isActive).map((bt) => {
                       const IconComp = ONBOARDING_LUCIDE[bt.lucideIcon];
                       const sel = demoBusinessType === bt.id;
                       const demoDb = DEMO_DATABASE_BUSINESS_TYPE_IDS.has(bt.id);
@@ -988,41 +1127,58 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                             setDemoBusinessType(bt.id);
                           }}
                           disabled={!bt.isActive}
-                          className={`group relative overflow-hidden rounded-2xl border p-3 sm:p-3.5 text-right transition-all duration-300 ${
+                          className={`group relative flex flex-col overflow-hidden rounded-2xl border p-0 text-right transition-all duration-300 ${
                             sel
-                              ? 'border-indigo-400/80 bg-gradient-to-br from-indigo-600/30 via-slate-900/55 to-violet-900/45 shadow-lg shadow-indigo-900/25 ring-1 ring-indigo-400/35 hover:-translate-y-0.5'
+                              ? 'border-indigo-400/80 bg-slate-900/80 shadow-xl shadow-indigo-900/30 ring-1 ring-indigo-400/40 hover:-translate-y-1'
                               : bt.isActive
-                                ? 'border-white/10 bg-white/[0.05] hover:border-indigo-400/40 hover:bg-white/[0.08] hover:-translate-y-0.5 hover:shadow-md'
+                                ? 'border-white/10 bg-white/[0.04] hover:border-indigo-400/45 hover:bg-white/[0.07] hover:-translate-y-1 hover:shadow-lg'
                                 : 'border-white/10 bg-white/[0.03] opacity-60 cursor-not-allowed'
                           }`}
                         >
-                          {sel ? (
-                            <span className="absolute top-1.5 left-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white text-[10px] font-black shadow-md">
-                              ✓
-                            </span>
-                          ) : null}
-                          {!bt.isActive ? (
-                            <span className="absolute top-1.5 left-1.5 rounded-md bg-slate-900/90 px-1.5 py-0.5 text-[7px] font-black text-slate-200/90 ring-1 ring-slate-500/40">
-                              بزودی
-                            </span>
-                          ) : !demoDb ? (
-                            <span className="absolute top-1.5 left-1.5 rounded-md bg-amber-950/90 px-1.5 py-0.5 text-[7px] font-black text-amber-200/90 ring-1 ring-amber-500/30">
-                              طرح کامل
-                            </span>
-                          ) : (
-                            <span className="absolute top-1.5 left-1.5 rounded-md bg-emerald-950/90 px-1.5 py-0.5 text-[7px] font-black text-emerald-200/90 ring-1 ring-emerald-500/30">
-                              دمو ۳ روز
-                            </span>
-                          )}
-                          <div
-                            className={`mb-2 inline-flex h-11 w-11 sm:h-12 sm:w-12 items-center justify-center rounded-xl bg-gradient-to-br ${bt.accent} shadow-md ring-1 ring-white/10`}
-                          >
-                            <IconComp size={22} className="text-white drop-shadow-md" strokeWidth={1.75} />
+                          <div className="relative h-32 sm:h-36 w-full shrink-0">
+                            {bt.cardCoverImage ? (
+                              <img
+                                src={bt.cardCoverImage}
+                                alt=""
+                                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className={`h-full w-full bg-gradient-to-br ${bt.accent}`} />
+                            )}
+                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/25 to-transparent" />
+                            {sel ? (
+                              <span className="absolute top-2 left-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-white text-[11px] font-black shadow-lg ring-2 ring-white/20">
+                                ✓
+                              </span>
+                            ) : null}
+                            {!bt.isActive ? (
+                              <span className="absolute top-2 left-2 z-10 rounded-lg bg-slate-950/90 px-2 py-0.5 text-[8px] font-black text-slate-200 ring-1 ring-slate-500/50">
+                                بزودی
+                              </span>
+                            ) : !demoDb ? (
+                              <span className="absolute top-2 left-2 z-10 rounded-lg bg-amber-950/95 px-2 py-0.5 text-[8px] font-black text-amber-100 ring-1 ring-amber-400/40">
+                                طرح کامل
+                              </span>
+                            ) : (
+                              <span className="absolute top-2 left-2 z-10 rounded-lg bg-emerald-950/95 px-2 py-0.5 text-[8px] font-black text-emerald-100 ring-1 ring-emerald-400/40">
+                                دمو ۳ روز
+                              </span>
+                            )}
                           </div>
-                          <p className="text-white font-bold text-xs sm:text-sm leading-snug tracking-tight pr-0.5">{bt.titleFa}</p>
-                          <p className="text-slate-500 text-[9px] sm:text-[10px] font-mono mt-0.5 truncate" dir="ltr">
-                            {bt.titleEn}
-                          </p>
+                          <div className="flex flex-1 flex-col gap-1.5 p-3 sm:p-3.5">
+                            <div
+                              className={`inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${bt.accent} shadow-md ring-1 ring-white/15`}
+                            >
+                              <IconComp size={20} className="text-white drop-shadow-md" strokeWidth={1.75} />
+                            </div>
+                            <p className="text-white font-black text-sm sm:text-base leading-snug tracking-tight">
+                              {bt.titleFa}
+                            </p>
+                            <p className="text-slate-500 text-[10px] sm:text-[11px] font-mono truncate" dir="ltr">
+                              {bt.titleEn}
+                            </p>
+                          </div>
                         </button>
                       );
                     })}
@@ -1088,7 +1244,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
 
                   <div>
                     <label className="text-xs font-bold text-slate-300 block mb-1">شماره موبایل</label>
-                    <input value={demoPhone} onChange={e => setDemoPhone(e.target.value)} placeholder="مثلاً 079xxxxxxx" dir="ltr"
+                    <input value={demoPhone} onChange={e => setDemoPhone(e.target.value)} placeholder="مثلاً 07xxxxxxx" dir="ltr"
                       className="w-full px-4 py-3 rounded-xl bg-white/5 border-2 border-white/10 text-white text-sm outline-none focus:border-indigo-400 font-bold text-left"
                       inputMode="tel" autoComplete="tel" />
                   </div>
@@ -1136,7 +1292,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   if (view === 'demo-limit') {
     return (
       <div className={`min-h-screen font-vazir relative flex items-center justify-center p-4 overflow-hidden`} dir="rtl">
-        <AnimatedBg scene="demo-limit" />
+        <AuthPremiumBackground scene="demo-limit" />
         <div className="relative z-10 w-full max-w-md">
           <div className={`p-8 rounded-3xl ${cardBg} text-center`}>
             <div className="w-20 h-20 rounded-full bg-blue-500/20 flex items-center justify-center mx-auto mb-6 shadow-lg shadow-blue-500/10">
@@ -1196,7 +1352,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   if (view === 'payment-pending') {
     return (
       <div className={`min-h-screen font-vazir relative flex items-center justify-center p-4 overflow-hidden`} dir="rtl">
-        <AnimatedBg scene="payment-pending" />
+        <AuthPremiumBackground scene="payment-pending" />
         <div className="relative z-10 w-full max-w-lg">
           <div className={`p-8 sm:p-12 rounded-[2.5rem] ${cardBg} text-center relative overflow-hidden`}>
             {/* Background Decorative Element */}
@@ -1284,7 +1440,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                   onClick={() => setView('login')}
                   className={`w-full py-4 rounded-2xl text-lg font-black flex items-center justify-center gap-3 ${primaryBtn}`}
                 >
-                  <LogIn size={22} /> ورود به پنل مدیریت
+                  <LogIn size={22} /> ورود به حساب
                 </button>
                 <button
                   onClick={() => setView('landing')}
@@ -1306,9 +1462,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
       <>
         {suspendedGateModal}
       <div className={`min-h-screen font-vazir selection:bg-indigo-100 selection:text-indigo-900 relative flex flex-col overflow-hidden`} dir="rtl">
-        <AnimatedBg full scene="landing" />
-        <div className="absolute inset-0 pointer-events-none opacity-70" aria-hidden>
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(239,68,68,.10)_1px,transparent_1px)] bg-[size:72px_100%]" />
+        <AuthPremiumBackground scene="landing" />
+        <div className="absolute inset-0 pointer-events-none opacity-40" aria-hidden>
+          <div className="absolute inset-0 bg-[linear-gradient(to_left,rgba(99,102,241,.07)_1px,transparent_1px)] bg-[size:64px_100%]" />
         </div>
 
         <header className="relative z-50 w-full">
@@ -1328,17 +1484,16 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     دانلود
                   </button>
                   <span className="text-white/25 select-none" aria-hidden>|</span>
-                  <button type="button" onClick={() => setView('login')} className="p-0 m-0 bg-transparent border-0 shadow-none hover:text-white/90 active:scale-[0.98] transition-all">
+                  <Link to="/login" className="p-0 m-0 text-inherit bg-transparent font-bold hover:text-white/90 active:scale-[0.98] transition-all">
                     {t('login')}
-                  </button>
+                  </Link>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => { setRegisterStep(1); setView('register'); }}
+                <Link
+                  to="/register"
                   className="text-xs font-black text-white px-5 py-2 rounded-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:opacity-95 transition-opacity shadow-lg shadow-indigo-900/40"
                 >
                   {t('register')}
-                </button>
+                </Link>
               </div>
             </div>
 
@@ -1354,13 +1509,12 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                   <button type="button" onClick={() => setView('download')} className="text-sm font-bold text-emerald-300 hover:text-emerald-200 transition-all hover:scale-105">
                     دانلود
                   </button>
-                  <button type="button" onClick={() => setView('login')} className="text-sm font-bold text-white hover:text-white/80 transition-all hover:scale-105">
+                  <Link to="/login" className="text-sm font-bold text-white hover:text-white/80 transition-all hover:scale-105">
                     {t('login')}
-                  </button>
+                  </Link>
                 </nav>
-                <button
-                  type="button"
-                  onClick={() => { setRegisterStep(1); setView('register'); }}
+                <Link
+                  to="/register"
                   className="group relative px-8 py-3.5 rounded-full text-base font-black text-white overflow-hidden transition-all duration-500 hover:shadow-[0_0_50px_rgba(79,70,229,0.5)] hover:-translate-y-1 active:scale-95"
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-600 animate-gradient-x" />
@@ -1368,33 +1522,35 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                   <span className="relative flex items-center gap-1.5">
                     {t('register')} <ArrowRight size={16} className="group-hover:translate-x-[-4px] transition-transform" />
                   </span>
-                </button>
+                </Link>
               </div>
             </div>
           </div>
         </header>
 
-        {/* Hero Section */}
-        <main className="relative z-10 flex-1 flex flex-col justify-center items-center text-center px-4 sm:px-6 pt-8 sm:pt-10 pb-16 sm:pb-20">
-          <div className="max-w-5xl">
-            {/* Trust badge removed as per request */}
-
-            <h2 className="text-4xl sm:text-7xl md:text-8xl font-black text-white mb-8 sm:mb-10 tracking-tight leading-[1.15] animate-fade-in-up animation-delay-200">
-              {t('app_name')}
-            </h2>
-
-            <p className="text-base sm:text-2xl text-slate-200/90 max-w-3xl mx-auto mb-10 sm:mb-14 leading-relaxed font-medium animate-fade-in-up animation-delay-400">
-              {t('welcome_hero_body')}
-            </p>
-
-            <div className="mt-14 flex flex-wrap items-center justify-center gap-3 text-xs text-slate-400">
-              <Link to="/privacy" className="hover:text-white font-bold transition-colors">{t('legal_privacy')}</Link>
-              <span className="text-white/20" aria-hidden>|</span>
-              <Link to="/terms" className="hover:text-white font-bold transition-colors">{t('legal_terms')}</Link>
+        {/* Hero */}
+        <main className="relative z-10 flex flex-1 flex-col justify-center px-4 pb-16 pt-8 sm:px-6 sm:pb-20 sm:pt-10">
+          <div className="mx-auto w-full max-w-6xl">
+            <div className="mb-10 text-center sm:mb-14">
+              <h2 className="mb-6 bg-gradient-to-b from-white via-white to-slate-400 bg-clip-text text-4xl font-black leading-[1.12] tracking-tight text-transparent drop-shadow-sm sm:mb-8 sm:text-6xl md:text-7xl lg:text-8xl animate-fade-in-up animation-delay-200">
+                {t('app_name')}
+              </h2>
+              <p className="mx-auto max-w-2xl text-base font-medium leading-relaxed text-slate-200/90 sm:text-xl md:text-2xl animate-fade-in-up animation-delay-400">
+                {t('welcome_hero_body')}
+              </p>
+            </div>
+            <div className="mt-12 flex flex-wrap items-center justify-center gap-3 text-[11px] text-slate-500 sm:mt-14">
+              <Link to="/privacy" className="font-bold transition-colors hover:text-white">
+                {t('legal_privacy')}
+              </Link>
+              <span className="text-white/15" aria-hidden>
+                |
+              </span>
+              <Link to="/terms" className="font-bold transition-colors hover:text-white">
+                {t('legal_terms')}
+              </Link>
             </div>
           </div>
-          
-          {/* Bottom Features Bar removed as per request */}
         </main>
 
         {googleModal}
@@ -1407,7 +1563,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   if (view === 'info') {
     return (
       <div className="min-h-screen font-vazir relative overflow-hidden" dir="rtl">
-        <AnimatedBg scene="info" />
+        <AuthPremiumBackground scene="info" />
 
         {/* Full-width hero image */}
         <div className="absolute top-0 inset-x-0 h-72 sm:h-80 z-0 overflow-hidden">
@@ -1426,9 +1582,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
               <BrandLogo size={40} variant="header" />
               <span className="font-extrabold text-xl text-white">{t('welcome_about_title')}</span>
             </div>
-            <button onClick={() => setView('login')} className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20">
+            <Link to="/login" className="px-5 py-2.5 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20 inline-flex items-center justify-center">
               {t('welcome_login_panel')}
-            </button>
+            </Link>
           </div>
         </header>
 
@@ -1472,6 +1628,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
             <p>
               <strong className="text-white">گزارش‌های جامع:</strong> نمودارهای فروش، تحلیل سود و زیان، وضعیت بدهی‌ها و گزارش موجودی انبار به صورت بصری و قابل صادرکردن. خدمات این مجموعه شامل طراحی سیستم‌های مدیریتی، توسعه وب‌سایت، اپلیکیشن موبایل و زیرساخت داده نیز می‌باشد.
             </p>
+            <p>
+              <strong className="text-white">پایگاه داده و ذخیره‌سازی:</strong> دادهٔ عملیاتی هر فروشگاه در <strong className="text-indigo-200">PostgreSQL</strong> نگهداری می‌شود؛ محصولات، فاکتورها، مشتریان و کتاب‌ها در جداول جدا با کلیدهای ترکیبی فروشگاه، قابل پشتیبان‌گیری و بازیابی هستند. برای هر محصول در هر فروشگاه <strong className="text-indigo-200">SKU (بارکد) یکتا</strong> در سطح دیتابیس اعمال می‌شود، <strong className="text-indigo-200">وضعیت کالا</strong> (مثلاً فعال یا متوقف) و <strong className="text-indigo-200">زمان و کاربر آخرین ویرایش</strong> ثبت می‌شود. ذخیرهٔ متمرکز state فروشگاه با <strong className="text-indigo-200">نسخهٔ خوش‌بینانه (optimistic locking)</strong> از تداخل همزمان جلوگیری می‌کند؛ بکاپ‌های برنامه‌ریزی‌شده روی همین زیرساخت توصیه می‌شود.
+            </p>
           </div>
 
           {/* Footer CTA */}
@@ -1489,9 +1648,6 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
               <button onClick={() => setView('register')} className="px-6 py-3 rounded-xl font-black text-white bg-indigo-600 hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20">
                 شروع کنید
               </button>
-              <button onClick={() => setView('login')} className="px-6 py-3 rounded-xl font-bold text-white bg-white/10 hover:bg-white/20 transition-all border border-white/10">
-                ورود
-              </button>
             </div>
           </div>
         </div>
@@ -1503,7 +1659,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
   if (view === 'creator') {
     return (
       <div className="min-h-screen font-vazir relative overflow-hidden" dir="rtl">
-        <AnimatedBg scene="creator" />
+        <AuthPremiumBackground scene="creator" />
 
         <div className="relative z-10 min-h-screen flex flex-col">
           <div className="px-4 sm:px-8 pt-5 pb-3">
@@ -1544,17 +1700,32 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
               </div>
 
               <div className="mt-10 pt-6">
-                <p className="text-slate-500 text-[10px] text-center mb-4 font-bold tracking-widest">تماس</p>
+                <p className="text-slate-500 text-[10px] text-center mb-4 font-bold tracking-widest">تماس و شبکه‌های اجتماعی</p>
                 <div className="flex flex-wrap justify-center gap-4 sm:gap-5">
+                  {(() => {
+                    const s = (creatorConfig as {
+                      social?: {
+                        phone?: string;
+                        linkedin?: string;
+                        tiktok?: string;
+                        facebook?: string;
+                        instagram?: string;
+                        github?: string;
+                      };
+                    }).social;
+                    const phone = (s?.phone || '+93795074175').replace(/\D/g, '');
+                    const wa = phone.startsWith('0') ? `https://wa.me/${phone.replace(/^0/, '93')}` : `https://wa.me/${phone}`;
+                    return (
+                      <>
                   <a
-                    href="tel:+93795074175"
+                    href={`tel:${s?.phone || '+93795074175'}`}
                     title="تلفن"
                     className="text-slate-400 hover:text-emerald-400 transition-colors p-2"
                   >
                     <Phone size={22} />
                   </a>
                   <a
-                    href="https://wa.me/93795074175"
+                    href={wa}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="WhatsApp"
@@ -1565,41 +1736,55 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     </svg>
                   </a>
                   <a
-                    href="https://www.facebook.com/smarthubdigitalsolutions"
+                    href={s?.linkedin || '#'}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title="Facebook"
-                    className="text-slate-400 hover:text-blue-400 transition-colors p-2"
-                  >
-                    <Facebook size={22} />
-                  </a>
-                  <a
-                    href={(creatorConfig as { social?: { instagram?: string } }).social?.instagram || '#'}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="Instagram"
-                    className="text-slate-400 hover:text-pink-400 transition-colors p-2"
-                  >
-                    <Instagram size={22} />
-                  </a>
-                  <a
-                    href={(creatorConfig as { social?: { linkedin?: string } }).social?.linkedin || '#'}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title="LinkedIn"
+                    title="لینکدین"
                     className="text-slate-400 hover:text-sky-400 transition-colors p-2"
                   >
                     <Linkedin size={22} />
                   </a>
                   <a
-                    href={(creatorConfig as { social?: { github?: string } }).social?.github || '#'}
+                    href={s?.tiktok || '#'}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title="GitHub"
+                    title="تیک‌تاک"
+                    className="text-slate-400 hover:text-fuchsia-400 transition-colors p-2"
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="w-[22px] h-[22px]" aria-hidden>
+                      <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64v-3.4a6.14 6.14 0 00-1-.05 6.33 6.33 0 106.33 6.33v-7.06a8.16 8.16 0 004.77 1.52v-3.4a4.85 4.85 0 01-1-.99z" />
+                    </svg>
+                  </a>
+                  <a
+                    href={s?.facebook || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="فیسبوک"
+                    className="text-slate-400 hover:text-blue-400 transition-colors p-2"
+                  >
+                    <Facebook size={22} />
+                  </a>
+                  <a
+                    href={s?.instagram || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="اینستاگرام"
+                    className="text-slate-400 hover:text-pink-400 transition-colors p-2"
+                  >
+                    <Instagram size={22} />
+                  </a>
+                  <a
+                    href={s?.github || '#'}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="گیت‌هاب"
                     className="text-slate-400 hover:text-slate-200 transition-colors p-2"
                   >
                     <Github size={22} />
                   </a>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -1623,6 +1808,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
             onLogin={() => {
               setView('login');
               setLoginStep(1);
+              setLoginShopRolesPool([]);
+              setLoginStep2UsernameOk(false);
             }}
             onRegister={() => {
               setRegisterStep(1);
@@ -1637,47 +1824,64 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
 
   // LOGIN PAGE
   if (view === 'login') {
+    const isPlatformSuperShop = shopCodeInput.trim().toUpperCase() === 'SUPERADMIN';
     const roleLabels: Record<string, string> = {
+      super_admin: 'ابرادمین پلتفرم',
       admin: adminRoleTitleFromShop.trim() || 'admin',
       seller: 'فروشنده',
       stock_keeper: 'انباردار',
       accountant: 'حسابدار',
-      super_admin: 'مدیر پلتفرم (سازنده)',
-    };
-    const roleAdminPin = (name: string) => {
-      const s = String(name || 'admin');
-      let h = 0;
-      for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) % 10000;
-      return String(h).padStart(4, '0');
     };
     const supportWaDigits = String(creatorConfig.social?.phone || '0795074175').replace(/\D/g, '');
     const supportWhatsAppUrl = `https://wa.me/${supportWaDigits || '93795074175'}`;
     return (
       <>
         {suspendedGateModal}
-      <div className="min-h-screen font-vazir relative flex items-center justify-center p-4 overflow-hidden" dir="rtl">
-        <AnimatedBg scene="login" />
-        {/* موبایل: برند گوشه روی صفحه (راست) */}
-        <div className="md:hidden absolute top-4 right-4 z-20 flex items-center pointer-events-none">
+      <div className="relative flex min-h-screen flex-col justify-center overflow-hidden p-4 pb-10 font-vazir lg:py-12" dir="rtl">
+        <AuthPremiumBackground scene="login" />
+        <div className="pointer-events-none absolute right-4 top-4 z-20 flex items-center md:hidden">
           <BrandLogo size={36} variant="header" className="drop-shadow-md" />
         </div>
-        <div className="relative z-10 w-full max-w-md mt-8 md:mt-0 space-y-4">
-          <div className="bg-black/40 backdrop-blur-lg border border-white/10 rounded-3xl shadow-2xl shadow-black/20">
-            <div className="p-8 sm:p-10">
+        <div className="relative z-10 mx-auto grid w-full max-w-7xl flex-1 items-center gap-8 px-1 sm:px-2 lg:grid-cols-[minmax(280px,1.25fr)_minmax(300px,0.95fr)] lg:gap-10 xl:max-w-[88rem] xl:gap-14">
+          <div className="order-2 hidden min-h-[520px] lg:order-1 lg:flex lg:items-stretch">
+            <LoginRoadmapHero className="h-full min-h-[520px] w-full xl:min-h-[600px]" />
+          </div>
+          <div className="order-1 mx-auto mt-6 w-full max-w-md space-y-4 lg:order-2 lg:mt-0 lg:max-w-[420px] lg:justify-self-start lg:ps-4 xl:ps-8 lg:-translate-x-2 xl:-translate-x-4">
+          <div className="auth-form-shell overflow-hidden rounded-[1.75rem] shadow-2xl shadow-black/40 min-h-[28rem] sm:min-h-[30rem] flex flex-col">
+            <div className="relative h-32 w-full shrink-0 sm:h-36">
+              <img
+                src="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?q=80&w=1200&auto=format&fit=crop"
+                alt=""
+                className="h-full w-full object-cover"
+                loading="eager"
+              />
+              <div className="absolute inset-0 bg-gradient-to-l from-slate-950/95 via-slate-950/55 to-slate-950/25" />
+            </div>
+            {isPwaStandaloneClient() && !isOnline ? (
+              <div className="mx-3 mt-2 rounded-xl border border-amber-400/35 bg-amber-500/15 px-3 py-2 text-[10px] text-amber-50 leading-relaxed text-center">
+                PWA بدون اینترنت: با «مرا به خاطر بسپار» مستقیم به مرحلهٔ رمز نقش می‌روید؛ در غیر این صورت برای تأیید کد فروشگاه به شبکه نیاز است.
+              </div>
+            ) : null}
+            <div className="p-8 sm:p-10 flex flex-col flex-1">
               <div className="text-center mb-6 sm:mb-8">
                 <div className="hidden md:inline-flex mb-3 sm:mb-4 transform scale-[0.82] sm:scale-100 origin-center">
                   <BrandLogo size={56} variant="header" />
                 </div>
                 <h2 className="text-lg sm:text-2xl font-black text-white">ورود به دکان یار</h2>
-                {/* Step indicator */}
-                {!twoFactorRequired && (
-                  <div className="flex items-center justify-center gap-2 mt-3">
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black transition-all ${loginStep === 1 ? 'bg-indigo-500 text-white' : 'bg-emerald-500 text-white'}`}>
-                      {loginStep === 1 ? '1' : '✓'}
+                {!twoFactorRequired && loginStep === 1 && (
+                  <div className="mt-3 space-y-1.5">
+                    <div className="flex items-center justify-center gap-2">
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black bg-indigo-500 text-white">۱</div>
+                      <div className="h-0.5 w-8 rounded-full bg-white/10" />
+                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black bg-white/10 text-slate-400">۲</div>
                     </div>
-                    <div className={`h-0.5 w-8 rounded-full transition-all ${loginStep === 2 ? 'bg-indigo-500' : 'bg-white/10'}`} />
-                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black transition-all ${loginStep === 2 ? 'bg-indigo-500 text-white' : 'bg-white/10 text-slate-400'}`}>2</div>
+                    <p className="text-[10px] text-slate-500 text-center font-bold">۱ — کد و رمز فروشگاه</p>
                   </div>
+                )}
+                {!twoFactorRequired && loginStep === 2 && (
+                  <p className="mt-3 text-[10px] text-slate-500 text-center font-bold">
+                    {isPlatformSuperShop ? '۲ — رمز ابرادمین' : '۲ — نام نقش و رمز نقش'}
+                  </p>
                 )}
               </div>
 
@@ -1689,6 +1893,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                   </div>
                   <h3 className="text-xl font-black text-white">تأیید هویت دو مرحله‌ای</h3>
                   <p className="text-sm text-slate-300">اپ Google Authenticator را باز کرده و کد ۶ رقمی مربوط به Dokanyar را وارد کنید.</p>
+                  <p className="text-[11px] text-slate-500 max-w-xs mx-auto leading-relaxed">{t('login_2fa_why')}</p>
                   {totpError && (
                     <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm font-bold flex items-center gap-3">
                       <AlertTriangle size={18} /> {totpError}
@@ -1711,10 +1916,9 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                 </div>
               )}
 
-              {/* ── Step 1: Shop code + password ─────────── */}
+              {/* ── Step 1: کد و رمز فروشگاه ─────────── */}
               {!twoFactorRequired && loginStep === 1 && (
                 <div className="space-y-5">
-                  <p className="text-slate-300 text-sm text-center">کد فروشگاه و رمز عبور را وارد کنید</p>
                   {checkShopError && (
                     <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm font-bold flex items-center gap-3">
                       <AlertTriangle size={18} /> {checkShopError}
@@ -1727,7 +1931,10 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                       onChange={e => { setShopCodeInput(e.target.value); setCheckShopError(''); }}
                       onKeyDown={e => e.key === 'Enter' && handleCheckShop()}
                       className="w-full px-5 py-3.5 rounded-xl bg-white/5 border-2 border-white/10 text-white text-lg font-bold tracking-widest text-center outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 transition-all"
-                      placeholder="مثال: SHOP001" dir="ltr" autoFocus />
+                      placeholder="مثال: SHOP001"
+                      dir="ltr"
+                      autoFocus
+                    />
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-bold text-slate-200 block">رمز عبور فروشگاه</label>
@@ -1755,6 +1962,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                           try {
                             localStorage.removeItem(REMEMBER_SHOP_CODE_KEY);
                             localStorage.removeItem(REMEMBER_SHOP_PASSWORD_KEY);
+                            localStorage.removeItem(REMEMBER_LOGIN_USERNAME_KEY);
                           } catch {
                             /* ignore */
                           }
@@ -1762,7 +1970,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                       }}
                       className="rounded border-white/25 bg-white/10 text-indigo-600 focus:ring-indigo-500/40 w-4 h-4"
                     />
-                    مرا به خاطر بسپار (کد و رمز عبور فروشگاه روی این دستگاه)
+                    مرا به خاطر بسپار (روی این دستگاه)
                   </label>
                   <div className="flex items-center justify-center gap-5 text-xs flex-wrap">
                     <button type="button" onClick={() => setShowForgotModal(true)} className="text-indigo-300 hover:text-indigo-200 font-bold flex items-center gap-1.5 transition-colors">
@@ -1784,55 +1992,114 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                 </div>
               )}
 
-              {/* ── Step 2: Role selection + role password ─── */}
+              {/* ── Step 2: نام کاربری (انگلیسی) + رمز نقش ─── */}
               {!twoFactorRequired && loginStep === 2 && (
-                <div className="space-y-5">
-                  <div className="text-center p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20">
-                    <p className="text-indigo-300 text-xs font-bold mb-1">فروشگاه تأیید شد</p>
+                <div className="space-y-5 flex-1 flex flex-col">
+                  <div className="text-center p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 space-y-2">
+                    <p className="text-indigo-300 text-xs font-bold">فروشگاه تأیید شد</p>
                     <p className="text-white font-black text-lg">{shopNameResult}</p>
+                    {loginStep2UsernameOk && shopRolesResult[0] ? (
+                      <p className="text-slate-300 text-sm font-bold pt-1 border-t border-white/10">
+                        نقش: <span className="text-white">{roleLabels[selectedRole] || selectedRole}</span>
+                        {shopRolesResult[0].full_name ? (
+                          <span className="text-slate-400 font-normal text-xs mr-2">({shopRolesResult[0].full_name})</span>
+                        ) : null}
+                      </p>
+                    ) : (
+                      <p className="text-slate-400 text-xs font-bold leading-relaxed pt-1 border-t border-white/10">
+                        نام کاربری انگلیسی همان نقش را وارد و تأیید کنید تا نقش نمایش داده شود.
+                      </p>
+                    )}
+                    {isPlatformSuperShop && loginStep2UsernameOk ? (
+                      <p className="text-emerald-200/90 text-[11px] leading-relaxed font-bold pt-1 border-t border-white/10">
+                        ورود ابرادمین: نام کاربری سرور به‌صورت خودکار تأیید شد — فقط رمز نقش را وارد کنید.
+                      </p>
+                    ) : null}
                   </div>
-                  <p className="text-slate-300 text-sm text-center font-bold">نقش خود را انتخاب کنید</p>
+
+                  {!loginStep2UsernameOk ? (
+                    <>
+                      <p className="text-slate-300 text-sm text-center leading-relaxed">
+                        <strong className="text-white">نام نقش</strong> را وارد کنید{' '}
+                        <span className="text-slate-500">(همان نام کاربری انگلیسی نقش در سرور)</span>.
+                      </p>
+                      {loginError && (
+                        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm font-bold flex items-center gap-3">
+                          <AlertTriangle size={18} /> {loginError}
+                        </div>
+                      )}
+                      <div className="space-y-2">
+                        <label className="text-sm font-bold text-slate-200 block">نام نقش (نام کاربری انگلیسی)</label>
+                        <input
+                          value={loginUsernameInput}
+                          onChange={(e) => {
+                            setLoginUsernameInput(e.target.value);
+                            setLoginError('');
+                          }}
+                          onKeyDown={(e) => e.key === 'Enter' && handleConfirmStep2Username()}
+                          className="w-full px-5 py-3.5 rounded-xl bg-white/5 border-2 border-white/10 text-white text-base font-bold tracking-wide text-center outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 transition-all"
+                          placeholder=""
+                          dir="ltr"
+                          autoFocus
+                          autoComplete="username"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmStep2Username()}
+                        className="w-full py-4 rounded-xl text-lg font-black flex items-center justify-center gap-3 bg-indigo-600 text-white hover:bg-indigo-500 transition-all shadow-lg shadow-indigo-500/20"
+                      >
+                        تأیید نام کاربری و ادامه <ChevronLeft size={22} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLoginStep(1);
+                          setLoginError('');
+                          setLoginShopRolesPool([]);
+                          setLoginStep2UsernameOk(false);
+                          setShopRolesResult([]);
+                        }}
+                        className="w-full text-center text-slate-400 hover:text-white text-sm transition-colors"
+                      >
+                        بازگشت به کد فروشگاه
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-slate-200 block">نام نقش</label>
+                    <input
+                      readOnly
+                      value={loginUsernameInput}
+                      className="w-full px-5 py-3.5 rounded-xl bg-white/5 border-2 border-white/10 text-white text-base font-bold tracking-wide text-center outline-none cursor-default opacity-95"
+                      placeholder=""
+                      dir="ltr"
+                      autoComplete="username"
+                      aria-readonly="true"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoginStep2UsernameOk(false);
+                        setShopRolesResult([]);
+                        setRolePassInput('');
+                        setLoginError('');
+                      }}
+                      className="text-xs font-bold text-indigo-300 hover:text-indigo-200 transition-colors w-full text-center"
+                    >
+                      تغییر نام نقش
+                    </button>
+                  </div>
+
                   {loginError && (
                     <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm font-bold flex items-center gap-3">
                       <AlertTriangle size={18} /> {loginError}
                     </div>
                   )}
 
-                  {/* Role buttons */}
-                  <div className="grid grid-cols-2 gap-3">
-                    {shopRolesResult.length === 0 ? (
-                      <div className="col-span-2 p-4 rounded-xl bg-amber-500/10 border border-amber-500/25 text-amber-200 text-sm text-center font-bold">
-                        کاربری برای ورود تعریف نشده. از تنظیمات → کاربران فروشگاه، حداقل یک نقش را فعال کنید.
-                      </div>
-                    ) : shopRolesResult.map((r) => {
-                      const inactive = r.status === 'inactive';
-                      return (
-                        <button key={r.role} type="button"
-                          disabled={inactive}
-                          onClick={() => { if (!inactive) setSelectedRole(r.role); }}
-                          className={`p-4 rounded-2xl border-2 text-center transition-all duration-200 ${
-                            inactive
-                              ? 'border-white/5 bg-white/[0.03] text-slate-500 cursor-not-allowed opacity-70'
-                              : selectedRole === r.role
-                                ? 'border-indigo-500 bg-indigo-500/20 text-white scale-[1.02] shadow-lg shadow-indigo-500/20'
-                                : 'border-white/10 bg-white/5 text-slate-300 hover:border-white/30 hover:bg-white/10'
-                          }`}>
-                          <p className="font-bold text-xs">
-                            {r.role === 'admin'
-                              ? `${r.full_name || roleLabels[r.role] || 'مدیر'} · ${roleAdminPin(r.full_name || 'admin')}`
-                              : (roleLabels[r.role] || r.full_name)}
-                          </p>
-                          {inactive && (
-                            <p className="text-[10px] text-rose-300 mt-1.5 font-bold">غیرفعال — مدیر از «کاربران» فعال کند</p>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Role password */}
                   <div className="space-y-2">
-                    <label className="text-sm font-bold text-slate-200 block">رمز عبور نقش</label>
+                    <label className="text-sm font-bold text-slate-200 block">رمز نقش</label>
                     <div className="relative">
                       <input
                         type={showRolePassInput ? 'text' : 'password'}
@@ -1840,7 +2107,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                         onChange={e => { setRolePassInput(e.target.value); setLoginError(''); }}
                         onKeyDown={e => e.key === 'Enter' && !isLoggingIn && handleRoleLogin()}
                         className="w-full px-5 py-3.5 rounded-xl bg-white/5 border-2 border-white/10 text-white text-lg font-bold tracking-widest text-center outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 transition-all"
-                        dir="ltr" placeholder="••••••" autoFocus />
+                        dir="ltr" placeholder="••••••" autoFocus={loginStep2UsernameOk} />
                       <button type="button" onClick={() => setShowRolePassInput(!showRolePassInput)} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
                         {showRolePassInput ? <EyeOff size={20} /> : <Eye size={20} />}
                       </button>
@@ -1857,36 +2124,44 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     />
                   </div>
                   {RECAPTCHA_SITE_KEY ? (
-                    <div className="flex justify-center py-1">
-                      <ReCAPTCHA
-                        ref={loginCaptchaRef}
-                        sitekey={RECAPTCHA_SITE_KEY}
-                        theme="dark"
-                        onChange={(token) => setLoginCaptchaToken(token || '')}
-                        onExpired={() => setLoginCaptchaToken('')}
-                      />
+                    <div className="space-y-1">
+                      <div className="flex justify-center py-1">
+                        <ReCAPTCHA
+                          ref={loginCaptchaRef}
+                          sitekey={RECAPTCHA_SITE_KEY}
+                          theme="dark"
+                          onChange={(token) => setLoginCaptchaToken(token || '')}
+                          onExpired={() => setLoginCaptchaToken('')}
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-500 text-center leading-relaxed px-1">{t('login_captcha_hint')}</p>
                     </div>
                   ) : null}
 
                   <button type="button" onClick={handleRoleLogin}
                     disabled={
                       isLoggingIn ||
+                      !loginStep2UsernameOk ||
                       !rolePassInput.trim() ||
-                      (shopRolesResult.some(r => r.role === selectedRole && r.status === 'inactive'))
+                      shopRolesResult.length === 0 ||
+                      (shopRolesResult[0]?.status === 'inactive')
                     }
                     className="w-full py-4 rounded-xl text-lg font-black flex items-center justify-center gap-3 bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-60 transition-all shadow-lg shadow-indigo-500/20">
                     {isLoggingIn
                       ? <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      : <>ورود به پنل <LogIn size={22} /></>}
+                      : <>ورود <LogIn size={22} /></>}
                   </button>
 
-                  <button type="button" onClick={() => { setLoginStep(1); setLoginError(''); setRolePassInput(''); }}
+                  <button type="button" onClick={() => { setLoginStep(1); setLoginError(''); setRolePassInput(''); setShopRolesResult([]); setLoginShopRolesPool([]); setLoginStep2UsernameOk(false); }}
                     className="w-full text-center text-slate-400 hover:text-white text-sm transition-colors">
-                    تغییر فروشگاه
+                    تغییر فروشگاه / نام کاربری
                   </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
+          </div>
           </div>
           {googleModal}
         </div>
@@ -1908,8 +2183,13 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
               بازیابی رمز عبور
             </div>
             <p className="text-slate-300 text-sm leading-relaxed mb-4">
-              رمز فروشگاه و رمز هر نقش جدا هستند. اگر رمز را فراموش کرده‌اید، مدیر همان فروشگاه یا تیم پشتیبانی دکان‌یار می‌تواند از پنل ادمین یا تنظیمات کاربران، رمز را بازنشانی کند.
+              رمز <strong className="text-white">فروشگاه</strong> و رمز هر <strong className="text-white">نقش</strong> جدا هستند. بازنشانی خودکار از طریق ایمیل در نسخهٔ فعلی فعال نیست؛ مسیرهای پیشنهادی:
             </p>
+            <ol className="list-decimal list-inside space-y-2 text-xs text-slate-400 mb-4 text-right leading-relaxed">
+              <li>از مدیر همان فروشگاه بخواهید در <strong className="text-slate-200">تنظیمات → کاربران فروشگاه</strong> رمز نقش را عوض کند.</li>
+              <li>برای حساب جدید، از <Link to="/register" onClick={() => setShowForgotModal(false)} className="text-indigo-300 font-bold hover:underline">ثبت‌نام</Link> استفاده کنید.</li>
+              <li>درخواست کمک از <strong className="text-slate-200">پشتیبانی دکان‌یار</strong> (واتساپ).</li>
+            </ol>
             <div className="flex flex-col gap-2">
               <a
                 href={supportWhatsAppUrl}
@@ -1919,6 +2199,13 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
               >
                 <LifeBuoy size={18} /> تماس با پشتیبانی (واتساپ)
               </a>
+              <Link
+                to="/register"
+                onClick={() => setShowForgotModal(false)}
+                className="text-center py-2.5 rounded-xl border border-white/15 text-sm font-bold text-indigo-200 hover:bg-white/5 transition-colors"
+              >
+                رفتن به ثبت‌نام
+              </Link>
               <button type="button" onClick={() => setShowForgotModal(false)} className="py-2.5 text-slate-400 text-sm hover:text-white transition-colors">
                 بستن
               </button>
@@ -1936,7 +2223,7 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
 
     return (
       <div className={`min-h-screen font-vazir selection:bg-indigo-100 selection:text-indigo-900 relative overflow-hidden`} dir="rtl">
-        <AnimatedBg scene="register" />
+        <AuthPremiumBackground scene="register" />
         <header className="relative z-10 bg-black/20 backdrop-blur-sm border-b border-white/10">
           <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between gap-3">
             <div className="flex items-center gap-4 min-w-0">
@@ -1955,9 +2242,32 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
           </div>
         </header>
 
-        <div className={`relative z-10 mx-auto px-4 py-10 transition-all duration-500 ${registerStep === 1 ? 'max-w-6xl' : 'max-w-5xl'}`}>
+        <div
+          className={`relative z-10 mx-auto grid w-full max-w-7xl grid-cols-1 gap-8 px-4 py-10 transition-all duration-500 xl:items-start ${
+            registerStep === 1 || registerStep === 4
+              ? ''
+              : 'xl:grid-cols-[minmax(360px,480px)_minmax(0,1fr)] xl:gap-12'
+          }`}
+        >
+          {registerStep > 1 && registerStep !== 4 ? (
+            <div className="order-2 hidden w-full max-w-[min(100%,420px)] min-h-[min(48vh,380px)] mx-auto xl:order-1 xl:mx-0 xl:block xl:max-w-[min(100%,440px)] xl:min-h-0">
+              <div className="sticky top-10">
+                <AuthHeroVideoCard
+                  scene={registerStep === 2 ? 'shop' : registerStep === 3 ? 'business' : 'plan'}
+                  className="aspect-[4/5] min-h-[min(48vh,380px)] w-full xl:aspect-auto xl:min-h-[min(68vh,560px)] 2xl:min-h-[min(72vh,620px)]"
+                />
+              </div>
+            </div>
+          ) : null}
+          <div
+            className={`order-1 mx-auto w-full min-w-0 xl:order-2 ${
+              registerStep === 1 ? 'max-w-6xl' : registerStep === 4 ? 'max-w-7xl' : 'max-w-5xl'
+            } xl:mx-0 xl:max-w-none ${
+              registerStep === 1 || registerStep === 4 ? '' : 'xl:ps-6 xl:translate-x-0'
+            }`}
+          >
           {/* Progress */}
-          <div className="mb-10 px-2 max-w-5xl mx-auto">
+          <div className="mb-10 px-2 max-w-5xl mx-auto xl:max-w-none">
             <div className="flex items-start justify-between gap-1 sm:gap-2 relative">
               <div className="absolute top-4 sm:top-5 left-4 right-4 sm:left-8 sm:right-8 h-1 bg-white/10 rounded-full -z-10" />
               <div
@@ -1983,7 +2293,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
             </div>
           </div>
 
-          <div className={`p-6 sm:p-10 rounded-3xl bg-black/30 backdrop-blur-lg border border-white/10`}>
+          {registerStep !== 4 ? (
+          <div className={`p-6 sm:p-10 rounded-3xl auth-form-shell border border-white/10`}>
             {/* Step 1 - Pricing */}
             {registerStep === 1 && (
               <div className="animate-fadeIn text-center">
@@ -2074,44 +2385,44 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
 
                 <div className="space-y-4 mb-8">
                   <div>
-                    <label className="text-sm font-bold block mb-2 text-slate-200">نام فروشگاه *</label>
+                    <label className="text-sm font-bold block mb-2 text-slate-200">نام فروشگاه</label>
                     <input
                       value={regData.shopName}
                       onChange={(e) => setRegData({ ...regData, shopName: e.target.value })}
-                      className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder-slate-500 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 transition-all ${formErrors.shopName ? 'border-rose-500/50' : ''}`}
-                      placeholder="مثال: فروشگاه رحیمی"
+                      className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder:text-slate-500 focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 transition-all ${formErrors.shopName ? 'border-rose-500/50' : ''}`}
+                      placeholder=""
                     />
                     {formErrors.shopName && <p className="text-xs text-rose-400 mt-1.5">{formErrors.shopName}</p>}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                      <label className="text-sm font-bold block mb-2 text-slate-200">نام *</label>
+                      <label className="text-sm font-bold block mb-2 text-slate-200">نام</label>
                       <input
                         value={regData.ownerFirstName}
                         onChange={(e) => setRegData({ ...regData, ownerFirstName: e.target.value })}
-                        className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder-slate-500 focus:border-indigo-400 transition-all ${formErrors.ownerFirstName ? 'border-rose-500/50' : ''}`}
-                        placeholder="نام"
+                        className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder:text-slate-500 focus:border-indigo-400 transition-all ${formErrors.ownerFirstName ? 'border-rose-500/50' : ''}`}
+                        placeholder=""
                       />
                       {formErrors.ownerFirstName && <p className="text-xs text-rose-400 mt-1.5">{formErrors.ownerFirstName}</p>}
                     </div>
                     <div>
-                      <label className="text-sm font-bold block mb-2 text-slate-200">نام خانوادگی *</label>
+                      <label className="text-sm font-bold block mb-2 text-slate-200">نام خانوادگی</label>
                       <input
                         value={regData.ownerFamily}
                         onChange={(e) => setRegData({ ...regData, ownerFamily: e.target.value })}
-                        className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder-slate-500 focus:border-indigo-400 transition-all ${formErrors.ownerFamily ? 'border-rose-500/50' : ''}`}
-                        placeholder="نام خانوادگی"
+                        className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder:text-slate-500 focus:border-indigo-400 transition-all ${formErrors.ownerFamily ? 'border-rose-500/50' : ''}`}
+                        placeholder=""
                       />
                       {formErrors.ownerFamily && <p className="text-xs text-rose-400 mt-1.5">{formErrors.ownerFamily}</p>}
                     </div>
                   </div>
                   <div>
-                    <label className="text-sm font-bold block mb-2 text-slate-200">شماره موبایل *</label>
+                    <label className="text-sm font-bold block mb-2 text-slate-200">شماره موبایل</label>
                     <input
                       value={regData.phone}
                       onChange={(e) => setRegData({ ...regData, phone: e.target.value })}
-                      className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder-slate-500 focus:border-indigo-400 text-left font-mono transition-all ${formErrors.phone ? 'border-rose-500/50' : ''}`}
-                      placeholder="079xxxxxxx"
+                      className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder:text-slate-500 focus:border-indigo-400 text-left transition-all ${formErrors.phone ? 'border-rose-500/50' : ''}`}
+                      placeholder="07xxxxxxx"
                       dir="ltr"
                       inputMode="tel"
                       autoComplete="tel"
@@ -2124,20 +2435,20 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                       type="email"
                       value={regData.email}
                       onChange={(e) => setRegData({ ...regData, email: e.target.value })}
-                      className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder-slate-500 focus:border-indigo-400 text-left transition-all ${formErrors.email ? 'border-rose-500/50' : ''}`}
-                      placeholder="example@gmail.com"
+                      className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder:text-slate-500 focus:border-indigo-400 text-left transition-all ${formErrors.email ? 'border-rose-500/50' : ''}`}
+                      placeholder=""
                       dir="ltr"
                     />
                     {formErrors.email && <p className="text-xs text-rose-400 mt-1.5">{formErrors.email}</p>}
                   </div>
                   <div>
-                    <label className="text-sm font-bold block mb-2 text-slate-200">رمز مدیر / ورود (حداقل ۸ کاراکتر و قوی) *</label>
+                    <label className="text-sm font-bold block mb-2 text-slate-200">رمز مدیر / ورود (حداقل ۸ کاراکتر و قوی)</label>
                     <div className="relative">
                       <input
                         type={showRegisterPwd ? 'text' : 'password'}
                         value={regData.password}
                         onChange={(e) => setRegData({ ...regData, password: e.target.value })}
-                        className={`w-full px-4 py-3.5 pl-12 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder-slate-500 focus:border-indigo-400 text-left transition-all ${formErrors.password ? 'border-rose-500/50' : ''}`}
+                        className={`w-full px-4 py-3.5 pl-12 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder:text-slate-400 focus:border-indigo-400 text-left transition-all ${formErrors.password ? 'border-rose-500/50' : ''}`}
                         dir="ltr"
                         autoComplete="new-password"
                       />
@@ -2152,12 +2463,12 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     {formErrors.password && <p className="text-xs text-rose-400 mt-1.5">{formErrors.password}</p>}
                   </div>
                   <div>
-                    <label className="text-sm font-bold block mb-2 text-slate-200">تکرار رمز *</label>
+                    <label className="text-sm font-bold block mb-2 text-slate-200">تکرار رمز</label>
                     <input
                       type={showRegisterPwd ? 'text' : 'password'}
                       value={regData.password2}
                       onChange={(e) => setRegData({ ...regData, password2: e.target.value })}
-                      className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder-slate-500 focus:border-indigo-400 text-left transition-all ${formErrors.password2 ? 'border-rose-500/50' : ''}`}
+                      className={`w-full px-4 py-3.5 rounded-xl text-sm bg-white/5 border-2 border-white/10 text-white placeholder:text-slate-400 focus:border-indigo-400 text-left transition-all ${formErrors.password2 ? 'border-rose-500/50' : ''}`}
                       dir="ltr"
                       autoComplete="new-password"
                     />
@@ -2211,8 +2522,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     </p>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3">
-                  {ONBOARDING_BUSINESS_TYPES.map((bt) => {
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+                  {ONBOARDING_BUSINESS_TYPES.filter((bt) => bt.isActive).map((bt) => {
                     const IconComp = ONBOARDING_LUCIDE[bt.lucideIcon];
                     const sel = regData.businessType === bt.id;
                     return (
@@ -2224,26 +2535,48 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                           setRegData({ ...regData, businessType: bt.id });
                         }}
                         disabled={!bt.isActive}
-                        className={`group relative overflow-hidden rounded-2xl border p-3 text-right transition-all duration-300 ${
+                        className={`group relative flex flex-col overflow-hidden rounded-2xl border p-0 text-right transition-all duration-300 ${
                           sel
-                            ? 'border-indigo-400/80 bg-gradient-to-br from-indigo-600/30 via-slate-900/55 to-violet-900/45 shadow-lg ring-1 ring-indigo-400/35'
+                            ? 'border-indigo-400/80 bg-slate-900/80 shadow-xl ring-1 ring-indigo-400/40 hover:-translate-y-1'
                             : bt.isActive
-                              ? 'border-white/10 bg-white/[0.05] hover:border-indigo-400/40 hover:bg-white/[0.08]'
+                              ? 'border-white/10 bg-white/[0.04] hover:border-indigo-400/45 hover:bg-white/[0.07] hover:-translate-y-1 hover:shadow-lg'
                               : 'border-white/10 bg-white/[0.03] opacity-60 cursor-not-allowed'
                         }`}
                       >
-                        {sel ? (
-                          <span className="absolute top-1.5 left-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white text-[10px] font-black shadow-md">✓</span>
-                        ) : null}
-                        {!bt.isActive ? (
-                          <span className="absolute top-1.5 left-1.5 rounded-md bg-slate-900/90 px-1.5 py-0.5 text-[7px] font-black text-slate-200/90 ring-1 ring-slate-500/40">
-                            بزودی
-                          </span>
-                        ) : null}
-                        <div className={`mb-2 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${bt.accent} shadow-md ring-1 ring-white/10`}>
-                          <IconComp size={20} className="text-white drop-shadow-md" strokeWidth={1.75} />
+                        <div className="relative h-32 sm:h-36 w-full shrink-0">
+                          {bt.cardCoverImage ? (
+                            <img
+                              src={bt.cardCoverImage}
+                              alt=""
+                              className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className={`h-full w-full bg-gradient-to-br ${bt.accent}`} />
+                          )}
+                          <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/25 to-transparent" />
+                          {sel ? (
+                            <span className="absolute top-2 left-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500 text-white text-[11px] font-black shadow-lg ring-2 ring-white/20">
+                              ✓
+                            </span>
+                          ) : null}
+                          {!bt.isActive ? (
+                            <span className="absolute top-2 left-2 z-10 rounded-lg bg-slate-950/90 px-2 py-0.5 text-[8px] font-black text-slate-200 ring-1 ring-slate-500/50">
+                              بزودی
+                            </span>
+                          ) : null}
                         </div>
-                        <p className="text-white font-bold text-xs leading-snug">{bt.titleFa}</p>
+                        <div className="flex flex-1 flex-col gap-1.5 p-3 sm:p-3.5">
+                          <div
+                            className={`inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br ${bt.accent} shadow-md ring-1 ring-white/15`}
+                          >
+                            <IconComp size={20} className="text-white drop-shadow-md" strokeWidth={1.75} />
+                          </div>
+                          <p className="text-white font-black text-sm sm:text-base leading-snug">{bt.titleFa}</p>
+                          <p className="text-slate-500 text-[10px] sm:text-[11px] font-mono truncate" dir="ltr">
+                            {bt.titleEn}
+                          </p>
+                        </div>
                       </button>
                     );
                   })}
@@ -2256,6 +2589,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                     type="button"
                     onClick={() => {
                       if (!ACTIVE_BUSINESS_TYPE_IDS.has(regData.businessType)) return;
+                      setRegisterPayUseAdvancedMethods(false);
+                      setRegData((prev) => ({ ...prev, payMethod: 'other_try' }));
                       setRegisterStep(4);
                     }}
                     className="flex-1 py-3.5 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-500 text-sm flex items-center justify-center gap-2"
@@ -2266,8 +2601,8 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
               </div>
             )}
 
-            {/* Step 4 — پرداخت */}
-            {registerStep === 4 && (() => {
+          </div>
+          ) : (() => {
               const methodColors: Record<string, { accent: string; glow: string }> = {
                 bank_transfer: { accent: '#10b981', glow: 'rgba(16,185,129,0.25)' },
                 mpaisa: { accent: '#3b82f6', glow: 'rgba(59,130,246,0.25)' },
@@ -2277,221 +2612,331 @@ const WelcomePage: React.FC<WelcomePageProps> = ({ onLogin, onGoogleLogin, onDem
                 hesabpay: { accent: '#2dd4bf', glow: 'rgba(45,212,191,0.25)' },
                 other_try: { accent: '#a78bfa', glow: 'rgba(167,139,250,0.25)' },
               };
-              const mc = methodColors[regData.payMethod] || methodColors.bank_transfer;
+              const mc = methodColors[regData.payMethod] || methodColors.other_try;
               const info = PAYMENT_INFO[regData.payMethod];
+              const heroImageUrl = info?.image || PAYMENT_INFO.other_try.image;
+              const defaultWa = '0795074175';
+              const payInputCls =
+                'w-full px-5 py-3.5 rounded-xl bg-white/5 border-2 border-white/10 text-white text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/20 transition-all placeholder:text-slate-400';
+              const advancedMethodChoices = paymentMethods.filter((m) => m.id !== 'other_try');
               return (
-                <div className="animate-fadeIn space-y-6">
-                  <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                    <p className="text-[11px] font-black text-slate-400 mb-3">مراحل تکمیل ثبت‌نام</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {[
-                        { title: '۱) ثبت اطلاعات', state: 'done' },
-                        { title: '۲) انتخاب نوع کسب‌وکار', state: 'done' },
-                        { title: '۳) پرداخت و تایید ادمین', state: 'active' },
-                      ].map((step) => (
-                        <div
-                          key={step.title}
-                          className={`rounded-xl px-3 py-2 text-xs font-bold ${
-                            step.state === 'done'
-                              ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                              : 'bg-indigo-500/15 text-indigo-200 border border-indigo-500/30'
-                          }`}
-                        >
-                          {step.title}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-start gap-4 justify-between">
-                    <div className="flex items-start gap-3">
-                      <button type="button" onClick={() => setRegisterStep(3)} className="p-1.5 rounded-lg text-slate-400 hover:bg-white/10 transition-colors shrink-0 mt-1">
-                        <ChevronRight size={20} />
-                      </button>
-                      <div>
-                        <h3 className="text-2xl font-black text-white tracking-tight">تسویه و فعال‌سازی</h3>
-                        <p className="text-slate-400 text-sm mt-1 max-w-xl leading-relaxed">
-                          طرح <span className="text-indigo-300 font-bold">{selectedPlan.name}</span> —{' '}
-                          <span className="text-white font-black">{selectedPlan.price}</span>
+                <div className="animate-fadeIn mx-auto w-full max-w-6xl min-w-0 xl:max-w-[88rem]">
+                  <div
+                    className="flex flex-col gap-6 lg:flex-row lg:items-stretch lg:justify-between lg:gap-8 xl:gap-10"
+                    dir="ltr"
+                  >
+                    {/* چپ: فقط خلاصه + فیلدهای تراکنش (طبق درخواست) */}
+                    <div className="flex w-full flex-shrink-0 flex-col gap-4 lg:w-[400px] xl:w-[420px]">
+                      <div className="auth-form-shell w-full rounded-2xl border border-white/10 bg-white/[0.04] p-3 shadow-lg shadow-black/20 sm:p-3.5">
+                        <p className="text-center text-[10px] font-black uppercase tracking-widest text-indigo-300/90">خلاصه سفارش</p>
+                        <p className="mt-1 text-center text-sm font-black leading-snug text-white sm:text-[0.95rem]">
+                          {selectedPlan.name}
+                        </p>
+                        <p className="text-center text-[11px] text-slate-400">
+                          <span dir="ltr" className="font-bold text-slate-200">
+                            {selectedPlan.price}
+                          </span>
                           <span className="text-slate-500"> / {selectedPlan.period}</span>
                         </p>
-                        <p className="text-slate-500 text-xs mt-2">
-                          فروشگاه: <span className="text-slate-300 font-medium">{regData.shopName || '—'}</span>
+                        <p className="mt-1.5 truncate border-t border-white/10 pt-1.5 text-center text-[10px] text-slate-500">
+                          فروشگاه:{' '}
+                          <span className="font-medium text-slate-300" title={regData.shopName || ''}>
+                            {regData.shopName || '—'}
+                          </span>
                         </p>
                       </div>
-                    </div>
-                    <div
-                      className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-left"
-                      style={{ boxShadow: `0 0 40px ${mc.glow}` }}
-                    >
-                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">مبلغ قابل پرداخت</p>
-                      <p className="text-2xl font-black text-white tabular-nums" dir="ltr">
-                        {selectedPlan.price}
-                      </p>
-                    </div>
-                  </div>
 
-                  {paymentError ? (
-                    <div className="rounded-2xl border border-rose-500/35 bg-rose-500/10 px-4 py-3 text-rose-200 text-sm font-bold">{paymentError}</div>
-                  ) : null}
+                      {paymentError ? (
+                        <div className="flex items-center gap-3 rounded-xl border border-rose-500/25 bg-rose-500/10 px-3 py-2.5 text-xs font-bold text-rose-200 sm:text-sm">
+                          <AlertTriangle size={16} className="shrink-0 sm:size-[18px]" /> {paymentError}
+                        </div>
+                      ) : null}
 
-                  <div className="grid lg:grid-cols-12 gap-6 lg:gap-8">
-                    <div className="lg:col-span-4 space-y-2 order-2 lg:order-1">
-                      <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider px-1 mb-1">روش پرداخت</p>
-                      <div className="space-y-2 max-h-[min(520px,70vh)] overflow-y-auto custom-scrollbar pr-1">
-                        {paymentMethods.map((method) => {
-                          const isSel = regData.payMethod === method.id;
-                          return (
-                            <button
-                              key={method.id}
-                              type="button"
-                              onClick={() => setRegData({ ...regData, payMethod: method.id })}
-                              className={`w-full text-right rounded-2xl border p-4 flex items-center gap-3 transition-all duration-200 ${
-                                isSel
-                                  ? 'border-indigo-400/80 bg-indigo-500/[0.12] ring-2 ring-indigo-500/30 shadow-lg shadow-indigo-950/40'
-                                  : 'border-white/10 bg-white/[0.03] hover:border-white/18 hover:bg-white/[0.06]'
-                              }`}
-                            >
-                              <div className="w-11 h-11 rounded-xl bg-white/10 flex items-center justify-center shrink-0 border border-white/10 [&>svg]:w-5 [&>svg]:h-5">
-                                {method.icon}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="font-black text-white text-sm leading-tight">{method.name}</p>
-                                <p className="text-[11px] text-slate-500 truncate mt-0.5">{method.company}</p>
-                              </div>
-                              {isSel ? <Check className="text-indigo-400 shrink-0" size={20} strokeWidth={2.5} /> : null}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="lg:col-span-8 order-1 lg:order-2">
-                      <div
-                        className="rounded-3xl border border-white/10 overflow-hidden shadow-2xl"
-                        style={{
-                          background: 'linear-gradient(165deg, rgba(255,255,255,0.06) 0%, rgba(15,23,42,0.85) 45%, rgba(2,6,23,0.95) 100%)',
-                          boxShadow: `0 25px 80px -20px ${mc.glow}`,
-                        }}
-                      >
-                        <div className="p-6 sm:p-8 border-b border-white/10">
-                          <div className="flex flex-wrap items-center gap-3 mb-4">
-                            <div
-                              className="w-12 h-12 rounded-2xl flex items-center justify-center border border-white/10"
-                              style={{ backgroundColor: `${mc.accent}18`, color: mc.accent }}
-                            >
-                              <span className="[&>svg]:w-6 [&>svg]:h-6">{selectedPayment?.icon}</span>
-                            </div>
-                            <div>
-                              <h4 className="text-lg font-black text-white">{selectedPayment?.name}</h4>
-                              <p className="text-xs text-slate-400">{selectedPayment?.company}</p>
-                            </div>
-                          </div>
-                          <div className="rounded-2xl bg-black/50 border border-white/10 p-4 sm:p-5 mb-5">
-                            <p className="text-[11px] font-black text-slate-500 uppercase tracking-wider mb-2">مقصد / شناسه واریز</p>
-                            <p className="font-mono text-lg sm:text-xl text-white font-black tracking-wide break-all text-left" dir="ltr">
-                              {selectedPayment?.id === 'other_try' ? '0795074175' : selectedPayment?.number}
+                      <div className="auth-form-shell space-y-4 rounded-[1.75rem] border border-white/10 p-5 shadow-xl shadow-black/30 sm:p-6">
+                        <div className="flex items-start gap-2 border-b border-white/10 pb-3">
+                          <button
+                            type="button"
+                            onClick={() => setRegisterStep(3)}
+                            className="mt-0.5 shrink-0 rounded-lg p-1 text-slate-400 transition-colors hover:bg-white/10"
+                            aria-label="بازگشت"
+                          >
+                            <ChevronRight size={18} />
+                          </button>
+                          <div className="min-w-0 flex-1 text-right">
+                            <h3 className="text-sm font-black text-white">جزئیات تراکنش شما</h3>
+                            <p className="mt-0.5 text-[10px] leading-relaxed text-slate-500">
+                              روش را از کارت‌های سمت راست انتخاب کنید؛ رسید یا شناسه را اینجا وارد کنید.
                             </p>
                           </div>
-                          {info ? (
-                            <div className="space-y-4">
-                              <p className="text-sm text-slate-300 leading-7 text-justify">{info.description}</p>
-                              <div>
-                                <p className="text-xs font-black text-slate-400 mb-2">مراحل پرداخت</p>
-                                <ol className="space-y-2">
-                                  {info.steps.map((st, i) => (
-                                    <li key={i} className="flex gap-3 text-sm text-slate-300 leading-relaxed">
-                                      <span
-                                        className="w-7 h-7 rounded-xl flex items-center justify-center text-xs font-black shrink-0"
-                                        style={{ backgroundColor: `${mc.accent}22`, color: mc.accent }}
-                                      >
-                                        {i + 1}
-                                      </span>
-                                      <span className="pt-0.5">{st}</span>
-                                    </li>
-                                  ))}
-                                </ol>
-                              </div>
-                            </div>
-                          ) : null}
-                          {selectedPayment?.hint ? (
-                            <p className="text-xs text-slate-500 mt-4 pt-4 border-t border-white/10 leading-relaxed">{selectedPayment.hint}</p>
-                          ) : null}
                         </div>
-                        <div className="p-6 sm:p-8 bg-black/30">
-                          {selectedPayment?.id === 'other_try' ? (
-                            <div className="rounded-2xl border border-violet-500/25 bg-violet-500/10 p-5">
-                              <p className="text-sm font-black text-violet-200 mb-3">تماس با پشتیبانی</p>
-                              <div className="space-y-2 text-sm text-slate-200">
-                                <div className="flex items-center gap-2">
-                                  <Phone size={16} className="text-violet-400 shrink-0" />
-                                  <span dir="ltr" className="font-black">
-                                    0795074175
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Facebook size={16} className="text-blue-400 shrink-0" />
-                                  <span className="font-bold">Smarthub digital solutions</span>
-                                </div>
+                        {selectedPayment?.id === 'other_try' ? (
+                          <p className="text-center text-[11px] leading-relaxed text-slate-400">
+                            پس از تماس یا واریز، در صورت نیاز یادداشت کوتاه بگذارید؛ یا برای روش دیگر همان فیلدهای رسید را پر کنید.
+                          </p>
+                        ) : null}
+                        {selectedPayment && selectedPayment.fields.length > 0 ? (
+                          <div className="space-y-3">
+                            {selectedPayment.fields.map((field) => (
+                              <div key={field.name} className="space-y-1.5">
+                                <label className="block text-xs font-bold text-slate-200 sm:text-sm">{field.label}</label>
+                                <input
+                                  type={field.type}
+                                  value={paymentValues[field.name] || ''}
+                                  onChange={(e) => setPaymentValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
+                                  placeholder={field.placeholder}
+                                  className={payInputCls}
+                                  dir="ltr"
+                                />
                               </div>
-                            </div>
-                          ) : selectedPayment && selectedPayment.fields.length > 0 ? (
-                            <div className="space-y-4">
-                              <p className="text-sm font-bold text-slate-300">جزئیات تراکنش شما</p>
-                              {selectedPayment.fields.map((field) => (
-                                <div key={field.name}>
-                                  <label className="text-xs font-bold text-slate-400 block mb-1.5">{field.label}</label>
-                                  <input
-                                    type={field.type}
-                                    value={paymentValues[field.name] || ''}
-                                    onChange={(e) => setPaymentValues((prev) => ({ ...prev, [field.name]: e.target.value }))}
-                                    placeholder={field.placeholder}
-                                    className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:border-indigo-400 focus:ring-2 focus:ring-indigo-500/20 outline-none transition-all"
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-slate-400">پس از واریز، در صورت نیاز با پشتیبانی هماهنگ کنید.</p>
-                          )}
+                            ))}
+                          </div>
+                        ) : selectedPayment?.id !== 'other_try' ? (
+                          <p className="text-center text-xs text-slate-400"> پس از واریز، در صورت نیاز با پشتیبانی هماهنگ کنید.</p>
+                        ) : null}
+
+                        <div className="space-y-2 border-t border-white/10 pt-4">
+                          <button
+                            type="button"
+                            onClick={() => setRegisterStep(3)}
+                            className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/10 py-3 text-sm font-bold text-white transition-colors hover:bg-white/20"
+                          >
+                            <ChevronRight size={18} /> بازگشت به نوع کسب‌وکار
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleSubmitPayment()}
+                            disabled={isSubmittingPayment}
+                            className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3.5 text-base font-black text-white shadow-lg shadow-indigo-500/20 transition-all hover:bg-indigo-500 disabled:opacity-60 sm:py-4 sm:text-lg"
+                          >
+                            {isSubmittingPayment ? (
+                              <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                            ) : (
+                              <>
+                                <Check size={20} strokeWidth={2.5} /> تأیید و ارسال درخواست پرداخت
+                              </>
+                            )}
+                          </button>
                         </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="sticky bottom-2 z-10 rounded-2xl border border-white/10 bg-slate-950/85 backdrop-blur p-3">
-                    <div className="flex items-center justify-between gap-3 mb-3">
-                      <p className="text-xs text-slate-400">مرحله نهایی: ارسال درخواست پرداخت برای تایید ادمین</p>
-                      <p className="text-sm font-black text-white">{selectedPlan.price}</p>
-                    </div>
-                    <div className="flex flex-col sm:flex-row gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setRegisterStep(3)}
-                      className="sm:flex-initial py-3.5 px-6 rounded-xl font-bold bg-white/10 text-white hover:bg-white/20 border border-white/20 text-sm flex items-center justify-center gap-2"
-                    >
-                      <ChevronRight size={18} /> بازگشت
-                    </button>
-                      <button
-                      type="button"
-                      onClick={() => void handleSubmitPayment()}
-                      disabled={isSubmittingPayment}
-                      className="flex-1 py-4 rounded-2xl font-black flex items-center justify-center gap-2 bg-gradient-to-l from-indigo-600 to-violet-600 text-white hover:from-indigo-500 hover:to-violet-500 shadow-xl shadow-indigo-900/40 transition-all disabled:opacity-60 text-sm sm:text-base border border-white/10"
-                    >
-                      {isSubmittingPayment ? (
-                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      ) : (
-                        <>
-                          <Check size={18} strokeWidth={2.5} /> تایید و ارسال درخواست پرداخت
-                        </>
-                      )}
-                      </button>
+                    <div className="min-w-0 flex-1" dir="rtl">
+                      <div className="auth-form-shell space-y-4 rounded-[1.75rem] border border-white/10 p-4 shadow-2xl shadow-black/35 sm:p-6 xl:sticky xl:top-6">
+                        <div className="border-b border-white/10 pb-3 text-center">
+                          <div className="mb-1 hidden justify-center sm:flex">
+                            <BrandLogo size={40} variant="header" />
+                          </div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-300/90">دکان‌یار</p>
+                          <h2 className="mt-1 text-base font-black text-white sm:text-lg">انتخاب روش پرداخت</h2>
+                          <p className="mx-auto mt-1.5 max-w-md text-[11px] leading-relaxed text-slate-400">
+                            روی کارت بزنید؛ توضیح و شمارهٔ واریز همان‌جا نمایش داده می‌شود.
+                          </p>
+                          <div className="mt-3 flex items-center justify-center gap-1.5 sm:gap-2">
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-[9px] font-black text-white sm:h-6 sm:w-6">
+                              ✓
+                            </span>
+                            <span className="h-0.5 w-4 rounded-full bg-emerald-500/80 sm:w-6" />
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-[9px] font-black text-white sm:h-6 sm:w-6">
+                              ✓
+                            </span>
+                            <span className="h-0.5 w-4 rounded-full bg-indigo-500 sm:w-6" />
+                            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[9px] font-black text-white sm:h-6 sm:w-6">
+                              ۳
+                            </span>
+                          </div>
+                          <p className="mt-1 text-[9px] font-bold text-slate-500">مرحله پرداخت</p>
+                        </div>
+
+                        <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+                          <button
+                            type="button"
+                            onClick={() => setRegisterStep(3)}
+                            className="shrink-0 rounded-lg p-1 text-slate-400 transition-colors hover:bg-white/10"
+                            aria-label="بازگشت"
+                          >
+                            <ChevronRight size={18} />
+                          </button>
+                          <p className="text-xs font-bold text-slate-300">مسیر پرداخت</p>
+                        </div>
+
+                        <div>
+                          <p className="mb-2 text-[10px] font-bold text-slate-500">واتساپ / حواله داخلی یا سایر روش‌ها — {defaultWa}</p>
+                          <div className="grid grid-cols-2 gap-1 rounded-xl border border-white/12 bg-black/40 p-1">
+                            <button
+                              type="button"
+                              className={`rounded-lg py-2.5 px-1.5 text-[11px] font-black leading-tight transition-all sm:text-xs ${
+                                !registerPayUseAdvancedMethods
+                                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/40'
+                                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                              }`}
+                              onClick={() => {
+                                setRegisterPayUseAdvancedMethods(false);
+                                setRegData((p) => ({ ...p, payMethod: 'other_try' }));
+                              }}
+                            >
+                              واتساپ و حواله داخلی
+                            </button>
+                            <button
+                              type="button"
+                              className={`rounded-lg py-2.5 px-1.5 text-[11px] font-black leading-tight transition-all sm:text-xs ${
+                                registerPayUseAdvancedMethods
+                                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/40'
+                                  : 'text-slate-400 hover:bg-white/5 hover:text-white'
+                              }`}
+                              onClick={() => {
+                                setRegisterPayUseAdvancedMethods(true);
+                                setRegData((p) => ({ ...p, payMethod: 'bank_transfer' }));
+                              }}
+                            >
+                              سایر روش‌ها
+                            </button>
+                          </div>
+                        </div>
+
+                        {registerPayUseAdvancedMethods ? (
+                          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
+                            {advancedMethodChoices.map((method) => {
+                              const sel = regData.payMethod === method.id;
+                              const imgUrl = PAYMENT_INFO[method.id]?.image || PAYMENT_INFO.bank_transfer.image;
+                              const col = methodColors[method.id] || methodColors.bank_transfer;
+                              return (
+                                <button
+                                  key={method.id}
+                                  type="button"
+                                  onClick={() => setRegData((p) => ({ ...p, payMethod: method.id }))}
+                                  className={`group relative min-h-[7.75rem] overflow-hidden rounded-[1.75rem] border text-right shadow-xl transition-all duration-300 sm:min-h-[8.5rem] ${
+                                    sel
+                                      ? 'border-indigo-400/80 bg-white/[0.08] ring-2 ring-indigo-400/35 shadow-indigo-900/20'
+                                      : 'border-white/10 bg-white/[0.04] hover:border-indigo-400/45 hover:bg-white/[0.07]'
+                                  }`}
+                                  style={{ boxShadow: sel ? `0 16px 48px -12px ${col.glow}` : undefined }}
+                                >
+                                  <img
+                                    src={imgUrl}
+                                    alt=""
+                                    className="absolute inset-0 h-full w-full object-cover opacity-45 transition-opacity duration-300 group-hover:opacity-55"
+                                    loading="lazy"
+                                  />
+                                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-900/75 to-slate-900/35" />
+                                  <div className="relative z-[1] flex h-full min-h-[7.75rem] flex-col justify-end p-3.5 text-right sm:min-h-[8.5rem] sm:p-4">
+                                    <p className="text-[11px] font-black leading-snug text-white sm:text-xs">{method.name}</p>
+                                    <p className="mt-1 line-clamp-2 text-[9px] font-bold text-slate-300 sm:text-[10px]">{method.company}</p>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRegisterPayUseAdvancedMethods(false);
+                              setRegData((p) => ({ ...p, payMethod: 'other_try' }));
+                            }}
+                            className={`relative min-h-[9rem] w-full overflow-hidden rounded-[1.75rem] border text-right shadow-xl transition-all duration-300 sm:min-h-[10rem] ${
+                              regData.payMethod === 'other_try'
+                                ? 'border-indigo-400/80 bg-white/[0.08] ring-2 ring-indigo-400/35'
+                                : 'border-white/10 bg-white/[0.04] hover:border-indigo-400/45 hover:bg-white/[0.07]'
+                            }`}
+                          >
+                            <img
+                              src={PAYMENT_INFO.other_try.image}
+                              alt=""
+                              className="absolute inset-0 h-full w-full object-cover opacity-40 transition-opacity duration-300 hover:opacity-50"
+                              loading="lazy"
+                            />
+                            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-indigo-950/65 to-transparent" />
+                            <div className="relative z-[1] flex min-h-[9rem] flex-col justify-end p-4 text-right sm:min-h-[10rem] sm:p-5">
+                              <p className="text-sm font-black text-white sm:text-base">پشتیبانی و واتساپ</p>
+                              <p className="mt-1.5 text-[11px] font-bold text-slate-300">پشتیبانی مستقیم — {defaultWa}</p>
+                            </div>
+                          </button>
+                        )}
+
+                        <div className="space-y-2 rounded-xl border border-white/10 bg-white/[0.04] p-3">
+                          <label className="block text-xs font-bold text-slate-200">مقصد / شناسه واریز</label>
+                          <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-left">
+                            <p className="font-mono text-sm font-black tracking-wide break-all text-white" dir="ltr">
+                              {selectedPayment?.id === 'other_try' ? defaultWa : selectedPayment?.number}
+                            </p>
+                          </div>
+                          {selectedPayment ? (
+                            <p className="text-center text-[11px] font-bold text-slate-400">{selectedPayment.name}</p>
+                          ) : null}
+                          {selectedPayment?.id === 'other_try' ? (
+                            <a
+                              href={`https://wa.me/93${defaultWa.replace(/^0/, '')}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center justify-center gap-2 rounded-lg border border-emerald-500/35 bg-emerald-500/10 py-2 text-[11px] font-bold text-emerald-200 transition-colors hover:bg-emerald-500/20"
+                            >
+                              باز کردن واتساپ همین شماره
+                            </a>
+                          ) : null}
+                        </div>
+
+                        {info ? (
+                          <div className="space-y-2 rounded-xl border border-white/10 bg-white/[0.03] p-3.5 sm:p-4">
+                            <p className="text-justify text-[11px] leading-7 text-slate-300 sm:text-sm">{info.description}</p>
+                            <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">مراحل پیشنهادی</p>
+                            <ol className="space-y-2">
+                              {info.steps.map((st, i) => (
+                                <li key={i} className="flex gap-2 text-[11px] leading-relaxed text-slate-300 sm:text-sm">
+                                  <span
+                                    className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[10px] font-black"
+                                    style={{ backgroundColor: `${mc.accent}22`, color: mc.accent }}
+                                  >
+                                    {i + 1}
+                                  </span>
+                                  <span className="pt-0.5">{st}</span>
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        ) : null}
+                        {selectedPayment?.hint ? (
+                          <p className="text-center text-[10px] leading-relaxed text-slate-500 sm:text-[11px]">{selectedPayment.hint}</p>
+                        ) : null}
+                        {selectedPayment?.id === 'other_try' ? (
+                          <div className="space-y-2 rounded-xl border border-violet-500/25 bg-violet-500/10 p-3.5">
+                            <p className="text-xs font-black text-violet-200">پشتیبانی مستقیم</p>
+                            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-200 sm:text-sm">
+                              <span className="flex items-center gap-1.5" dir="ltr">
+                                <Phone size={14} className="text-violet-400" />
+                                {defaultWa}
+                              </span>
+                              <span className="flex items-center gap-1.5">
+                                <Facebook size={14} className="text-blue-400" />
+                                Smarthub digital solutions
+                              </span>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className="relative mt-1 min-h-[200px] overflow-hidden rounded-xl border border-white/10 sm:min-h-[240px]">
+                          <img
+                            src={heroImageUrl}
+                            alt=""
+                            className="pay-method-card-media pointer-events-none absolute inset-0 h-full w-full object-cover opacity-85"
+                            loading="lazy"
+                          />
+                          <div className="absolute inset-0 bg-slate-950/35" aria-hidden />
+                          <div className="relative z-10 flex min-h-[200px] flex-col sm:min-h-[240px]">
+                            <AuthHeroVideoCard
+                              scene="payment"
+                              hideCaption
+                              useSceneBackdrop={false}
+                              className="min-h-[inherit] flex-1 border-0 !bg-slate-950/40 shadow-none backdrop-blur-[2px]"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
               );
             })()}
-          </div>
+        </div>
         </div>
         {googleModal}
       </div>

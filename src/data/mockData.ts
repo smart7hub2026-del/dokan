@@ -111,6 +111,17 @@ export interface Product {
   image_url?: string;
   /** واحد پول قیمت فروش (پیش‌فرض افغانی) */
   currency_code?: CurrencyCode;
+  /** موجودی انبار به تفکیک شناسه انبار (کلید رشته‌ای id) */
+  warehouse_stock_by_id?: Record<string, number>;
+  /** وضعیت کالا در سرور: active | draft | discontinued و غیره */
+  product_status?: string;
+  updated_at?: string;
+  updated_by?: number;
+  /** زرگری — در `ShopProduct.extra` ذخیره می‌شود */
+  karat?: number;
+  weight_grams?: number;
+  labor_note?: string;
+  note?: string;
 }
 
 /** موجودی جدا برای کتابفروشی — همگام با سرور کلید books */
@@ -171,6 +182,10 @@ export interface Customer {
   last_reminder_date?: string;
   created_at: string;
   tenant_id: number;
+  /** آرشیو (حذف نرم) — سوابق فاکتور با customer_id باقی می‌ماند */
+  archived_at?: string;
+  /** رضایت بازاریابی پیامکی/ایمیلی (ثبت در اپ؛ ارسال واقعی جداست) */
+  marketing_consent?: boolean;
 }
 
 export interface InvoiceItem {
@@ -208,6 +223,8 @@ export interface Invoice {
   items: InvoiceItem[];
   tenant_id: number;
   currency?: CurrencyCode;
+  /** پس از ثبت فروش ادمین یا تأیید فاکتور پرسنل — کسر موجودی اعمال شده است */
+  stock_committed?: boolean;
 }
 
 export interface Debt {
@@ -422,7 +439,17 @@ export const translations: Translations = {
     welcome: 'خوش آمدید', tenants: 'دکان‌ها', payments: 'پرداخت‌ها',
     manage_shops: 'مدیریت دکان‌ها', billing: 'صورتحساب', analytics360: 'آنالیتیکس ۳۶۰°',
     architecture: 'معماری سیستم', security_analysis: 'تحلیل امنیت', system_analysis: 'تحلیل کمبودها',
-    broadcast_notifications: 'اعلان همگانی', general_reports: 'گزارش‌های کلی', language_currency: 'زبان و ارز',
+    broadcast_notifications: 'اعلان همگانی', general_reports: 'گزارش‌های کلی', crm: 'CRM',
+    crm_subtitle: 'معامله، وظیفه، تماس و ارزش مشتری (سرور)',
+    customers_crm_hub_title: 'مشتریان و فروش',
+    customers_crm_hub_subtitle: 'دفترچه مشتری، معاملات، وظایف، تماس و تحلیل ارزش — یکپارچه',
+    customers_crm_tab_directory: 'دفترچه مشتریان',
+    customers_crm_directory_heading: 'لیست و پرونده مشتریان',
+    crm_super_shop_hint: 'کد فروشگاه هدف (ابرادمین)',
+    crm_tab_deals: 'معاملات', crm_tab_tasks: 'وظایف', crm_tab_contacts: 'تماس‌ها', crm_tab_rfm: 'ارزش مشتری',
+    crm_apply: 'اعمال', crm_refresh: 'تازه‌سازی', crm_access_denied: 'فقط مدیر دکان یا ابرادمین به CRM دسترسی دارد.',
+    crm_complete: 'انجام', crm_reopen: 'باز کردن',
+    language_currency: 'زبان و ارز',
     sales_pos: 'فروش / POS', invoices: 'فاکتورها', suppliers: 'تامین‌کنندگان', accounting: 'حسابداری',
     staff_payroll: 'پرسنل و حقوق', inventory_management: 'مدیریت موجودی', purchase_invoices: 'فاکتورها (خرید)',
     inventory_reports: 'گزارش موجودی', shop_management: 'مدیریت فروشگاه', role_super_admin: 'ابرادمین',
@@ -474,6 +501,17 @@ export const translations: Translations = {
     month: 'ماه', add_serial_help: 'برای افزودن سریال جدید...',
     expiry_products: 'تاریخ انقضای محصولات', expired: 'منقضی', under_30_days: 'زیر ۳۰ روز',
     barcode_required: 'بارکد اجباری است',
+    product_categories_tab: 'دسته‌بندی',
+    categories_manage_hint: 'دسته‌ها برای فیلتر کالا و گزارش استفاده می‌شوند.',
+    category_new_placeholder: 'نام دستهٔ جدید…',
+    items_in_category_label: 'تعداد',
+    category_delete_blocked: 'حذف ممکن نیست: هنوز {count} {entity} در این دسته است.',
+    category_delete_confirm: 'این دسته بدون کالا حذف شود؟',
+    shop_journal: 'روزنامه و تاریخچه',
+    shop_journal_subtitle: 'خلاصهٔ فروش، هشدار موجودی، مشتریان تازه و قرض‌های باز — به‌ترتیب زمان.',
+    shop_journal_badge: 'مرور عملیات',
+    book_item_label: 'کتاب',
+    min_stock_label: 'حداقل موجودی',
     // Customers extra
     manage_customers: 'مدیریت مشتریان', print_list: 'چاپ لیست',
     search_name_phone_code: 'جستجو (نام، موبایل، کد)...', debtor: 'بدهکار', creditor: 'بستانکار',
@@ -547,6 +585,9 @@ export const translations: Translations = {
     support_no_tickets: 'تیکتی یافت نشد', support_reply_label: 'پاسخ پشتیبانی', support_sender: 'فرستنده',
     support_message_body: 'متن پیام', support_your_reply: 'پاسخ شما', support_reply_placeholder: 'پاسخ را بنویسید...',
     support_subject: 'موضوع', support_priority: 'اولویت',
+    support_attachment_optional: 'تصویر ضمیمه (اختیاری، حدود زیر ۵۰۰KB)',
+    login_2fa_why: 'این مرحله برای امنیت حساب شماست؛ چون برای حساب شما احراز دو مرحله‌ای فعال شده است.',
+    login_captcha_hint: 'اگر کپچا می‌بینید، به‌خاطر تنظیمات امنیتی سرور است؛ آن را تکمیل کنید.',
     profile_tab: 'پروفایل', profile_super_readonly: 'ویرایش پروفایل برای ابرادمین از این مسیر در دسترس نیست.',
     loading_session: 'در حال بارگذاری نشست...',
     demo_cta: 'ارتقاء اشتراک',
@@ -601,7 +642,17 @@ export const translations: Translations = {
     welcome: 'ښه راغلاست', tenants: 'دوکانونه', payments: 'تادیات',
     manage_shops: 'د دوکانونو مدیریت', billing: 'بلینګ', analytics360: '۳۶۰ تحلیلات',
     architecture: 'سیستم جوړښت', security_analysis: 'امنیت تحلیل', system_analysis: 'د کمښت تحلیل',
-    broadcast_notifications: 'عام خبرتیا', general_reports: 'عمومي راپورونه', language_currency: 'ژبه او اسعار',
+    broadcast_notifications: 'عام خبرتیا', general_reports: 'عمومي راپورونه', crm: 'CRM',
+    crm_subtitle: 'معامله، دنده، اړیکه او پیرودونکي ارزښت (سرور)',
+    customers_crm_hub_title: 'پیرودونکي او پلور',
+    customers_crm_hub_subtitle: 'د پیرودونکو کتابچه، معاملې، دندې، اړیکې او ارزښت تحلیل — یوځای',
+    customers_crm_tab_directory: 'د پیرودونکو کتابچه',
+    customers_crm_directory_heading: 'لیست او پیرودونکی پرونده',
+    crm_super_shop_hint: 'د ابرادمین لپاره د دوکان کوډ',
+    crm_tab_deals: 'معاملات', crm_tab_tasks: 'دندې', crm_tab_contacts: 'اړیکې', crm_tab_rfm: 'ارزښت',
+    crm_apply: 'پلی کړئ', crm_refresh: 'تازه', crm_access_denied: 'یوازې دوکان مدیر یا سوپر اډمین.',
+    crm_complete: 'بشپړ', crm_reopen: 'بیرته پرانیستل',
+    language_currency: 'ژبه او اسعار',
     sales_pos: 'پلور / POS', invoices: 'بلونه', suppliers: 'عرضه کوونکي', accounting: 'حسابداري',
     staff_payroll: 'کارکوونکي او معاش', inventory_management: 'د موجودي مدیریت', purchase_invoices: 'د پیرود بلونه',
     inventory_reports: 'د موجودي راپورونه', shop_management: 'د دوکان مدیریت', role_super_admin: 'سوپر اډمین',
@@ -653,6 +704,17 @@ export const translations: Translations = {
     month: 'میاشت', add_serial_help: 'د نوي سیریل اضافه کولو لپاره...',
     expiry_products: 'د محصولاتو پای نیټه', expired: 'پای ته رسیدلی', under_30_days: 'تر ۳۰ ورځو لاندې',
     barcode_required: 'بارکوډ اجباري دی',
+    product_categories_tab: 'کټګورۍ',
+    categories_manage_hint: 'کټګورۍ د فلتر او راپور لپاره کارول کیږي.',
+    category_new_placeholder: 'نوې کټګورۍ…',
+    items_in_category_label: 'شمیر',
+    category_delete_blocked: 'ړنګیدای نشي: لا هم {count} {entity} پدې کټګورۍ کې دي.',
+    category_delete_confirm: 'بی‌محصوله کټګورۍ ړنګه شي؟',
+    shop_journal: 'ورونې / تاریخ',
+    shop_journal_subtitle: 'پلور، موجودي خبرداری، نوي پیریدونکي او پورونه.',
+    shop_journal_badge: 'عملیات',
+    book_item_label: 'کتاب',
+    min_stock_label: 'لږترلږه موجودي',
     // Customers extra
     manage_customers: 'د پیریدونکو مدیریت', print_list: 'لیست چاپ',
     search_name_phone_code: 'لټون (نوم، موبایل، کوډ)...', debtor: 'پورمن', creditor: 'پورورکوونکی',
@@ -726,6 +788,9 @@ export const translations: Translations = {
     support_no_tickets: 'ټیکټ ونه موندل شو', support_reply_label: 'د ملاتړ ځواب', support_sender: 'لیږونکی',
     support_message_body: 'د پیغام متن', support_your_reply: 'ستاسو ځواب', support_reply_placeholder: 'ځواب ولیکئ...',
     support_subject: 'موضوع', support_priority: 'لومړیتوب',
+    support_attachment_optional: 'د انځور ضمیمه (اختیاري، لږ تر ۵۰۰KB)',
+    login_2fa_why: 'دا مرحله ستاسو د امنیت لپاره ده.',
+    login_captcha_hint: 'که کپچا ښکاري، د سرور امنیتي تنظیمات دي.',
     profile_tab: 'پروفایل', profile_super_readonly: 'د سوپر اډمین پروفایل دلته نشي سمیدلی.',
     loading_session: 'ناسته بارول کیږي...',
     demo_cta: 'اشتراک پورته کړئ',
@@ -780,7 +845,17 @@ export const translations: Translations = {
     welcome: 'خوش آمدید', tenants: 'فروشگاه‌ها', payments: 'پرداخت‌ها',
     manage_shops: 'مدیریت فروشگاه‌ها', billing: 'صورت‌حساب', analytics360: 'آنالیتیکس ۳۶۰°',
     architecture: 'معماری سیستم', security_analysis: 'تحلیل امنیت', system_analysis: 'تحلیل کمبودها',
-    broadcast_notifications: 'اعلان عمومی', general_reports: 'گزارش‌های کلی', language_currency: 'زبان و ارز',
+    broadcast_notifications: 'اعلان عمومی', general_reports: 'گزارش‌های کلی', crm: 'CRM',
+    crm_subtitle: 'معامله، وظیفه، تماس و ارزش مشتری (سرور)',
+    customers_crm_hub_title: 'مشتریان و فروش',
+    customers_crm_hub_subtitle: 'دفترچه مشتری، معاملات، وظایف، تماس و تحلیل ارزش — یکپارچه',
+    customers_crm_tab_directory: 'دفترچه مشتریان',
+    customers_crm_directory_heading: 'لیست و پرونده مشتریان',
+    crm_super_shop_hint: 'کد فروشگاه هدف (ابرادمین)',
+    crm_tab_deals: 'معاملات', crm_tab_tasks: 'وظایف', crm_tab_contacts: 'تماس‌ها', crm_tab_rfm: 'ارزش مشتری',
+    crm_apply: 'اعمال', crm_refresh: 'تازه‌سازی', crm_access_denied: 'فقط مدیر فروشگاه یا ابرادمین.',
+    crm_complete: 'انجام', crm_reopen: 'باز کردن',
+    language_currency: 'زبان و ارز',
     sales_pos: 'فروش / POS', invoices: 'فاکتورها', suppliers: 'تامین‌کنندگان', accounting: 'حسابداری',
     staff_payroll: 'پرسنل و حقوق', inventory_management: 'مدیریت موجودی', purchase_invoices: 'فاکتورهای خرید',
     inventory_reports: 'گزارش موجودی', shop_management: 'مدیریت فروشگاه', role_super_admin: 'ابرادمین',
@@ -830,6 +905,17 @@ export const translations: Translations = {
     month: 'ماه', add_serial_help: 'برای افزودن سریال جدید...',
     expiry_products: 'تاریخ انقضای محصولات', expired: 'منقضی', under_30_days: 'زیر ۳۰ روز',
     barcode_required: 'بارکد اجباری است',
+    product_categories_tab: 'دسته‌بندی',
+    categories_manage_hint: 'دسته‌ها برای فیلتر کالا و گزارش استفاده می‌شوند.',
+    category_new_placeholder: 'نام دستهٔ جدید…',
+    items_in_category_label: 'تعداد',
+    category_delete_blocked: 'حذف ممکن نیست: هنوز {count} {entity} در این دسته است.',
+    category_delete_confirm: 'این دسته بدون کالا حذف شود؟',
+    shop_journal: 'روزنامه و تاریخچه',
+    shop_journal_subtitle: 'خلاصهٔ فروش، هشدار موجودی، مشتریان تازه و قرض‌های باز.',
+    shop_journal_badge: 'مرور عملیات',
+    book_item_label: 'کتاب',
+    min_stock_label: 'حداقل موجودی',
     manage_customers: 'مدیریت مشتریان', print_list: 'چاپ لیست',
     search_name_phone_code: 'جستجو (نام، موبایل، کد)...', debtor: 'بدهکار', creditor: 'بستانکار',
     reminder: 'یادآوری', days_ago: 'روز قبل', new_customer_btn: 'مشتری جدید',
@@ -893,6 +979,9 @@ export const translations: Translations = {
     support_no_tickets: 'تیکتی یافت نشد', support_reply_label: 'پاسخ پشتیبانی', support_sender: 'فرستنده',
     support_message_body: 'متن پیام', support_your_reply: 'پاسخ شما', support_reply_placeholder: 'پاسخ را بنویسید...',
     support_subject: 'موضوع', support_priority: 'اولویت',
+    support_attachment_optional: 'تصویر ضمیمه (اختیاری، حدود زیر ۵۰۰KB)',
+    login_2fa_why: 'این مرحله برای امنیت حساب شماست.',
+    login_captcha_hint: 'کپچا به‌خاطر تنظیمات امنیتی سرور است.',
     profile_tab: 'پروفایل', profile_super_readonly: 'ویرایش پروفایل ابرادمین از این مسیر در دسترس نیست.',
     loading_session: 'در حال بارگذاری نشست...',
     demo_cta: 'ارتقاء اشتراک',
@@ -947,7 +1036,17 @@ export const translations: Translations = {
     welcome: 'Welcome', tenants: 'Shops', payments: 'Payments',
     manage_shops: 'Manage Shops', billing: 'Billing', analytics360: 'Analytics 360°',
     architecture: 'System Architecture', security_analysis: 'Security Analysis', system_analysis: 'Gap Analysis',
-    broadcast_notifications: 'Broadcast Notifications', general_reports: 'General Reports', language_currency: 'Language & Currency',
+    broadcast_notifications: 'Broadcast Notifications', general_reports: 'General Reports', crm: 'CRM',
+    crm_subtitle: 'Deals, tasks, contacts & customer value (server)',
+    customers_crm_hub_title: 'Customers & sales',
+    customers_crm_hub_subtitle: 'Directory, deals, tasks, contacts & value — in one place',
+    customers_crm_tab_directory: 'Customer directory',
+    customers_crm_directory_heading: 'Customer list & profiles',
+    crm_super_shop_hint: 'Target shop code (super admin)',
+    crm_tab_deals: 'Deals', crm_tab_tasks: 'Tasks', crm_tab_contacts: 'Contacts', crm_tab_rfm: 'RFM / value',
+    crm_apply: 'Apply', crm_refresh: 'Refresh', crm_access_denied: 'Only shop admin or super admin can open CRM.',
+    crm_complete: 'Complete', crm_reopen: 'Reopen',
+    language_currency: 'Language & Currency',
     sales_pos: 'Sales / POS', invoices: 'Invoices', suppliers: 'Suppliers', accounting: 'Accounting',
     staff_payroll: 'Staff & Payroll', inventory_management: 'Inventory Management', purchase_invoices: 'Purchase Invoices',
     inventory_reports: 'Inventory Reports', shop_management: 'Shop Management', role_super_admin: 'Super Admin',
@@ -998,6 +1097,17 @@ export const translations: Translations = {
     month: 'Month', add_serial_help: 'To add a new serial...',
     expiry_products: 'Product Expiry Dates', expired: 'Expired', under_30_days: 'Under 30 days',
     barcode_required: 'Barcode is required',
+    product_categories_tab: 'Categories',
+    categories_manage_hint: 'Categories organize items for filters and reports.',
+    category_new_placeholder: 'New category name…',
+    items_in_category_label: 'Count',
+    category_delete_blocked: 'Cannot delete: {count} {entity} still in this category.',
+    category_delete_confirm: 'Delete this empty category?',
+    shop_journal: 'Shop journal & history',
+    shop_journal_subtitle: 'Sales, stock alerts, new customers, and open debts — newest first.',
+    shop_journal_badge: 'Operations digest',
+    book_item_label: 'book',
+    min_stock_label: 'Min stock',
     manage_customers: 'Customer Management', print_list: 'Print List',
     search_name_phone_code: 'Search (name, phone, code)...', debtor: 'Debtor', creditor: 'Creditor',
     reminder: 'Reminder', days_ago: 'days ago', new_customer_btn: 'New Customer',
@@ -1061,6 +1171,9 @@ export const translations: Translations = {
     support_no_tickets: 'No tickets', support_reply_label: 'Support reply', support_sender: 'Sender',
     support_message_body: 'Message', support_your_reply: 'Your reply', support_reply_placeholder: 'Write a reply...',
     support_subject: 'Subject', support_priority: 'Priority',
+    support_attachment_optional: 'Attach image (optional, under ~500KB)',
+    login_2fa_why: 'This step protects your account because two-factor authentication is enabled.',
+    login_captcha_hint: 'Captcha appears when required by server security settings.',
     profile_tab: 'Profile', profile_super_readonly: 'Super admin profile cannot be edited here.',
     loading_session: 'Loading session...',
     demo_cta: 'Upgrade subscription',
@@ -1245,7 +1358,7 @@ export const mockCustomers: Customer[] = [
   { id: 3, customer_code: 'C003', name: 'حسین رضایی', phone: '0793333333', email: 'hosein@example.com', address: 'کابل، مکروریان دوم', balance: -28500, total_purchases: 120000, status: 'active', reminder_enabled: true, reminder_days_before: 5, created_at: '2025-01-03', tenant_id: 1 },
   { id: 4, customer_code: 'C004', name: 'زینب کریمی', phone: '0794444444', address: 'کابل، وزیراکبرخان', balance: 0, total_purchases: 15000, status: 'active', reminder_enabled: false, reminder_days_before: 3, created_at: '2025-01-05', tenant_id: 1 },
   { id: 5, customer_code: 'C005', name: 'محمود نوری', phone: '0795555555', address: 'کابل، چهاراهی قمبر', balance: -5500, total_purchases: 38000, status: 'inactive', reminder_enabled: true, reminder_days_before: 3, created_at: '2025-01-06', tenant_id: 1 },
-  { id: 6, customer_code: 'C006', name: 'نسرین صدیقی', phone: '0796666666', whatsapp: '0796666666', email: 'nasrin@mail.af', address: 'کابل، پل سرخ', balance: 2000, total_purchases: 65000, status: 'active', reminder_enabled: true, reminder_days_before: 2, created_at: '2025-01-07', tenant_id: 1 },
+  { id: 6, customer_code: 'C006', name: 'نسرین صدیقی', phone: '0796666666', whatsapp: '0796666666', email: 'nasrin@mail.af', address: 'کابل، پل سرخ', balance: -7500, total_purchases: 65000, status: 'active', reminder_enabled: true, reminder_days_before: 2, created_at: '2025-01-07', tenant_id: 1 },
 ];
 
 export const mockReminders: Reminder[] = [

@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { Search, Eye, Printer, Trash2, Edit2, X, Check, FileText, ShoppingCart, Package, Plus, ChevronDown, ChevronUp, Download, ChevronRight, ChevronLeft, ImagePlus, Copy, Layers, Send, Users, Mic, MicOff } from 'lucide-react';
-import { Invoice } from '../data/mockData';
+import { Invoice, InvoiceItem } from '../data/mockData';
 import { useToast } from './Toast';
 import { ConfirmModal } from './Modal';
 import { useApp } from '../context/AppContext';
@@ -401,6 +401,77 @@ export default function InvoicesPage() {
     );
   }, [storeUsers]);
 
+  /** همزمان فقط یک مودال فاکتور باز باشد؛ بدون تغییر تنظیمات/دیتابیس تا زمان ثبت یا چاپ */
+  const openNewSaleOnly = useCallback(() => {
+    setShowPrintModal(null);
+    setShowPurchasePrintModal(null);
+    setShowNewPurchaseModal(false);
+    setViewInvoice(null);
+    setEditInvoice(null);
+    setEditPurchaseInvoice(null);
+    setShowNewSaleModal(true);
+  }, []);
+
+  const openNewPurchaseOnly = useCallback(() => {
+    setShowPrintModal(null);
+    setShowPurchasePrintModal(null);
+    setShowNewSaleModal(false);
+    setViewInvoice(null);
+    setEditInvoice(null);
+    setEditPurchaseInvoice(null);
+    setShowNewPurchaseModal(true);
+  }, []);
+
+  const openViewSale = useCallback((inv: Invoice) => {
+    setShowPrintModal(null);
+    setShowPurchasePrintModal(null);
+    setShowNewSaleModal(false);
+    setShowNewPurchaseModal(false);
+    setEditInvoice(null);
+    setEditPurchaseInvoice(null);
+    setViewInvoice(inv);
+  }, []);
+
+  const openPrintSale = useCallback((inv: Invoice) => {
+    setShowNewSaleModal(false);
+    setShowNewPurchaseModal(false);
+    setShowPurchasePrintModal(null);
+    setViewInvoice(null);
+    setEditInvoice(null);
+    setEditPurchaseInvoice(null);
+    setShowPrintModal(inv);
+  }, []);
+
+  const openEditSale = useCallback((inv: Invoice) => {
+    setShowPrintModal(null);
+    setShowPurchasePrintModal(null);
+    setShowNewSaleModal(false);
+    setShowNewPurchaseModal(false);
+    setViewInvoice(null);
+    setEditPurchaseInvoice(null);
+    setEditInvoice(inv);
+  }, []);
+
+  const openPurchasePrint = useCallback((inv: PurchaseInvoice) => {
+    setShowNewSaleModal(false);
+    setShowNewPurchaseModal(false);
+    setShowPrintModal(null);
+    setViewInvoice(null);
+    setEditInvoice(null);
+    setEditPurchaseInvoice(null);
+    setShowPurchasePrintModal(inv);
+  }, []);
+
+  const openEditPurchase = useCallback((inv: PurchaseInvoice) => {
+    setShowPrintModal(null);
+    setShowPurchasePrintModal(null);
+    setShowNewSaleModal(false);
+    setShowNewPurchaseModal(false);
+    setViewInvoice(null);
+    setEditInvoice(null);
+    setEditPurchaseInvoice(inv);
+  }, []);
+
   const handleSharePurchaseList = () => {
     const inv = showPurchasePrintModal;
     if (!inv) return;
@@ -491,10 +562,37 @@ export default function InvoicesPage() {
     setDeleteId(null);
   };
 
+  const recalcInvoiceTotals = (inv: Invoice, items: InvoiceItem[], discount: number, paid: number) => {
+    const subtotal = items.reduce((s, it) => s + (Number(it.quantity) || 0) * (Number(it.unit_price) || 0), 0);
+    const disc = Math.max(0, discount);
+    const total = Math.max(0, subtotal - disc);
+    const due =
+      inv.payment_method === 'credit' ? total : Math.max(0, total - Math.min(paid, total));
+    return { ...inv, items, subtotal, discount: disc, total, paid_amount: Math.min(paid, total), due_amount: due };
+  };
+
+  const patchEditItem = (idx: number, patch: Partial<InvoiceItem>) => {
+    setEditInvoice((inv) => {
+      if (!inv) return inv;
+      const items = inv.items.map((it, i) => {
+        if (i !== idx) return it;
+        const next = { ...it, ...patch };
+        const q = Math.max(0, Number(next.quantity) || 0);
+        const u = Math.max(0, Math.round(Number(next.unit_price) || 0));
+        return { ...next, quantity: q, unit_price: u, total_price: q * u };
+      });
+      return recalcInvoiceTotals(inv, items, inv.discount, inv.paid_amount);
+    });
+  };
+
   const handleSaveEdit = () => {
     if (!editInvoice) return;
-    storeUpdateInvoice(editInvoice);
-    success('فاکتور ویرایش شد');
+    const res = storeUpdateInvoice(editInvoice);
+    if (!res.ok) {
+      error('موجودی', res.message);
+      return;
+    }
+    success('فاکتور ویرایش شد', 'موجودی مغازه/گدام با اقلام جدید هماهنگ شد');
     setEditInvoice(null);
   };
 
@@ -591,13 +689,13 @@ export default function InvoicesPage() {
             <Download size={16} /> خروجی Excel
           </button>
           {tab === 'sales' && (
-            <button onClick={() => setShowNewSaleModal(true)}
+            <button onClick={openNewSaleOnly}
               className="btn-primary flex items-center gap-2 text-white px-4 py-2.5 rounded-xl text-sm font-medium">
               <Plus size={16} /> فاکتور فروش جدید
             </button>
           )}
           {tab === 'purchase' && (
-            <button onClick={() => setShowNewPurchaseModal(true)}
+            <button onClick={openNewPurchaseOnly}
               className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl text-sm font-medium transition-colors">
               <Plus size={16} /> فاکتور خرید جدید
             </button>
@@ -711,9 +809,9 @@ export default function InvoicesPage() {
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex gap-1">
-                        <button onClick={() => setViewInvoice(inv)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-blue-400 transition-colors" title="مشاهده"><Eye size={13} /></button>
-                        <button onClick={() => setEditInvoice({ ...inv })} className="p-1.5 rounded-lg glass text-slate-400 hover:text-amber-400 transition-colors" title="ویرایش"><Edit2 size={13} /></button>
-                        <button onClick={() => setShowPrintModal(inv)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-emerald-400 transition-colors" title="چاپ"><Printer size={13} /></button>
+                        <button onClick={() => openViewSale(inv)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-blue-400 transition-colors" title="مشاهده"><Eye size={13} /></button>
+                        <button onClick={() => openEditSale({ ...inv })} className="p-1.5 rounded-lg glass text-slate-400 hover:text-amber-400 transition-colors" title="ویرایش"><Edit2 size={13} /></button>
+                        <button onClick={() => openPrintSale(inv)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-emerald-400 transition-colors" title="چاپ"><Printer size={13} /></button>
                         <button onClick={() => setDeleteId(inv.id)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-rose-400 transition-colors" title="حذف"><Trash2 size={13} /></button>
                       </div>
                     </td>
@@ -725,7 +823,7 @@ export default function InvoicesPage() {
               <div className="text-center py-16 text-slate-500">
                 <FileText size={36} className="mx-auto mb-3 opacity-30" />
                 <p className="text-sm">فاکتوری برای این تاریخ یافت نشد</p>
-                <button onClick={() => setShowNewSaleModal(true)} className="mt-3 btn-primary text-white px-4 py-2 rounded-xl text-sm flex items-center gap-1 mx-auto">
+                <button onClick={openNewSaleOnly} className="mt-3 btn-primary text-white px-4 py-2 rounded-xl text-sm flex items-center gap-1 mx-auto">
                   <Plus size={14} /> فاکتور جدید
                 </button>
               </div>
@@ -786,8 +884,8 @@ export default function InvoicesPage() {
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex gap-1">
-                        <button onClick={() => setEditPurchaseInvoice({ ...inv })} className="p-1.5 rounded-lg glass text-slate-400 hover:text-amber-400 transition-colors" title="ویرایش"><Edit2 size={13} /></button>
-                        <button onClick={() => setShowPurchasePrintModal(inv)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-emerald-400 transition-colors" title="چاپ"><Printer size={13} /></button>
+                        <button onClick={() => openEditPurchase({ ...inv })} className="p-1.5 rounded-lg glass text-slate-400 hover:text-amber-400 transition-colors" title="ویرایش"><Edit2 size={13} /></button>
+                        <button onClick={() => openPurchasePrint(inv)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-emerald-400 transition-colors" title="چاپ"><Printer size={13} /></button>
                         <button onClick={() => setDeletePurchaseId(inv.id)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-rose-400 transition-colors" title="حذف"><Trash2 size={13} /></button>
                       </div>
                     </td>
@@ -799,7 +897,7 @@ export default function InvoicesPage() {
               <div className="text-center py-16 text-slate-500">
                 <Package size={36} className="mx-auto mb-3 opacity-30" />
                 <p className="text-sm">فاکتور خریدی برای این تاریخ یافت نشد</p>
-                <button onClick={() => setShowNewPurchaseModal(true)} className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm flex items-center gap-1 mx-auto transition-colors">
+                <button onClick={openNewPurchaseOnly} className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-sm flex items-center gap-1 mx-auto transition-colors">
                   <Plus size={14} /> فاکتور خرید جدید
                 </button>
               </div>
@@ -829,12 +927,12 @@ export default function InvoicesPage() {
 
       {/* View Sale Invoice Modal */}
       {viewInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 sticky top-0 bg-slate-900">
               <h2 className="text-white font-bold text-lg">فاکتور {viewInvoice.invoice_number}</h2>
               <div className="flex gap-2">
-                <button onClick={() => setShowPrintModal(viewInvoice)} className="flex items-center gap-1 px-3 py-1.5 btn-primary text-white rounded-lg text-xs">
+                <button onClick={() => openPrintSale(viewInvoice)} className="flex items-center gap-1 px-3 py-1.5 btn-primary text-white rounded-lg text-xs">
                   <Printer size={12} /> چاپ
                 </button>
                 <button onClick={() => setViewInvoice(null)} className="p-1.5 text-slate-400 hover:text-white"><X size={18} /></button>
@@ -874,22 +972,69 @@ export default function InvoicesPage() {
 
       {/* Edit Sale Invoice Modal */}
       {editInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
-          <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 overflow-y-auto" style={{ background: 'rgba(0,0,0,0.8)' }}>
+          <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-3xl shadow-2xl my-4 max-h-[min(92dvh,calc(100dvh-2rem))] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 shrink-0">
               <h2 className="text-white font-bold">ویرایش فاکتور {editInvoice.invoice_number}</h2>
               <button onClick={() => setEditInvoice(null)} className="text-slate-400 hover:text-white"><X size={18} /></button>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+            <div className="p-6 space-y-4 overflow-y-auto flex-1 min-h-0">
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                همان اقلامی که روی چاپ فاکتور بوده‌اند اینجا نمایش داده می‌شوند؛ تعداد و قیمت واحد را کم‌وزیاد کنید؛ جمع و مبلغ کل به‌صورت خودکار به‌روز می‌شود.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div><label className="text-slate-400 text-xs block mb-1">نام مشتری</label><input value={editInvoice.customer_name} onChange={e => setEditInvoice({ ...editInvoice, customer_name: e.target.value })} className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none" /></div>
                 <div><label className="text-slate-400 text-xs block mb-1">موبایل مشتری</label><input value={editInvoice.customer_phone} onChange={e => setEditInvoice({ ...editInvoice, customer_phone: e.target.value })} className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none" /></div>
-                <div><label className="text-slate-400 text-xs block mb-1">تخفیف (؋)</label><input type="number" value={editInvoice.discount} onChange={e => { const d = +e.target.value; setEditInvoice({ ...editInvoice, discount: d, total: editInvoice.subtotal - d, due_amount: Math.max(0, editInvoice.subtotal - d - editInvoice.paid_amount) }); }} className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none" /></div>
-                <div><label className="text-slate-400 text-xs block mb-1">تاریخ سررسید</label><input type="date" value={editInvoice.due_date} onChange={e => setEditInvoice({ ...editInvoice, due_date: e.target.value })} className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none" /></div>
+                <div><label className="text-slate-400 text-xs block mb-1">تخفیف (؋)</label><input type="number" value={editInvoice.discount} onChange={e => { const d = +e.target.value; setEditInvoice((inv) => (inv ? recalcInvoiceTotals(inv, inv.items, d, inv.paid_amount) : inv)); }} className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none" /></div>
+                {editInvoice.payment_method === 'cash' ? (
+                  <div><label className="text-slate-400 text-xs block mb-1">پرداخت شده (نقد)</label><input type="number" value={editInvoice.paid_amount} onChange={e => { const p = +e.target.value; setEditInvoice((inv) => (inv ? recalcInvoiceTotals(inv, inv.items, inv.discount, p) : inv)); }} className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none" /></div>
+                ) : (
+                  <div><label className="text-slate-400 text-xs block mb-1">تاریخ سررسید</label><input type="date" value={editInvoice.due_date} onChange={e => setEditInvoice({ ...editInvoice, due_date: e.target.value })} className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 outline-none" /></div>
+                )}
               </div>
               <div><label className="text-slate-400 text-xs block mb-1">یادداشت</label><textarea value={editInvoice.notes} onChange={e => setEditInvoice({ ...editInvoice, notes: e.target.value })} rows={2} className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500 resize-none outline-none" /></div>
-              <div className="bg-slate-800/40 rounded-xl p-3 flex justify-between text-sm text-white font-bold"><span>مبلغ کل:</span><span className="text-emerald-400">{editInvoice.total.toLocaleString()} ؋</span></div>
-              <div className="flex gap-3">
+
+              <div className="rounded-xl border border-white/10 overflow-hidden">
+                <p className="text-xs font-bold text-slate-300 bg-slate-800/60 px-3 py-2">اقلام فاکتور ({editInvoice.items.length})</p>
+                <div className="overflow-x-auto max-h-56">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-white/10 text-slate-500 bg-slate-900/80">
+                        <th className="text-right py-2 px-2">کالا</th>
+                        <th className="text-center py-2 px-2 w-20">تعداد</th>
+                        <th className="text-center py-2 px-2 w-24">قیمت واحد</th>
+                        <th className="text-left py-2 px-2 w-28">جمع</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {editInvoice.items.map((it, idx) => (
+                        <tr key={`${it.product_id}-${idx}`}>
+                          <td className="py-2 px-2 text-slate-200">{it.product_name}</td>
+                          <td className="py-2 px-2">
+                            <input type="number" min={0} step={1} value={it.quantity}
+                              onChange={e => patchEditItem(idx, { quantity: +e.target.value })}
+                              className="w-full bg-slate-800/50 border border-slate-600 rounded-lg px-1 py-1 text-white text-center" dir="ltr" />
+                          </td>
+                          <td className="py-2 px-2">
+                            <input type="number" min={0} step={1} value={it.unit_price}
+                              onChange={e => patchEditItem(idx, { unit_price: +e.target.value })}
+                              className="w-full bg-slate-800/50 border border-slate-600 rounded-lg px-1 py-1 text-white text-center" dir="ltr" />
+                          </td>
+                          <td className="py-2 px-2 text-emerald-400 font-bold whitespace-nowrap" dir="ltr">{it.total_price.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-slate-800/40 rounded-xl p-3 space-y-1 text-sm text-white">
+                <div className="flex justify-between text-slate-400"><span>جمع اقلام</span><span>{editInvoice.subtotal.toLocaleString()} ؋</span></div>
+                {editInvoice.discount > 0 && <div className="flex justify-between text-rose-400"><span>تخفیف</span><span>− {editInvoice.discount.toLocaleString()} ؋</span></div>}
+                <div className="flex justify-between font-bold border-t border-white/10 pt-2"><span>مبلغ کل</span><span className="text-emerald-400">{editInvoice.total.toLocaleString()} ؋</span></div>
+                {editInvoice.due_amount > 0 && <div className="flex justify-between text-amber-400 text-xs"><span>مانده</span><span>{editInvoice.due_amount.toLocaleString()} ؋</span></div>}
+              </div>
+              <div className="flex gap-3 shrink-0">
                 <button onClick={handleSaveEdit} className="flex-1 btn-primary text-white py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm font-medium"><Check size={15} /> ذخیره تغییرات</button>
                 <button onClick={() => setEditInvoice(null)} className="px-5 py-2.5 rounded-xl glass text-slate-300 text-sm">انصراف</button>
               </div>
@@ -900,7 +1045,7 @@ export default function InvoicesPage() {
 
       {/* Edit Purchase Invoice Modal */}
       {editPurchaseInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.8)' }}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
               <h2 className="text-white font-bold">ویرایش فاکتور خرید {editPurchaseInvoice.invoice_number}</h2>
@@ -924,7 +1069,7 @@ export default function InvoicesPage() {
 
       {/* New Sale Invoice Modal */}
       {showNewSaleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.85)' }}>
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.85)' }}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 sticky top-0 bg-slate-900 z-10">
               <h2 className="text-white font-bold text-lg flex items-center gap-2"><ShoppingCart size={18} /> فاکتور فروش جدید</h2>
@@ -1020,7 +1165,7 @@ export default function InvoicesPage() {
 
       {/* New Purchase Invoice Modal */}
       {showNewPurchaseModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.85)' }}>
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.85)' }}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 sticky top-0 bg-slate-900 z-10">
               <h2 className="text-white font-bold text-lg flex items-center gap-2"><Package size={18} className="text-emerald-400" /> فاکتور خرید جدید</h2>
@@ -1080,7 +1225,7 @@ export default function InvoicesPage() {
 
       {/* Print modal — فروش */}
       {showPrintModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.85)' }}>
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.85)' }}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 sticky top-0 bg-slate-900/95 backdrop-blur z-10">
               <h2 className="text-white font-bold flex items-center gap-2"><Printer size={18} /> چاپ پیشرفته فاکتور فروش</h2>
@@ -1186,7 +1331,7 @@ export default function InvoicesPage() {
 
       {/* Print modal — خرید */}
       {showPurchasePrintModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.85)' }}>
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.85)' }}>
           <div className="bg-slate-900 border border-white/10 rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between px-5 py-4 border-b border-white/10 sticky top-0 bg-slate-900/95 backdrop-blur z-10">
               <h2 className="text-white font-bold flex items-center gap-2"><Printer size={18} /> چاپ پیشرفته فاکتور خرید</h2>

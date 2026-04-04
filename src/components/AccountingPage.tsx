@@ -76,7 +76,6 @@ export default function AccountingPage() {
   const [deleteType, setDeleteType] = useState<'expense' | 'cash' | 'return'>('expense');
   const [search, setSearch] = useState('');
   const [viewCurrency, setViewCurrency] = useState<'AFN' | 'USD' | 'EUR'>('AFN');
-  const [cashCalcMode, setCashCalcMode] = useState<'auto' | 'manual' | 'combined'>('auto');
   const { isListening, startListening, stopListening, supported: voiceOk } = useVoiceSearch((text) => {
     setSearch(text);
   });
@@ -95,9 +94,15 @@ export default function AccountingPage() {
   // Return form
   const [retForm, setRetForm] = useState({ invoice_number: '', customer_name: '', product_name: '', quantity: '', amount: '', reason: '', date: new Date().toISOString().split('T')[0] });
 
-  // Store Data
+  // Store Data (before memos that depend on invoices)
   const storeInvoices = useStore(s => s.invoices);
   const storeProducts = useStore(s => s.products);
+
+  const returnInvoiceMatch = useMemo(() => {
+    const n = retForm.invoice_number.trim();
+    if (!n) return null;
+    return storeInvoices.find((i) => i.invoice_number.trim() === n) ?? null;
+  }, [retForm.invoice_number, storeInvoices]);
   const shopSettings = useStore(s => s.shopSettings);
   const currentUser = useStore(s => s.currentUser);
   const addPendingApproval = useStore(s => s.addPendingApproval);
@@ -133,8 +138,9 @@ export default function AccountingPage() {
     .reduce((s, r) => s + Number(r.amount || 0), 0);
   const autoIn = autoCashInSales;
   const autoOut = autoCashOutOps + autoCashOutReturns;
-  const cashIn = cashCalcMode === 'manual' ? manualCashIn : cashCalcMode === 'combined' ? manualCashIn + autoIn : autoIn;
-  const cashOut = cashCalcMode === 'manual' ? manualCashOut : cashCalcMode === 'combined' ? manualCashOut + autoOut : autoOut;
+  /** ترکیب ثبت دستی صندوق + استناد خودکار به فاکتور نقدی و مصارف/برگشت */
+  const cashIn = manualCashIn + autoIn;
+  const cashOut = manualCashOut + autoOut;
   const cashBalance = cashIn - cashOut;
   const expenseToSalesPct = totalSales > 0 ? (totalExpenses / totalSales) * 100 : 0;
 
@@ -374,24 +380,9 @@ export default function AccountingPage() {
 
             <div className="glass rounded-2xl p-5">
               <h3 className="text-white font-semibold mb-4">صندوق نقدی</h3>
-              <div className="mb-3 flex items-center justify-center gap-1 rounded-xl border border-white/10 bg-black/20 p-1">
-                {([
-                  ['auto', 'خودکار'],
-                  ['manual', 'دستی'],
-                  ['combined', 'ترکیبی'],
-                ] as const).map(([id, label]) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setCashCalcMode(id)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                      cashCalcMode === id ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+              <p className="text-[11px] text-slate-500 mb-3 text-center leading-relaxed">
+                موجودی ترکیبی: تراکنش‌های دستی صندوق + فروش نقدی و مصارف/برگشت از سیستم.
+              </p>
               <div className="text-center">
                 <p className={`text-3xl font-bold ${cashBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatByViewCurrency(cashBalance)}</p>
                 <p className="text-slate-400 text-xs mt-1">موجودی فعلی</p>
@@ -587,26 +578,9 @@ export default function AccountingPage() {
       {/* Cash Box */}
       {tab === 'cashbox' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-end">
-            <div className="flex items-center gap-1 rounded-xl border border-white/10 bg-black/20 p-1">
-              {([
-                ['auto', 'خودکار'],
-                ['manual', 'دستی'],
-                ['combined', 'ترکیبی'],
-              ] as const).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setCashCalcMode(id)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
-                    cashCalcMode === id ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <p className="text-xs text-slate-500 text-right leading-relaxed max-w-xl mr-auto">
+            صندوق به‌صورت خودکار از فاکتورهای نقدی، مصارف و برگشت‌های تأییدشده + هر تراکنش دستی که در همین تب ثبت می‌کنید محاسبه می‌شود.
+          </p>
           <div className="grid grid-cols-3 gap-4">
             <div className="glass rounded-2xl p-4 border border-emerald-500/20">
               <p className="text-slate-400 text-xs mb-1">کل دریافتی</p>
@@ -726,7 +700,7 @@ export default function AccountingPage() {
             open={showAddReturn}
             onClose={() => setShowAddReturn(false)}
             title="ثبت واپسی"
-            size="md"
+            size="xl"
             footer={
               <div className="flex gap-3">
                 <button type="button" onClick={addReturn} className="flex flex-1 items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-medium text-white btn-primary">
@@ -739,6 +713,69 @@ export default function AccountingPage() {
             }
           >
                   <div className="space-y-3">
+                  <div>
+                    <label className="text-slate-400 text-xs block mb-1">انتخاب فاکتور فروش (برای دیدن همهٔ اقلام)</label>
+                    <select
+                      value={retForm.invoice_number}
+                      onChange={(e) => {
+                        const num = e.target.value;
+                        const inv = storeInvoices.find((i) => i.invoice_number === num);
+                        setRetForm({
+                          ...retForm,
+                          invoice_number: num,
+                          customer_name: inv?.customer_name || retForm.customer_name,
+                        });
+                      }}
+                      className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500"
+                    >
+                      <option value="">— فاکتور را انتخاب کنید یا شماره را دستی بنویسید —</option>
+                      {[...storeInvoices]
+                        .sort((a, b) => String(b.invoice_date).localeCompare(String(a.invoice_date)))
+                        .map((inv) => (
+                          <option key={inv.id} value={inv.invoice_number}>
+                            {inv.invoice_number} — {inv.customer_name} ({inv.invoice_date})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  {returnInvoiceMatch && returnInvoiceMatch.items.length > 0 && (
+                    <div className="rounded-xl border border-indigo-500/25 bg-indigo-500/5 p-3 space-y-2">
+                      <p className="text-[11px] font-bold text-indigo-200">
+                        اقلام فاکتور {returnInvoiceMatch.invoice_number} ({returnInvoiceMatch.items.length} قلم)
+                      </p>
+                      <div className="max-h-48 overflow-y-auto space-y-1.5">
+                        {returnInvoiceMatch.items.map((line, li) => (
+                          <div
+                            key={`${line.product_id}-${li}`}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-slate-900/40 px-2 py-1.5 text-[11px]"
+                          >
+                            <span className="text-slate-200 flex-1 min-w-[120px]">{line.product_name}</span>
+                            <span className="text-slate-400 font-mono" dir="ltr">
+                              {line.quantity} × {line.unit_price.toLocaleString()} = {line.total_price.toLocaleString()}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setRetForm({
+                                  ...retForm,
+                                  invoice_number: returnInvoiceMatch.invoice_number,
+                                  customer_name: returnInvoiceMatch.customer_name,
+                                  product_name: line.product_name,
+                                  quantity: String(line.quantity),
+                                  amount: String(line.total_price),
+                                })
+                              }
+                              className="shrink-0 rounded-lg bg-indigo-600/80 px-2 py-1 text-[10px] font-bold text-white hover:bg-indigo-500"
+                            >
+                              پر از این قلم
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {[
                     ['شماره فاکتور *', 'invoice_number', 'text'],
                     ['نام مشتری', 'customer_name', 'text'],
@@ -749,7 +786,7 @@ export default function AccountingPage() {
                   ].map(([label, field, type]) => (
                     <div key={field as string}>
                       <label className="text-slate-400 text-xs block mb-1">{label as string}</label>
-                      <input type={type as string} value={(retForm as any)[field as string]}
+                      <input type={type as string} value={(retForm as Record<string, string>)[field as string]}
                         onChange={e => setRetForm({ ...retForm, [field as string]: e.target.value })}
                         className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500" />
                     </div>

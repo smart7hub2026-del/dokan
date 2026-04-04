@@ -1,5 +1,6 @@
 export const PAGE_TO_PATH: Record<string, string> = {
   dashboard: '/dashboard',
+  journal: '/journal',
   tenants: '/tenants',
   billing: '/billing',
   analytics360: '/analytics360',

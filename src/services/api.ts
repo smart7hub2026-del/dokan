@@ -5,11 +5,15 @@ export interface LoginRequest {
   rolePassword: string;
   captchaToken?: string;
   deviceName?: string;
+  /** اگر ارسال شود، باید با username کاربر فعال همان نقش در فروشگاه یکی باشد */
+  loginUsername?: string;
 }
 
 export interface ShopRole {
   role: string;
   full_name: string;
+  /** نام کاربری انگلیسی ورود — از سرور check-shop */
+  username?: string;
   status?: 'active' | 'inactive' | 'pending';
 }
 
@@ -19,6 +23,8 @@ export const apiCheckShop = (shopCode: string, shopPassword: string) =>
     shopName: string;
     roles: ShopRole[];
     is_demo_shop?: boolean;
+    /** true فقط برای دکان SUPERADMIN (ابرادمین پلتفرم) */
+    is_platform_shop?: boolean;
     admin_role_name?: string;
   }>('/api/auth/check-shop', {
     method: 'POST',
@@ -118,10 +124,12 @@ export interface SupportTicket {
   created_at: string;
   reply?: string;
   updated_at?: string;
+  /** data:image/... از فرم تیکت (اختیاری) */
+  attachment_base64?: string | null;
 }
 
 export const apiPostSupportMessage = (
-  payload: { subject: string; message: string; priority?: string },
+  payload: { subject: string; message: string; priority?: string; attachment_base64?: string | null },
   token?: string
 ) =>
   request<{ ok: boolean; ticket: SupportTicket }>('/api/support/message', {
@@ -205,6 +213,8 @@ export interface DemoRegisterPayload {
   shopPassword: string;
   shopName?: string;
   adminFullName: string;
+  /** نام کاربری انگلیسی نقش مدیر — همان مقدار مرحلهٔ دوم ورود (سرورهای قدیمی: خالی؛ فرانت از روی کد دکان حدس می‌زند) */
+  adminUsername?: string;
   adminRoleTitle: string;
   adminRolePassword: string;
   trialEndsAt?: string | null;
@@ -262,9 +272,132 @@ export const apiGetPublicMeta = async (): Promise<{ trial_quick_signup_enabled: 
 };
 
 export const apiMasterPlatformBackup = (token?: string) =>
-  request<{ ok: boolean; path: string; at: string }>('/api/master/platform-backup', {
+  request<{
+    ok: boolean;
+    path: string;
+    manifestPath?: string;
+    sha256?: string;
+    byteLength?: number;
+    gzipPath?: string | null;
+    prunedOldBackups?: number;
+    at: string;
+    backend?: string;
+    hint?: string;
+  }>(
+    '/api/master/platform-backup',
+    {
+      method: 'POST',
+      token,
+    }
+  );
+
+/** دانلود مستقیم اسنپ‌شات JSON کل پلتفرم (ابرادمین) */
+/** ZIP چند فروشگاه ساخته‌شده روی سرور */
+export async function apiMasterShopsBackupArchiveBlob(shopCodes: string[], token?: string): Promise<Blob> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  let res = await fetch(`${API_BASE}/api/master/shops-backup-archive`, {
+    method: 'POST',
+    credentials: 'include',
+    headers,
+    body: JSON.stringify({ shopCodes }),
+  });
+  if (!res.ok && import.meta.env.DEV && API_BASE) {
+    res = await fetch(`${DEV_FALLBACK_BASE}/api/master/shops-backup-archive`, {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify({ shopCodes }),
+    });
+  }
+  if (!res.ok) {
+    let msg = 'خطا در بکاپ ZIP سرور';
+    try {
+      const j = (await res.json()) as { message?: string };
+      if (j?.message) msg = j.message;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg);
+  }
+  return res.blob();
+}
+
+/** سقف تقریبی دانلود اسنپ‌شات در مرورگر (هم‌خوان با سرور؛ از حافظه پر شدن تب جلوگیری می‌شود). */
+const PLATFORM_SNAPSHOT_BROWSER_MAX_BYTES = 80 * 1024 * 1024;
+const PLATFORM_SNAPSHOT_FETCH_MS = 180_000;
+
+export async function apiMasterPlatformSnapshotBlob(token?: string): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PLATFORM_SNAPSHOT_FETCH_MS);
+  const fetchOnce = (base: string) =>
+    fetch(`${base}/api/master/platform-snapshot`, {
+      credentials: 'include',
+      headers,
+      signal: ctrl.signal,
+    });
+  try {
+    let res = await fetchOnce(API_BASE);
+    if (!res.ok && import.meta.env.DEV && API_BASE) {
+      res = await fetchOnce(DEV_FALLBACK_BASE);
+    }
+    if (!res.ok) {
+      let msg = 'خطا در دانلود اسنپ‌شات';
+      try {
+        const j = (await res.json()) as { message?: string };
+        if (j?.message) msg = j.message;
+      } catch {
+        /* ignore */
+      }
+      throw new Error(msg);
+    }
+    const bytesHdr = res.headers.get('X-Backup-Bytes');
+    if (bytesHdr) {
+      const n = Number(bytesHdr);
+      if (Number.isFinite(n) && n > PLATFORM_SNAPSHOT_BROWSER_MAX_BYTES) {
+        throw new Error(
+          `حجم ${Math.round(n / 1024 / 1024)}MB از سقف امن مرورگر (~${Math.round(PLATFORM_SNAPSHOT_BROWSER_MAX_BYTES / 1024 / 1024)}MB) بیشتر است؛ از بکاپ روی دیسک سرور یا فشرده‌سازی gzip استفاده کنید.`,
+        );
+      }
+    }
+    return await res.blob();
+  } catch (e) {
+    if (e instanceof Error && e.name === 'AbortError') {
+      throw new Error('زمان دانلود اسنپ‌شات به پایان رسید؛ فایل خیلی بزرگ است یا شبکه کند است.');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export const apiMasterBackupAudit = (opts?: { q?: string; limit?: number; token?: string }) => {
+  const p = new URLSearchParams();
+  if (opts?.q) p.set('q', opts.q);
+  if (opts?.limit != null) p.set('limit', String(opts.limit));
+  const qs = p.toString();
+  return request<{ entries: Record<string, unknown>[] }>(
+    `/api/master/backup-audit${qs ? `?${qs}` : ''}`,
+    { token: opts?.token },
+  );
+};
+
+export const apiMasterPlatformRestore = (
+  payload: {
+    snapshot: Record<string, unknown>;
+    acknowledgeTotalDataLoss: boolean;
+    confirmReplaceAllTenants: boolean;
+    typedPhrase: string;
+    resetCode: string;
+  },
+  token?: string,
+) =>
+  request<{ ok: boolean; message?: string }>('/api/master/platform-restore', {
     method: 'POST',
     token,
+    body: JSON.stringify(payload),
   });
 
 /** ابرادمین: خروجی JSON پشتیبان یک فروشگاه (shopCode در query) */
@@ -352,6 +485,7 @@ const request = async <T>(
     error.status = res.status;
     const c = (json as { code?: string }).code;
     if (c) error.code = c;
+    else if (res.status === 429) error.code = 'RATE_LIMITED';
     throw error;
   }
   return json as T;
@@ -649,6 +783,46 @@ export const apiRejectRegistration = (code: string, reason?: string, token?: str
     body: JSON.stringify({ reason }),
   });
 
+export interface BranchRequestRow {
+  id: number;
+  status: string;
+  from_shop_code: string;
+  created_at: string;
+  branch_title?: string;
+  message: string;
+  contact_phone?: string;
+  proposed_credentials_note?: string;
+  image_data_url?: string;
+}
+
+export const apiPostShopBranchRequest = (
+  body: {
+    message: string;
+    branch_title?: string;
+    contact_phone?: string;
+    proposed_credentials_note?: string;
+    image_data_url?: string;
+  },
+  token?: string
+) => request<{ ok: boolean; id: number }>('/api/shop/branch-request', { method: 'POST', body: JSON.stringify(body), token });
+
+export const apiGetMasterBranchRequests = (token?: string) =>
+  request<{ requests: BranchRequestRow[] }>('/api/master/branch-requests', { token });
+
+export const apiApproveBranchRequest = (id: number, note?: string, token?: string) =>
+  request<{ ok: boolean; message?: string }>(`/api/master/branch-requests/${id}/approve`, {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ note }),
+  });
+
+export const apiRejectBranchRequest = (id: number, reason?: string, token?: string) =>
+  request<{ ok: boolean }>(`/api/master/branch-requests/${id}/reject`, {
+    method: 'POST',
+    token,
+    body: JSON.stringify({ reason }),
+  });
+
 export const apiResetAllData = (token?: string) =>
   request<{ ok: boolean; message: string }>('/api/master/reset-all-data', {
     method: 'POST',
@@ -685,3 +859,101 @@ export const apiVerifyOtp = (email: string, code: string) =>
     method: 'POST',
     body: JSON.stringify({ email, code }),
   });
+
+const crmShopQs = (shopCode?: string) => {
+  const c = String(shopCode || '').trim();
+  if (!c) return '';
+  return `?shopCode=${encodeURIComponent(c.toUpperCase())}`;
+};
+
+export interface CrmDealRow {
+  id: number;
+  shopCode: string;
+  customerId: number;
+  title: string;
+  stage: string;
+  valueAfs: number;
+  notes: string;
+  createdAt: string;
+}
+
+export interface CrmTaskRow {
+  id: number;
+  shopCode: string;
+  title: string;
+  dueAt: string | null;
+  done: boolean;
+  customerId: number | null;
+  dealId: number | null;
+  createdAt: string;
+}
+
+export interface CrmContactLogRow {
+  id: number;
+  shopCode: string;
+  channel: string;
+  customerId: number;
+  note: string;
+  at: string;
+}
+
+export interface CrmRfmRow {
+  customer_id: number;
+  orders: number;
+  monetary_afs: number;
+  last_invoice_date: string;
+  r_score: number;
+  f_score: number;
+  m_score: number;
+  rfm_label: string;
+  ltv_afs: number;
+}
+
+export const apiCrmGetDeals = (token?: string, shopCode?: string) =>
+  request<{ deals: CrmDealRow[] }>(`/api/crm/deals${crmShopQs(shopCode)}`, { token });
+
+export const apiCrmPostDeal = (
+  body: { shopCode?: string; customerId: number; title: string; stage?: string; valueAfs?: number; notes?: string },
+  token?: string,
+) =>
+  request<{ ok: boolean; deal: CrmDealRow }>('/api/crm/deals', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(body),
+  });
+
+export const apiCrmGetTasks = (token?: string, shopCode?: string) =>
+  request<{ tasks: CrmTaskRow[] }>(`/api/crm/tasks${crmShopQs(shopCode)}`, { token });
+
+export const apiCrmPostTask = (
+  body: { shopCode?: string; title: string; dueAt?: string | null; customerId?: number | null; dealId?: number | null; done?: boolean },
+  token?: string,
+) =>
+  request<{ ok: boolean; task: CrmTaskRow }>('/api/crm/tasks', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(body),
+  });
+
+export const apiCrmPatchTask = (id: number, body: { done?: boolean; title?: string; shopCode?: string }, token?: string) =>
+  request<{ ok: boolean; task: CrmTaskRow }>(`/api/crm/tasks/${id}`, {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify(body),
+  });
+
+export const apiCrmGetContacts = (token?: string, shopCode?: string) =>
+  request<{ logs: CrmContactLogRow[] }>(`/api/crm/contacts${crmShopQs(shopCode)}`, { token });
+
+export const apiCrmPostContact = (
+  body: { shopCode?: string; customerId: number; channel: string; note?: string },
+  token?: string,
+) =>
+  request<{ ok: boolean; log: CrmContactLogRow }>('/api/crm/contacts', {
+    method: 'POST',
+    token,
+    body: JSON.stringify(body),
+  });
+
+export const apiCrmGetRfm = (token?: string, shopCode?: string) =>
+  request<{ rows: CrmRfmRow[] }>(`/api/crm/rfm${crmShopQs(shopCode)}`, { token });
