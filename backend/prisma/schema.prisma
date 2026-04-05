@@ -50,12 +50,16 @@ model ShopProduct {
   stockWarehouse Int     @default(0) @map("stock_warehouse")
   minStock       Int     @default(0) @map("min_stock")
   isActive       Boolean @default(true) @map("is_active")
+  status         String  @default("active") @map("product_status")
   tenantId       Int     @default(0) @map("tenant_id")
   createdAt      String? @map("created_at")
+  updatedAt      DateTime @default(now()) @map("updated_at")
+  updatedBy      Int?    @map("updated_by")
   extra          Json?
 
   @@id([shopCode, id])
   @@index([shopCode])
+  @@unique([shopCode, sku], map: "ShopProduct_shopCode_sku_key")
 }
 
 model ShopInvoice {
