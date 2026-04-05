@@ -416,6 +416,7 @@ function initialDemoShopState(fullName, phone, businessType) {
       date_calendar: 'jalali',
       business_type: businessType,
       admin_role_name: 'admin',
+      role_login_enabled: { seller: false, stock_keeper: false, accountant: false },
     },
   };
 }
@@ -431,6 +432,7 @@ const SHOP_STATE_ARRAY_KEYS = [
   'staff',
   'expenses',
   'cashEntries',
+  'partyCashLedger',
   'productReturns',
   'reminders',
   'notifications',
@@ -2849,7 +2851,7 @@ app.put('/api/shop/users/:id', authMiddleware, async (req, res) => {
     return res.status(403).json({ message: 'فقط مدیر فروشگاه' });
   }
   const userId = Number(req.params.id);
-  const { full_name, username, status } = req.body ?? {};
+  const { full_name, username, status, email, preferred_language, preferred_currency } = req.body ?? {};
   const db = await loadDatabase();
   const shop = db.shops.find((s) => s.code === req.auth.shopCode);
   if (!shop) return res.status(404).json({ message: 'فروشگاه یافت نشد' });
@@ -2866,6 +2868,15 @@ app.put('/api/shop/users/:id', authMiddleware, async (req, res) => {
     user.username = nu;
   }
   if (full_name !== undefined) user.full_name = String(full_name).trim() || user.full_name;
+  if (email !== undefined) user.email = String(email).trim() || undefined;
+  if (preferred_language !== undefined) {
+    const pl = String(preferred_language).trim();
+    user.preferred_language = pl || undefined;
+  }
+  if (preferred_currency !== undefined) {
+    const pc = String(preferred_currency).trim();
+    user.preferred_currency = pc || undefined;
+  }
   if (status !== undefined) {
     const st = String(status);
     if (!['active', 'inactive', 'pending'].includes(st)) {
@@ -4374,10 +4385,12 @@ app.post('/api/sales/invoices', authMiddleware, async (req, res) => {
   const shopCode = req.auth.shopCode;
   const state = ensureShopState(db, shopCode);
 
-  const resolveStockLine = (productId) => {
-    const p = state.products.find((x) => x.id === productId);
+  const resolveStockLine = (rawId) => {
+    const productId = Number(rawId);
+    if (!Number.isFinite(productId)) return null;
+    const p = state.products.find((x) => Number(x.id) === productId);
     if (p) return { kind: 'product', row: p, label: p.name };
-    const b = state.books.find((x) => x.id === productId);
+    const b = state.books.find((x) => Number(x.id) === productId);
     if (b) return { kind: 'book', row: b, label: b.title };
     return null;
   };
@@ -4426,8 +4439,9 @@ app.post('/api/sales/invoices', authMiddleware, async (req, res) => {
   if (isShopAdmin) {
     const applyDeductions = (row) => {
       let next = { ...row };
+      const rid = Number(row.id);
       for (const item of invoice.items) {
-        if (item.product_id !== row.id) continue;
+        if (Number(item.product_id) !== rid) continue;
         const qty = Number(item.quantity || 0);
         if (qty <= 0) continue;
         if (item.stock_source === 'warehouse') {
