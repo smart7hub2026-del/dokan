@@ -6,7 +6,7 @@
 |--------|--------|
 | `NODE_ENV=production` | فعال‌سازی CORS محدود، کوکی امن، الزام HTTPS در صورت وجود پروکسی |
 | `JWT_SECRET` | الزامی؛ رشته طولانی تصادفی |
-| `ALLOWED_ORIGINS` | لیست مبدأهای مجاز جدا با ویرگول، مثلاً `https://app.example.com` |
+| `ALLOWED_ORIGINS` | لیست مبدأهای مجاز جدا با ویرگول؛ فرانت production فعلی: `https://dokan-iota-two.vercel.app` (بدون `/` آخر) |
 | `ALLOW_TRIAL_QUICK_SIGNUP` | پیش‌فرض در production: **خاموش**. برای فعال کردن ثبت‌نام آزمایشی سریع (موبایل+رمز) مقدار `true` بگذارید |
 | `AUTO_BACKUP_INTERVAL_HOURS` | اگر بزرگ‌تر از ۰ باشد، کپی خودکار SQLite در `server/backups` هر N ساعت |
 | `DATABASE_URL` | پیش‌فرض `file:./server/prisma/dev.db` — در production مسیر مطلق فایل دیتابیس توصیه می‌شود |

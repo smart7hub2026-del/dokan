@@ -1,14 +1,22 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
-import { Search, Eye, Printer, Trash2, Edit2, X, Check, FileText, ShoppingCart, Package, Plus, ChevronDown, ChevronUp, Download, ChevronRight, ChevronLeft, ImagePlus, Copy, Layers, Send, Users, Mic, MicOff } from 'lucide-react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { Search, Eye, Printer, Trash2, Edit2, X, Check, FileText, ShoppingCart, Package, Plus, ChevronDown, ChevronUp, Download, ChevronRight, ChevronLeft, ImagePlus, Copy, Layers, Send, Users, Mic, MicOff, ClipboardList } from 'lucide-react';
 import { Invoice, InvoiceItem } from '../data/mockData';
 import { useToast } from './Toast';
 import { ConfirmModal } from './Modal';
 import { useApp } from '../context/AppContext';
 import { PurchaseInvoice, useStore, type ShopSettings } from '../store/useStore';
 import { buildProductImagesPrintSection } from '../utils/invoicePrintProductImages';
+import {
+  buildCustomerInvoiceItemsTableHtml,
+  buildInternalInvoiceItemsTablesHtml,
+  groupInvoiceLineItemsByLocation,
+  invoicePrintAudienceForCopyIndex,
+  type InvoicePrintAudience,
+} from '../utils/invoicePrintLineItems';
 import type { Product, User } from '../data/mockData';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
 import { formatDateByCalendar, type CalendarMode } from '../utils/dateFormat';
+import { apiCreateSaleInvoice } from '../services/api';
 
 function normalizeInvoicePaperSize(s: string): InvoicePaperSize {
   return (INVOICE_PAPER_SIZES as readonly string[]).includes(s) ? (s as InvoicePaperSize) : '80mm';
@@ -40,6 +48,23 @@ const SIZE_HINTS: Record<InvoicePaperSize, string> = {
 };
 
 const ITEMS_PER_PAGE = 8;
+
+function digestInvoiceStockCells(inv: Invoice) {
+  const groups = groupInvoiceLineItemsByLocation(inv.items);
+  let shopQty = 0;
+  const whLines: { label: string; qty: number }[] = [];
+  for (const g of groups) {
+    const qty = g.items.reduce((s, i) => s + (Number(i.quantity) || 0), 0);
+    if (g.title === 'اقلام فروخته‌شده از مغازه (دکان)') shopQty += qty;
+    else {
+      const label = g.title.startsWith('اقلام فروخته‌شده از ')
+        ? g.title.slice('اقلام فروخته‌شده از '.length)
+        : g.title;
+      whLines.push({ label, qty });
+    }
+  }
+  return { shopQty, whLines };
+}
 
 function exportToCSV(data: any[], filename: string) {
   if (data.length === 0) return;
@@ -104,17 +129,23 @@ function printLayoutMaps(size: InvoicePaperSize) {
 
 function copyLabels(mode: 'single' | 'duplicate' | 'triple'): string[] {
   if (mode === 'single') return [''];
-  if (mode === 'duplicate') return ['نسخه مشتری', 'نسخه فروشگاه / بایگانی'];
-  return ['نسخه مشتری', 'نسخه فروشگاه', 'نسخه حسابداری'];
+  if (mode === 'duplicate') return ['نسخه مشتری', 'نسخه داخلی — مدیر / کارکنان (مغازه و گدام)'];
+  return ['نسخه مشتری', 'نسخه داخلی — مغازه', 'نسخه داخلی — حسابداری'];
 }
 
 function saleInvoiceSheetHtml(
   inv: Invoice,
   shop: InvoicePrintShop,
-  _size: InvoicePaperSize,
+  size: InvoicePaperSize,
   copyLabel: string,
-  photosAppend: string
+  photosAppend: string,
+  audience: InvoicePrintAudience
 ) {
+  const { isThermal } = printLayoutMaps(size);
+  const itemsBlock =
+    audience === 'customer'
+      ? buildCustomerInvoiceItemsTableHtml(inv.items, isThermal, escapeHtml)
+      : buildInternalInvoiceItemsTablesHtml(inv.items, isThermal, escapeHtml);
   const logo = shop.logo ? `<img src="${safeAttr(shop.logo)}" class="logo" alt="">` : '';
   const shopTitle = shop.showShopName && shop.name ? `<div class="sn">${escapeHtml(shop.name)}</div>` : '';
   const addr = shop.showAddress && shop.address ? `<div class="ss">${escapeHtml(shop.address)}</div>` : '';
@@ -151,15 +182,7 @@ ${ribbon}
   ${inv.due_date ? `<div><span class="il">سررسید: </span><span class="iv">${escapeHtml(inv.due_date)}</span></div>` : ''}
 </div>
 <hr>
-<table>
-  <thead><tr><th>محصول</th><th>تعداد</th><th>قیمت</th><th>جمع</th></tr></thead>
-  <tbody>${inv.items.map(i => `<tr>
-    <td>${escapeHtml(i.product_name)}</td>
-    <td style="text-align:center">${i.quantity}</td>
-    <td style="text-align:left">${i.unit_price.toLocaleString()} ؋</td>
-    <td style="text-align:left">${i.total_price.toLocaleString()} ؋</td>
-  </tr>`).join('')}</tbody>
-</table>
+${itemsBlock}
 <hr>
 <div class="tr"><span>جمع:</span><span>${inv.subtotal.toLocaleString()} ؋</span></div>
 ${inv.discount > 0 ? `<div class="tr" style="color:red"><span>تخفیف:</span><span>-${inv.discount.toLocaleString()} ؋</span></div>` : ''}
@@ -188,7 +211,9 @@ function printSaleInvoice(
       ? buildProductImagesPrintSection(inv, options.products, photoTitle)
       : '';
   const sheets = labels
-    .map((lb) => saleInvoiceSheetHtml(inv, shop, size, lb, photosAppend))
+    .map((lb, idx) =>
+      saleInvoiceSheetHtml(inv, shop, size, lb, photosAppend, invoicePrintAudienceForCopyIndex(copyMode, idx))
+    )
     .join('<div class="page-break"></div>');
 
   const html = `<!DOCTYPE html>
@@ -303,7 +328,9 @@ export default function InvoicesPage() {
   const { formatPrice, t } = useApp();
   const { success, error } = useToast();
 
-  const [tab, setTab] = useState<'sales' | 'purchase'>('sales');
+  const [tab, setTab] = useState<'sales' | 'purchase' | 'internal'>('sales');
+  const tabBootRef = useRef(false);
+  const preferInternalPrintRef = useRef(false);
   const [currentPage, setCurrentPage] = useState(1);
 
   // Sales invoices from Zustand store (persistent)
@@ -319,7 +346,11 @@ export default function InvoicesPage() {
   const storeProducts = useStore(s => s.products);
   const storeSuppliers = useStore(s => s.suppliers);
   const storeCurrentUser = useStore(s => s.currentUser);
+  const authToken = useStore((s) => s.authToken);
+  const hydrateFromServer = useStore((s) => s.hydrateFromServer);
   const storeUsers = useStore(s => s.users);
+  const addPendingApproval = useStore(s => s.addPendingApproval);
+  const reportStaffActivityToAdmins = useStore(s => s.reportStaffActivityToAdmins);
   const addPurchaseListShare = useStore(s => s.addPurchaseListShare);
   const storeSettings = useStore(s => s.shopSettings);
   const calendarMode = (storeSettings.date_calendar || 'jalali') as CalendarMode;
@@ -345,7 +376,9 @@ export default function InvoicesPage() {
     customer_id: 0, customerSearch: '', discount: 0, payment_method: 'cash' as 'cash' | 'credit',
     paid_amount: 0, due_date: '', notes: '',
   });
-  const [saleCart, setSaleCart] = useState<{ product_id: number; name: string; qty: number; price: number }[]>([]);
+  const [saleCart, setSaleCart] = useState<
+    { product_id: number; name: string; qty: number; price: number; stock_source: 'shop' | 'warehouse' }[]
+  >([]);
   const [saleProductSearch, setSaleProductSearch] = useState('');
 
   const { isListening: voiceListListening, startListening: startVoiceList, stopListening: stopVoiceList, supported: voiceListOk } = useVoiceSearch((text) => {
@@ -377,9 +410,24 @@ export default function InvoicesPage() {
   const today = new Date().toISOString().split('T')[0];
 
   useEffect(() => {
+    if (tabBootRef.current || !storeCurrentUser) return;
+    tabBootRef.current = true;
+    if (storeCurrentUser.role === 'stock_keeper') setTab('purchase');
+  }, [storeCurrentUser]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [tab]);
+
+  useEffect(() => {
     if (!showPrintModal) return;
     setPrintSize(normalizeInvoicePaperSize(storeSettings.paper_size));
-    setPrintCopyMode(storeSettings.invoice_copy_mode ?? 'single');
+    if (preferInternalPrintRef.current) {
+      setPrintCopyMode('duplicate');
+      preferInternalPrintRef.current = false;
+    } else {
+      setPrintCopyMode(storeSettings.invoice_copy_mode ?? 'single');
+    }
     setPrintLogoOverride(null);
     setSaveSalePrintDefaults(false);
     setPrintIncludeProductImages(Boolean(storeSettings.print_invoice_with_product_images));
@@ -432,13 +480,14 @@ export default function InvoicesPage() {
     setViewInvoice(inv);
   }, []);
 
-  const openPrintSale = useCallback((inv: Invoice) => {
+  const openPrintSale = useCallback((inv: Invoice, opts?: { defaultInternalStaffCopy?: boolean }) => {
     setShowNewSaleModal(false);
     setShowNewPurchaseModal(false);
     setShowPurchasePrintModal(null);
     setViewInvoice(null);
     setEditInvoice(null);
     setEditPurchaseInvoice(null);
+    if (opts?.defaultInternalStaffCopy) preferInternalPrintRef.current = true;
     setShowPrintModal(inv);
   }, []);
 
@@ -533,13 +582,14 @@ export default function InvoicesPage() {
     return matchSearch && matchDate;
   }), [purchaseInvoices, search, dateFilter]);
 
-  const totalPages = Math.ceil((tab === 'sales' ? filteredSales.length : filteredPurchase.length) / ITEMS_PER_PAGE);
+  const salesTabListLength = tab === 'purchase' ? filteredPurchase.length : filteredSales.length;
+  const totalPages = Math.ceil(salesTabListLength / ITEMS_PER_PAGE);
   const paginatedSales = filteredSales.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
   const paginatedPurchase = filteredPurchase.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   const handleExport = () => {
-    const data = tab === 'sales' ? filteredSales : filteredPurchase;
-    const filename = tab === 'sales' ? 'sales_invoices' : 'purchase_invoices';
+    const data = tab === 'purchase' ? filteredPurchase : filteredSales;
+    const filename = tab === 'purchase' ? 'purchase_invoices' : 'sales_invoices';
     
     // Flatten data for export
     const exportData = data.map(inv => ({
@@ -602,14 +652,19 @@ export default function InvoicesPage() {
     setDeletePurchaseId(null);
   };
 
-  // New Sale Invoice submit
-  const handleNewSaleSubmit = () => {
-    if (saleCart.length === 0) { alert('هیچ کالایی اضافه نشده'); return; }
-    const customer = storeCustomers.find((c: { id: number }) => c.id === saleForm.customer_id) as { name: string; phone: string; id: number } | undefined;
+  // New Sale Invoice submit — با توکن مثل صفحه فروش از API ثبت می‌شود تا روی سرور و لیست فاکتورها یکپارچه باشد
+  const handleNewSaleSubmit = async () => {
+    if (saleCart.length === 0) {
+      alert('هیچ کالایی اضافه نشده');
+      return;
+    }
+    const customer = storeCustomers.find((c: { id: number }) => c.id === saleForm.customer_id) as
+      | { name: string; phone: string; id: number }
+      | undefined;
     const subtotal = saleCart.reduce((s, i) => s + i.qty * i.price, 0);
     const total = Math.max(0, subtotal - saleForm.discount);
     const due = saleForm.payment_method === 'credit' ? total : Math.max(0, total - saleForm.paid_amount);
-    const newInv = storeAddInvoice({
+    const draft: Omit<Invoice, 'id' | 'invoice_number'> = {
       customer_id: saleForm.customer_id,
       customer_name: customer?.name || 'مشتری نقدی',
       customer_phone: customer?.phone || '',
@@ -624,16 +679,50 @@ export default function InvoicesPage() {
       status: 'pending',
       approval_status: 'pending',
       invoice_date: today,
-      due_date: saleForm.due_date || (saleForm.payment_method === 'credit' ? new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0] : ''),
+      due_date:
+        saleForm.due_date ||
+        (saleForm.payment_method === 'credit'
+          ? new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0]
+          : ''),
       notes: saleForm.notes,
-      items: saleCart.map((c, i) => ({ id: i + 1, product_id: c.product_id, product_name: c.name, quantity: c.qty, unit_price: c.price, total_price: c.qty * c.price })),
+      items: saleCart.map((c, i) => ({
+        id: i + 1,
+        product_id: c.product_id,
+        product_name: c.name,
+        quantity: c.qty,
+        unit_price: c.price,
+        total_price: c.qty * c.price,
+        stock_source: c.stock_source,
+      })),
       tenant_id: storeCurrentUser?.tenant_id ?? 1,
       currency: 'AFN',
-    });
-    success(`فاکتور ${newInv.invoice_number} ثبت شد`);
+    };
+
+    if (authToken) {
+      try {
+        const res = await apiCreateSaleInvoice(authToken, draft as unknown as Record<string, unknown>);
+        if (res.state) hydrateFromServer(res.state as Record<string, unknown>);
+        const num = (res.invoice as Invoice | undefined)?.invoice_number || 'جدید';
+        success(`فاکتور ${num} ثبت شد`);
+      } catch (e) {
+        error('ثبت فروش', e instanceof Error ? e.message : 'ناموفق');
+        return;
+      }
+    } else {
+      const newInv = storeAddInvoice(draft);
+      success(`فاکتور ${newInv.invoice_number} ثبت شد`);
+    }
     setShowNewSaleModal(false);
     setSaleCart([]);
-    setSaleForm({ customer_id: 0, customerSearch: '', discount: 0, payment_method: 'cash', paid_amount: 0, due_date: '', notes: '' });
+    setSaleForm({
+      customer_id: 0,
+      customerSearch: '',
+      discount: 0,
+      payment_method: 'cash',
+      paid_amount: 0,
+      due_date: '',
+      notes: '',
+    });
   };
 
   // New Purchase Invoice submit
@@ -644,7 +733,7 @@ export default function InvoicesPage() {
     const subtotal = validItems.reduce((s, i) => s + i.qty * i.price, 0);
     const total = Math.max(0, subtotal - purchaseForm.discount);
     const paid = purchaseForm.payment_method === 'cash' ? purchaseForm.paid : 0;
-    const newP = storeAddPurchaseInvoice({
+    const purchasePayload = {
       supplier_id: purchaseForm.supplier_id,
       supplier_name: supplier?.company_name || 'تامین‌کننده',
       invoice_date: purchaseForm.date,
@@ -654,9 +743,28 @@ export default function InvoicesPage() {
       payment_method: purchaseForm.payment_method,
       due_date: purchaseForm.payment_method === 'credit' ? new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0] : undefined,
       notes: purchaseForm.notes,
-      status: paid >= total ? 'completed' : 'pending',
-    });
-    success(`فاکتور خرید ${newP.invoice_number} ثبت شد`);
+      status: (paid >= total ? 'completed' : 'pending') as 'pending' | 'completed',
+    };
+    if (!isShopAdmin) {
+      addPendingApproval({
+        type: 'purchase',
+        title: `فاکتور خرید: ${purchasePayload.supplier_name}`,
+        description: `${total.toLocaleString()} ؋ — ${validItems.length} قلم`,
+        data: { ...purchasePayload } as unknown as Record<string, unknown>,
+        submitted_by: storeCurrentUser?.full_name || 'کاربر',
+        submitted_by_role: storeCurrentUser?.role || '',
+      });
+      reportStaffActivityToAdmins(
+        'درخواست فاکتور خرید',
+        `${storeCurrentUser?.full_name}: ${purchasePayload.supplier_name} — ${total.toLocaleString()} ؋`,
+        storeCurrentUser?.id ?? 0,
+        storeCurrentUser?.full_name || 'کاربر'
+      );
+      success('ارسال شد', 'پس از تأیید مدیر، فاکتور خرید ثبت و موجودی به‌روز می‌شود.');
+    } else {
+      const newP = storeAddPurchaseInvoice(purchasePayload);
+      success(`فاکتور خرید ${newP.invoice_number} ثبت شد`);
+    }
     setShowNewPurchaseModal(false);
     setPurchaseItems([{ name: '', qty: 1, price: 0 }]);
     setPurchaseForm({ supplier_id: 1, date: today, payment_method: 'cash', paid: 0, discount: 0, notes: '' });
@@ -681,7 +789,11 @@ export default function InvoicesPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">{t('invoices')}</h1>
-          <p className="text-slate-400 text-sm mt-1">مدیریت فاکتورهای فروش و خرید</p>
+          <p className="text-slate-400 text-sm mt-1">
+            {tab === 'internal'
+              ? 'فاکتور داخلی — محل برداشت جنس (دکان / گدام) برای انباردار و کارکنان'
+              : 'مدیریت فاکتورهای فروش و خرید'}
+          </p>
         </div>
         <div className="flex gap-2 items-center">
           <button onClick={handleExport}
@@ -700,11 +812,14 @@ export default function InvoicesPage() {
               <Plus size={16} /> فاکتور خرید جدید
             </button>
           )}
-          <div className="flex gap-1 glass rounded-xl p-1">
-            <button onClick={() => setTab('sales')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'sales' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+          <div className="flex gap-1 glass rounded-xl p-1 flex-wrap">
+            <button onClick={() => setTab('sales')} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'sales' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'}`}>
               <ShoppingCart size={15} /> فروش
             </button>
-            <button onClick={() => setTab('purchase')} className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'purchase' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+            <button onClick={() => setTab('internal')} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'internal' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+              <ClipboardList size={15} /> داخلی
+            </button>
+            <button onClick={() => setTab('purchase')} className={`flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all ${tab === 'purchase' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>
               <Package size={15} /> خرید
             </button>
           </div>
@@ -738,8 +853,15 @@ export default function InvoicesPage() {
         </div>
       </div>
 
+      {tab === 'internal' && (
+        <div className="glass rounded-xl border border-sky-500/25 bg-sky-500/5 px-4 py-3 text-sm text-sky-100">
+          <span className="font-bold text-sky-300">فاکتور داخلی:</span>{' '}
+          همان فاکتورهای فروش با ستون‌های دکان و گدام؛ دکمهٔ چاپ با پیش‌فرض «دو نسخه» باز می‌شود تا نسخهٔ داخلی با جداول جداگانهٔ مغازه و انبار چاپ شود.
+        </div>
+      )}
+
       {/* Stats */}
-      {tab === 'sales' && (
+      {(tab === 'sales' || tab === 'internal') && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
             { label: 'کل فاکتورها', value: filteredSales.length, color: 'text-white' },
@@ -771,52 +893,86 @@ export default function InvoicesPage() {
         </div>
       )}
 
-      {/* Sales Invoices Table */}
-      {tab === 'sales' && (
-        <div className="glass rounded-2xl overflow-hidden">
+      {/* Sales Invoices Table (فروش + داخلی) */}
+      {(tab === 'sales' || tab === 'internal') && (
+        <div className="glass rounded-2xl overflow-hidden border border-white/5 shadow-xl shadow-black/20">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[980px]">
               <thead>
-                <tr className="bg-slate-800/50 border-b border-white/10">
-                  {['شماره', 'مشتری', 'مبلغ کل', 'پرداخت', 'مانده', 'تاریخ', 'وضعیت', 'عملیات'].map(h => (
-                    <th key={h} className="text-right text-slate-400 font-medium py-3 px-4 whitespace-nowrap text-xs">{h}</th>
+                <tr className="bg-gradient-to-l from-slate-800/90 to-slate-800/50 border-b border-white/10">
+                  {['شماره', 'تاریخ', 'مشتری', 'فروشنده', 'دکان', 'گدام', 'مبلغ کل', 'پرداخت', 'مانده', 'وضعیت', 'عملیات'].map(h => (
+                    <th key={h} className="text-right text-slate-400 font-semibold py-3.5 px-3 whitespace-nowrap text-[11px] tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/5">
-                {paginatedSales.map(inv => (
-                  <tr key={inv.id} className="table-row-hover">
-                    <td className="py-3 px-4 text-indigo-400 font-mono text-xs font-bold">{inv.invoice_number}</td>
-                    <td className="py-3 px-4">
-                      <p className="text-white text-xs font-medium">{inv.customer_name}</p>
-                      <p className="text-slate-500 text-xs">{inv.customer_phone}</p>
+              <tbody className="divide-y divide-white/[0.06]">
+                {paginatedSales.map(inv => {
+                  const { shopQty, whLines } = digestInvoiceStockCells(inv);
+                  return (
+                  <tr key={inv.id} className="table-row-hover hover:bg-indigo-500/[0.04] transition-colors">
+                    <td className="py-3.5 px-3 text-indigo-400 font-mono text-xs font-bold align-top">{inv.invoice_number}</td>
+                    <td className="py-3.5 px-3 text-slate-300 text-xs font-medium align-top whitespace-nowrap">{formatDateByCalendar(inv.invoice_date, calendarMode)}</td>
+                    <td className="py-3.5 px-3 align-top min-w-[120px]">
+                      <p className="text-white text-xs font-semibold leading-snug">{inv.customer_name}</p>
+                      <p className="text-slate-500 text-[11px] font-mono mt-0.5">{inv.customer_phone || '—'}</p>
                     </td>
-                    <td className="py-3 px-4 text-emerald-400 font-bold text-xs">{inv.total.toLocaleString()} ؋</td>
-                    <td className="py-3 px-4">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${inv.payment_method === 'cash' ? 'badge-green' : 'badge-yellow'}`}>
+                    <td className="py-3.5 px-3 text-slate-200 text-xs align-top max-w-[100px]">
+                      <span className="line-clamp-2">{inv.seller_name || '—'}</span>
+                    </td>
+                    <td className="py-3.5 px-3 align-top">
+                      <span className="inline-flex items-center justify-center min-w-[2rem] rounded-lg bg-emerald-500/15 text-emerald-300 text-xs font-bold px-2 py-1 tabular-nums">
+                        {shopQty > 0 ? shopQty : '—'}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-3 align-top max-w-[200px]">
+                      {whLines.length === 0 ? (
+                        <span className="text-slate-600 text-xs">—</span>
+                      ) : (
+                        <div className="flex flex-col gap-1">
+                          {whLines.map((w) => (
+                            <span
+                              key={w.label}
+                              className="inline-flex flex-wrap items-center gap-1 text-[10px] font-semibold rounded-md bg-sky-500/12 text-sky-200 border border-sky-500/20 px-2 py-0.5"
+                            >
+                              <span className="truncate max-w-[120px]">{w.label}</span>
+                              <span className="tabular-nums text-sky-100">×{w.qty}</span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-3 text-emerald-400 font-bold text-xs align-top tabular-nums">{inv.total.toLocaleString()} ؋</td>
+                    <td className="py-3.5 px-3 align-top">
+                      <span className={`text-[10px] px-2 py-1 rounded-full font-bold ${inv.payment_method === 'cash' ? 'badge-green' : 'badge-yellow'}`}>
                         {inv.payment_method === 'cash' ? 'نقدی' : 'نسیه'}
                       </span>
                     </td>
-                    <td className="py-3 px-4">
+                    <td className="py-3.5 px-3 align-top">
                       {inv.due_amount > 0
-                        ? <span className="text-rose-400 text-xs font-bold">{inv.due_amount.toLocaleString()} ؋</span>
-                        : <span className="text-emerald-400 text-xs">تسویه ✓</span>
+                        ? <span className="text-rose-400 text-xs font-bold tabular-nums">{inv.due_amount.toLocaleString()} ؋</span>
+                        : <span className="text-emerald-400 text-[11px] font-semibold">تسویه</span>
                       }
                     </td>
-                    <td className="py-3 px-4 text-slate-400 text-xs">{formatDateByCalendar(inv.invoice_date, calendarMode)}</td>
-                    <td className="py-3 px-4">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${statusColors[inv.status]}`}>{statusLabels[inv.status]}</span>
+                    <td className="py-3.5 px-3 align-top">
+                      <span className={`text-[10px] px-2 py-1 rounded-full font-bold ${statusColors[inv.status]}`}>{statusLabels[inv.status]}</span>
                     </td>
-                    <td className="py-3 px-4">
-                      <div className="flex gap-1">
+                    <td className="py-3.5 px-3 align-top">
+                      <div className="flex gap-0.5 flex-wrap">
                         <button onClick={() => openViewSale(inv)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-blue-400 transition-colors" title="مشاهده"><Eye size={13} /></button>
                         <button onClick={() => openEditSale({ ...inv })} className="p-1.5 rounded-lg glass text-slate-400 hover:text-amber-400 transition-colors" title="ویرایش"><Edit2 size={13} /></button>
-                        <button onClick={() => openPrintSale(inv)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-emerald-400 transition-colors" title="چاپ"><Printer size={13} /></button>
+                        <button
+                          onClick={() => openPrintSale(inv, tab === 'internal' ? { defaultInternalStaffCopy: true } : undefined)}
+                          className="p-1.5 rounded-lg glass text-slate-400 hover:text-emerald-400 transition-colors"
+                          title={tab === 'internal' ? 'چاپ — پیش‌فرض نسخه داخلی' : 'چاپ'}
+                        >
+                          <Printer size={13} />
+                        </button>
                         <button onClick={() => setDeleteId(inv.id)} className="p-1.5 rounded-lg glass text-slate-400 hover:text-rose-400 transition-colors" title="حذف"><Trash2 size={13} /></button>
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
             {filteredSales.length === 0 && (
@@ -944,20 +1100,31 @@ export default function InvoicesPage() {
                   <div key={k}><p className="text-slate-400 text-xs">{k}</p><p className="text-white text-sm font-medium">{v}</p></div>
                 ))}
               </div>
-              <div className="glass rounded-xl overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead><tr className="bg-slate-800/50">{['محصول', 'تعداد', 'قیمت', 'جمع'].map(h => <th key={h} className="text-right text-slate-400 text-xs py-2.5 px-4">{h}</th>)}</tr></thead>
-                  <tbody className="divide-y divide-white/5">
-                    {viewInvoice.items.map(item => (
-                      <tr key={item.id}>
-                        <td className="py-2.5 px-4 text-white text-xs">{item.product_name}</td>
-                        <td className="py-2.5 px-4 text-slate-300 text-xs text-center">{item.quantity}</td>
-                        <td className="py-2.5 px-4 text-slate-300 text-xs">{item.unit_price.toLocaleString()} ؋</td>
-                        <td className="py-2.5 px-4 text-emerald-400 font-bold text-xs">{item.total_price.toLocaleString()} ؋</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-3">
+                {groupInvoiceLineItemsByLocation(viewInvoice.items).map((block) => (
+                  <div key={block.title} className="glass rounded-xl overflow-hidden border border-white/10">
+                    <p className="text-[11px] font-bold text-slate-300 bg-slate-800/70 px-4 py-2 border-b border-white/10">{block.title}</p>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-800/40">
+                          {['محصول', 'تعداد', 'قیمت', 'جمع'].map(h => (
+                            <th key={h} className="text-right text-slate-400 text-xs py-2 px-4">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {block.items.map((item) => (
+                          <tr key={item.id}>
+                            <td className="py-2 px-4 text-white text-xs">{item.product_name}</td>
+                            <td className="py-2 px-4 text-slate-300 text-xs text-center tabular-nums">{item.quantity}</td>
+                            <td className="py-2 px-4 text-slate-300 text-xs tabular-nums">{item.unit_price.toLocaleString()} ؋</td>
+                            <td className="py-2 px-4 text-emerald-400 font-bold text-xs tabular-nums">{item.total_price.toLocaleString()} ؋</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))}
               </div>
               <div className="bg-slate-800/50 rounded-xl p-4 space-y-2">
                 <div className="flex justify-between text-slate-400 text-sm"><span>جمع فرعی</span><span>{viewInvoice.subtotal.toLocaleString()} ؋</span></div>
@@ -1105,9 +1272,9 @@ export default function InvoicesPage() {
                   <div className="mt-1 bg-slate-800 border border-white/10 rounded-xl max-h-40 overflow-y-auto">
                     {storeProducts.filter(p => p.is_active && (p.name.includes(saleProductSearch) || p.barcode.includes(saleProductSearch))).map(p => (
                       <button key={p.id} onClick={() => {
-                        const existing = saleCart.find(i => i.product_id === p.id);
-                        if (existing) setSaleCart(saleCart.map(i => i.product_id === p.id ? { ...i, qty: i.qty + 1 } : i));
-                        else setSaleCart([...saleCart, { product_id: p.id, name: p.name, qty: 1, price: p.sale_price }]);
+                        const existing = saleCart.find(i => i.product_id === p.id && i.stock_source === 'shop');
+                        if (existing) setSaleCart(saleCart.map(i => (i.product_id === p.id && i.stock_source === 'shop') ? { ...i, qty: i.qty + 1 } : i));
+                        else setSaleCart([...saleCart, { product_id: p.id, name: p.name, qty: 1, price: p.sale_price, stock_source: 'shop' }]);
                         setSaleProductSearch('');
                       }} className="w-full text-right px-3 py-2 hover:bg-indigo-500/20 text-sm flex justify-between items-center">
                         <span className="text-white">{p.name}</span>
@@ -1121,8 +1288,24 @@ export default function InvoicesPage() {
               {saleCart.length > 0 && (
                 <div className="space-y-2 max-h-48 overflow-y-auto">
                   {saleCart.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-2 bg-slate-800/40 rounded-xl p-2">
-                      <span className="text-white text-xs flex-1">{item.name}</span>
+                    <div key={`${item.product_id}-${item.stock_source}-${idx}`} className="flex flex-wrap items-center gap-2 bg-slate-800/40 rounded-xl p-2">
+                      <span className="text-white text-xs flex-1 min-w-[100px]">{item.name}</span>
+                      <div className="flex rounded-lg border border-white/10 overflow-hidden text-[10px] font-bold shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setSaleCart(saleCart.map((i, ii) => (ii === idx ? { ...i, stock_source: 'shop' } : i)))}
+                          className={`px-2 py-1 ${item.stock_source === 'shop' ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                        >
+                          دکان
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSaleCart(saleCart.map((i, ii) => (ii === idx ? { ...i, stock_source: 'warehouse' } : i)))}
+                          className={`px-2 py-1 ${item.stock_source === 'warehouse' ? 'bg-sky-600 text-white' : 'bg-slate-800 text-slate-400'}`}
+                        >
+                          گدام
+                        </button>
+                      </div>
                       <div className="flex items-center gap-1">
                         <button onClick={() => setSaleCart(saleCart.map((i, ii) => ii === idx ? { ...i, qty: Math.max(1, i.qty - 1) } : i))} className="w-6 h-6 rounded bg-slate-700 text-white flex items-center justify-center"><ChevronDown size={11} /></button>
                         <span className="text-white text-xs w-8 text-center font-bold">{item.qty}</span>
@@ -1261,7 +1444,7 @@ export default function InvoicesPage() {
                   ))}
                 </div>
                 <p className="text-slate-500 text-[10px] mt-2 leading-relaxed">
-                  دو نسخه: مشتری + فروشگاه. سه نسخه: مشتری + فروشگاه + حسابداری — هر نسخه در صفحه جدا با برچسب مشخص چاپ می‌شود.
+                  یک نسخه: فقط نسخهٔ مشتری (جدول + ستون محل فروش). دو یا سه نسخه: صفحهٔ اول مشتری؛ صفحه‌های بعد نسخهٔ داخلی با جداول جدا برای «مغازه (دکان)» و «گدام» و جمع هر بخش.
                 </p>
               </div>
 

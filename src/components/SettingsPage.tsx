@@ -12,13 +12,7 @@ import {
   MessageSquare,
   UserCog,
   Smartphone,
-  Shield,
-  KeyRound,
-  ScrollText,
-  Webhook,
-  Percent,
-  Clock,
-  ChevronRight,
+  Trash2,
 } from 'lucide-react';
 import SecurityPage from './SecurityPage';
 import BackupPage from './BackupPage';
@@ -29,6 +23,7 @@ import PrintSettingsPage from './PrintSettingsPage';
 import OfflinePage from './OfflinePage';
 import SupportPage from './SupportPage';
 import ActiveSessionsPage from './ActiveSessionsPage';
+import TrashPage from './TrashPage';
 import { useStore } from '../store/useStore';
 import creatorConfig from '../config/creator.json';
 
@@ -41,7 +36,8 @@ type SettingsTab =
   | 'users'
   | 'print'
   | 'offline'
-  | 'support';
+  | 'support'
+  | 'trash';
 
 export default function SettingsPage({
   currentUser,
@@ -72,7 +68,7 @@ export default function SettingsPage({
     const ids: SettingsTab[] = [
       'general',
       'profile',
-      ...(currentUser.role === 'admin' ? (['users'] as const) : []),
+      ...(currentUser.role === 'admin' ? (['users', 'trash'] as const) : []),
       ...(shopSettingsTabs ? (['print', 'offline', 'support'] as const) : (['support'] as const)),
       'security',
       'sessions',
@@ -119,7 +115,12 @@ export default function SettingsPage({
   const tabs: { id: SettingsTab; label: string; icon?: ReactNode }[] = [
     { id: 'general', label: t('tab_general') },
     { id: 'profile', label: t('profile_tab') },
-    ...(currentUser.role === 'admin' ? [{ id: 'users' as const, label: t('shop_users'), icon: <UserCog size={14} /> }] : []),
+    ...(currentUser.role === 'admin'
+      ? ([
+          { id: 'users' as const, label: t('shop_users'), icon: <UserCog size={14} /> },
+          { id: 'trash' as const, label: 'سطل زباله', icon: <Trash2 size={14} /> },
+        ] as const)
+      : []),
     ...(shopSettingsTabs
       ? [
           { id: 'print' as const, label: t('print_settings'), icon: <Printer size={14} /> },
@@ -221,176 +222,6 @@ export default function SettingsPage({
             )}
 
             {currentUser.role === 'admin' && !isSuper && <WarehouseBinsSettingsPanel />}
-
-            {!isSuper && (
-              <div
-                className={`rounded-2xl p-6 space-y-5 border ${
-                  isDark
-                    ? 'bg-slate-800/40 border-indigo-500/25'
-                    : 'bg-gradient-to-br from-slate-50 to-indigo-50/40 border-indigo-200/80 shadow-sm'
-                }`}
-              >
-                <div>
-                  <h2 className={`font-bold text-base ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                    آمادگی سطح Enterprise
-                  </h2>
-                  <p className={`text-xs mt-1 leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                    ماژول‌های زیر برای سازمان‌های بزرگ‌تر طراحی شده‌اند؛ بخشی در همین برنامه در دسترس است و بقیه در نقشهٔ توسعه فعال می‌شوند.
-                  </p>
-                </div>
-                <div className="grid gap-3 sm:gap-4">
-                  {(
-                    [
-                      {
-                        icon: Shield,
-                        title: 'RBAC پیشرفته',
-                        body: 'نقش‌های از پیش تعریف‌شده (مدیر، فروشنده، انباردار، حسابدار) فعال است. کنترل ریز per-page و per-action برای نسخهٔ سازمانی در حال تکمیل است.',
-                        action: { label: 'کاربران و نقش‌ها', tab: 'users' as const },
-                        tone: 'violet',
-                        badge: 'partial' as const,
-                      },
-                      {
-                        icon: KeyRound,
-                        title: 'سیاست رمز و نشست',
-                        body: 'اعتبارسنجی رمز قوی، احراز دو مرحله‌ای و مدیریت نشست در تب امنیت و نشست‌های فعال در دسترس است؛ انقضای اجباری نشست و قفل پس از تلاش ناموفق روی سرور قابل سخت‌گیری بیشتر است.',
-                        action: { label: 'امنیت', tab: 'security' as const },
-                        tone: 'emerald',
-                        badge: 'partial' as const,
-                      },
-                      {
-                        icon: ScrollText,
-                        title: 'Audit و ردپای تنظیمات',
-                        body: 'لاگ اقدامات حساس تنظیمات و بکاپ در سرور ثبت می‌شود؛ گزارش جستجوپذیر سراسری برای همهٔ دکان‌ها در پنل ابرادمین توسعه می‌یابد.',
-                        action: { label: 'پشتیبان‌گیری', tab: 'backup' as const },
-                        tone: 'amber',
-                        badge: 'partial' as const,
-                      },
-                      {
-                        icon: Webhook,
-                        title: 'وب‌هوک و API',
-                        body: 'یکپارچگی پرداخت (مثلاً HesabPay) و مسیرهای REST برای فروشگاه فعال است؛ صدور API Key اختصاصی فروشگاه و وب‌هوک رویدادها برای نسخهٔ تجاری برنامه‌ریزی شده است.',
-                        action: { label: 'پشتیبانی', tab: 'support' as const },
-                        tone: 'sky',
-                        badge: 'partial' as const,
-                      },
-                      {
-                        icon: Percent,
-                        title: 'مالیات و چند ارز',
-                        body: 'چند ارز و نرخ تبدیل در «زبان و ارز» مدیریت می‌شود؛ قوانین مالیاتی پیچیده و چند نرخ همزمان روی فاکتور در نقشهٔ محصول است.',
-                        action: { label: 'زبان و ارز از منو', tab: null },
-                        tone: 'rose',
-                        badge: 'partial' as const,
-                      },
-                      {
-                        icon: Clock,
-                        title: 'بکاپ زمان‌بندی‌شده',
-                        body: 'بکاپ دستی و خروجی JSON/پایگاه از تب پشتیبان در دسترس است؛ زمان‌بندی خودکار، نگهداری چند نسخه و اعلان خطا به مدیر در نسخهٔ میزبان اختصاصی اضافه می‌شود.',
-                        action: { label: 'پشتیبان‌گیری', tab: 'backup' as const },
-                        tone: 'cyan',
-                        badge: 'planned' as const,
-                      },
-                    ] as const
-                  ).map((row) => {
-                    const Icon = row.icon;
-                    const ring =
-                      row.tone === 'violet'
-                        ? isDark
-                          ? 'border-violet-500/25 bg-violet-500/[0.07]'
-                          : 'border-violet-200 bg-white'
-                        : row.tone === 'emerald'
-                          ? isDark
-                            ? 'border-emerald-500/25 bg-emerald-500/[0.06]'
-                            : 'border-emerald-200 bg-white'
-                          : row.tone === 'amber'
-                            ? isDark
-                              ? 'border-amber-500/25 bg-amber-500/[0.06]'
-                              : 'border-amber-200 bg-white'
-                            : row.tone === 'sky'
-                              ? isDark
-                                ? 'border-sky-500/25 bg-sky-500/[0.06]'
-                                : 'border-sky-200 bg-white'
-                              : row.tone === 'rose'
-                                ? isDark
-                                  ? 'border-rose-500/25 bg-rose-500/[0.06]'
-                                  : 'border-rose-200 bg-white'
-                                : isDark
-                                  ? 'border-cyan-500/25 bg-cyan-500/[0.06]'
-                                  : 'border-cyan-200 bg-white';
-                    const iconBg =
-                      row.tone === 'violet'
-                        ? isDark
-                          ? 'bg-violet-500/20 text-violet-300'
-                          : 'bg-violet-100 text-violet-700'
-                        : row.tone === 'emerald'
-                          ? isDark
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : 'bg-emerald-100 text-emerald-700'
-                          : row.tone === 'amber'
-                            ? isDark
-                              ? 'bg-amber-500/20 text-amber-300'
-                              : 'bg-amber-100 text-amber-800'
-                            : row.tone === 'sky'
-                              ? isDark
-                                ? 'bg-sky-500/20 text-sky-300'
-                                : 'bg-sky-100 text-sky-800'
-                              : row.tone === 'rose'
-                                ? isDark
-                                  ? 'bg-rose-500/20 text-rose-300'
-                                  : 'bg-rose-100 text-rose-800'
-                                : isDark
-                                  ? 'bg-cyan-500/20 text-cyan-300'
-                                  : 'bg-cyan-100 text-cyan-800';
-                    return (
-                      <div
-                        key={row.title}
-                        className={`rounded-2xl border p-4 flex flex-col sm:flex-row gap-3 sm:gap-4 ${ring}`}
-                      >
-                        <div className={`h-11 w-11 rounded-xl flex items-center justify-center shrink-0 ${iconBg}`}>
-                          <Icon size={22} strokeWidth={1.75} />
-                        </div>
-                        <div className="flex-1 min-w-0 space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <h3 className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{row.title}</h3>
-                            <span
-                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                                row.badge === 'planned'
-                                  ? isDark
-                                    ? 'bg-amber-500/15 text-amber-200 ring-1 ring-amber-500/25'
-                                    : 'bg-amber-100 text-amber-900 ring-1 ring-amber-200'
-                                  : isDark
-                                    ? 'bg-white/10 text-slate-300'
-                                    : 'bg-slate-200/80 text-slate-700'
-                              }`}
-                            >
-                              {row.badge === 'planned' ? 'آیندهٔ محصول' : 'بخشی فعال / توسعه'}
-                            </span>
-                          </div>
-                          <p className={`text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                            {row.body}
-                          </p>
-                          {row.action.tab ? (
-                            <button
-                              type="button"
-                              onClick={() => goTab(row.action.tab!)}
-                              className={`inline-flex items-center gap-1 text-xs font-bold mt-1 ${
-                                isDark ? 'text-indigo-300 hover:text-indigo-200' : 'text-indigo-700 hover:text-indigo-900'
-                              }`}
-                            >
-                              {row.action.label}
-                              <ChevronRight size={14} className="rotate-180" />
-                            </button>
-                          ) : (
-                            <p className={`text-[11px] font-semibold ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
-                              از منوی اصلی: {row.action.label}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             {currentUser.role === 'super_admin' && (
               <div className="bg-slate-800/40 border border-slate-700/50 rounded-2xl p-6 space-y-4">
@@ -510,6 +341,12 @@ export default function SettingsPage({
             </p>
             <BranchRequestShopPanel />
             <UsersPage embedded />
+          </div>
+        )}
+
+        {activeTab === 'trash' && currentUser.role === 'admin' && (
+          <div className="space-y-4 max-w-3xl">
+            <TrashPage />
           </div>
         )}
 

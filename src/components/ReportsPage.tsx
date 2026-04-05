@@ -7,6 +7,7 @@ import { useStore } from '../store/useStore';
 import { formatDateByCalendar, formatMonthLabelByCalendar, formatWeekdayByCalendar, type CalendarMode } from '../utils/dateFormat';
 import { downloadReportExcel, downloadReportPdf } from '../utils/reportExport';
 import { bookToProductForSale } from '../utils/bookInventory';
+import { invoiceCountsTowardFinancialReports } from '../utils/invoiceReports';
 
 const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
@@ -41,7 +42,10 @@ export default function ReportsPage() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   const filteredInvoices = useMemo(
-    () => invoices.filter(i => i.invoice_date >= dateFrom && i.invoice_date <= dateTo),
+    () =>
+      invoices
+        .filter(invoiceCountsTowardFinancialReports)
+        .filter((i) => i.invoice_date >= dateFrom && i.invoice_date <= dateTo),
     [invoices, dateFrom, dateTo]
   );
 
@@ -65,6 +69,7 @@ export default function ReportsPage() {
   const monthlyData = useMemo(() => {
     const byMonth = new Map<string, number>();
     for (const inv of invoices) {
+      if (!invoiceCountsTowardFinancialReports(inv)) continue;
       const k = inv.invoice_date.slice(0, 7);
       byMonth.set(k, (byMonth.get(k) || 0) + inv.total);
     }

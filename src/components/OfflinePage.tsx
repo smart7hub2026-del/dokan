@@ -131,7 +131,7 @@ export default function OfflinePage() {
         </div>
         <div className="flex-1">
           <p className={`font-semibold ${isOnline ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {isOnline ? '✅ متصل به اینترنت' : '❌ بدون اتصال به اینترنت'}
+            {isOnline ? 'متصل به اینترنت' : 'بدون اتصال به اینترنت'}
           </p>
           <p className="text-slate-400 text-sm mt-0.5">
             {isOnline

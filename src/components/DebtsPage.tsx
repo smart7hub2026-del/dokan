@@ -24,6 +24,7 @@ export default function DebtsPage() {
   const { success, info } = useToast();
   const debts = useStore(s => s.debts);
   const payDebt = useStore(s => s.payDebt);
+  const currentUser = useStore(s => s.currentUser);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [payModal, setPayModal] = useState<Debt | null>(null);
@@ -69,8 +70,13 @@ export default function DebtsPage() {
     if (!amount || amount <= 0) { info('مبلغ را وارد کنید'); return; }
     if (amount > payModal.remaining_amount) { info('مبلغ بیشتر از مانده است'); return; }
 
-    payDebt(payModal.id, amount);
-    success('پرداخت ثبت شد', `${amount.toLocaleString()} ؋ دریافت شد`);
+    payDebt(payModal.id, amount, payNote.trim() || undefined);
+    success(
+      currentUser?.role === 'admin' ? 'پرداخت ثبت شد' : 'ارسال شد',
+      currentUser?.role === 'admin'
+        ? `${amount.toLocaleString()} ؋ دریافت شد`
+        : 'پس از تأیید مدیر در «تأیید فعالیت» روی قرض اعمال می‌شود.'
+    );
     setPayModal(null);
   };
 

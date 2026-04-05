@@ -12,6 +12,8 @@ import {
   Wallet,
   Receipt,
   Activity,
+  ShoppingCart,
+  HandCoins,
 } from 'lucide-react';
 import { Invoice } from '../data/mockData';
 import { useStore, type PurchaseListTaskData } from '../store/useStore';
@@ -19,7 +21,15 @@ import { useToast } from './Toast';
 import { useApp } from '../context/AppContext';
 import FormModal from './ui/FormModal';
 
-const MISC_TYPES = ['warehouse_transfer', 'staff_expense', 'staff_cash', 'staff_return'] as const;
+const MISC_TYPES = [
+  'warehouse_transfer',
+  'staff_expense',
+  'staff_cash',
+  'staff_return',
+  'purchase',
+  'debt_payment',
+] as const;
+const ENTITY_TYPES = ['entity_delete', 'entity_create', 'entity_update'] as const;
 
 export default function PendingPage() {
   const { t, isDark } = useApp();
@@ -33,6 +43,22 @@ export default function PendingPage() {
   const { success, error, warning } = useToast();
 
   const isShopAdmin = currentUser?.role === 'admin';
+
+  type RoleFilter = 'all' | 'seller' | 'stock_keeper' | 'accountant';
+  type StatusFilter = 'pending' | 'approved' | 'rejected';
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
+
+  const filteredEntityApprovals = useMemo(
+    () =>
+      pendingApprovals.filter(
+        (p) =>
+          (ENTITY_TYPES as readonly string[]).includes(p.type) &&
+          (roleFilter === 'all' || p.submitted_by_role === roleFilter) &&
+          p.status === statusFilter
+      ),
+    [pendingApprovals, roleFilter, statusFilter]
+  );
 
   const th = useMemo(
     () => ({
@@ -222,6 +248,106 @@ export default function PendingPage() {
         </div>
       </header>
 
+      <section className={`space-y-4 ${th.card} p-4 sm:p-5`}>
+        <h2 className={`font-bold text-sm sm:text-base flex items-center gap-2 ${th.section}`}>
+          <ClipboardList size={18} className={isDark ? 'text-indigo-400' : 'text-indigo-600'} />
+          کالا، مشتری و تأمین‌کننده (درخواست کارکنان)
+        </h2>
+        <p className={`text-xs ${th.muted}`}>
+          مدیر بدون این صف کار می‌کند؛ فروشنده، انباردار و حسابدار با ثبت/ویرایش/حذف، درخواست اینجا و در اعلان‌ها برای مدیر می‌آید.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ['all', 'همه نقش‌ها'],
+              ['seller', 'فروشنده'],
+              ['stock_keeper', 'انباردار'],
+              ['accountant', 'حسابدار'],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setRoleFilter(v)}
+              className={`px-3 py-2 rounded-xl text-xs font-bold border transition-colors ${
+                roleFilter === v
+                  ? 'bg-indigo-600 border-indigo-500 text-white'
+                  : `${th.btnGhost} border`
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ['pending', 'در انتظار'],
+              ['approved', 'تأیید شده'],
+              ['rejected', 'رد شده'],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setStatusFilter(v)}
+              className={`px-3 py-2 rounded-xl text-xs font-bold border transition-colors ${
+                statusFilter === v
+                  ? v === 'pending'
+                    ? 'bg-amber-600 border-amber-500 text-white'
+                    : v === 'approved'
+                      ? 'bg-emerald-600 border-emerald-500 text-white'
+                      : 'bg-rose-600 border-rose-500 text-white'
+                  : `${th.btnGhost} border`
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {filteredEntityApprovals.length === 0 ? (
+          <p className={`text-sm ${th.muted}`}>در این فیلتر موردی نیست.</p>
+        ) : (
+          <ul className="space-y-3">
+            {filteredEntityApprovals.map((task) => (
+              <li key={task.id} className={`rounded-xl border p-4 ${th.cardInner}`}>
+                <div className="flex flex-wrap justify-between gap-2">
+                  <div>
+                    <p className={`font-bold ${th.h1}`}>{task.title}</p>
+                    <p className={`text-xs mt-1 ${th.sub}`}>{task.description}</p>
+                    <p className={`text-[11px] mt-1 ${th.muted}`}>
+                      {task.submitted_by} · {task.submitted_by_role}
+                      {task.reviewed_at ? ` · ${new Date(task.reviewed_at).toLocaleString('fa-IR')}` : ''}
+                    </p>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold px-2 py-1 rounded-lg shrink-0 h-fit ${
+                      task.status === 'pending'
+                        ? 'bg-amber-500/20 text-amber-200'
+                        : task.status === 'approved'
+                          ? 'bg-emerald-500/20 text-emerald-200'
+                          : 'bg-rose-500/20 text-rose-200'
+                    }`}
+                  >
+                    {task.status === 'pending' ? 'در انتظار' : task.status === 'approved' ? 'تأیید' : 'رد'}
+                  </span>
+                </div>
+                {isShopAdmin && task.status === 'pending' && (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    <button type="button" onClick={() => { approveItem(task.id, currentUser?.full_name || 'مدیر'); success('تأیید شد', task.title); }} className={btnPrimary}>
+                      <CheckCircle size={14} /> تأیید و اعمال
+                    </button>
+                    <button type="button" onClick={() => { rejectItem(task.id, currentUser?.full_name || 'مدیر'); warning('رد شد', task.title); }} className={btnDanger}>
+                      <XCircle size={14} /> رد
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       {miscTasks.length > 0 && (
         <section className="space-y-3">
           <h2 className={`font-bold text-sm sm:text-base flex items-center gap-2 ${th.section}`}>
@@ -250,6 +376,12 @@ export default function PendingPage() {
                   )}
                   {task.type === 'staff_return' && (
                     <Package size={22} className={isDark ? 'text-violet-400 shrink-0' : 'text-violet-600 shrink-0'} />
+                  )}
+                  {task.type === 'purchase' && (
+                    <ShoppingCart size={22} className={isDark ? 'text-emerald-400 shrink-0' : 'text-emerald-600 shrink-0'} />
+                  )}
+                  {task.type === 'debt_payment' && (
+                    <HandCoins size={22} className={isDark ? 'text-sky-400 shrink-0' : 'text-sky-600 shrink-0'} />
                   )}
                 </div>
                 {isShopAdmin ? (

@@ -81,6 +81,15 @@ export default function SupportPage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!showSendForm && !viewMsg) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [showSendForm, viewMsg]);
+
   const filtered = tickets.filter((m) => filter === 'all' || m.status === filter);
 
   const openView = async (msg: SupportTicket) => {
@@ -284,8 +293,17 @@ export default function SupportPage() {
       </div>
 
       {viewMsg && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="glass-dark rounded-2xl w-full max-w-2xl max-h-[min(92dvh,calc(100dvh-1.5rem))] overflow-y-auto overscroll-contain">
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setViewMsg(null)}
+          role="presentation"
+        >
+          <div
+            className="glass-dark rounded-2xl w-full max-w-2xl max-h-[min(92dvh,calc(100dvh-1.5rem))] overflow-y-auto overscroll-contain"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
             <div className="flex items-center justify-between p-5 border-b border-white/10">
               <h2 className="text-white font-semibold">{viewMsg.subject}</h2>
               <button type="button" onClick={() => setViewMsg(null)} className="text-slate-400 hover:text-white">
@@ -354,8 +372,20 @@ export default function SupportPage() {
       )}
 
       {showSendForm && !isSuper && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="glass-dark rounded-2xl w-full max-w-2xl max-h-[min(92dvh,calc(100dvh-1.5rem))] overflow-y-auto overscroll-contain">
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => {
+            setShowSendForm(false);
+            setTicketAttachment(null);
+          }}
+          role="presentation"
+        >
+          <div
+            className="glass-dark rounded-2xl w-full max-w-2xl max-h-[min(92dvh,calc(100dvh-1.5rem))] overflow-y-auto overscroll-contain"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+          >
             <div className="flex items-center justify-between p-5 border-b border-white/10">
               <h2 className="text-white font-semibold">{t('support_send_ticket')}</h2>
               <button

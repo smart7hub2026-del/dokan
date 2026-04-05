@@ -1,3 +1,5 @@
+import { PRODUCTION_FRONTEND_ORIGIN } from '../config/productionSite';
+
 export interface LoginRequest {
   shopCode: string;
   shopPassword: string;
@@ -62,7 +64,9 @@ export const apiGetShopUsers = (token?: string) =>
 
 export const apiUpdateShopUser = (
   id: number,
-  payload: Partial<Pick<ShopUserRow, 'full_name' | 'username' | 'status'>>,
+  payload: Partial<
+    Pick<ShopUserRow, 'full_name' | 'username' | 'status' | 'email' | 'preferred_language' | 'preferred_currency'>
+  >,
   token?: string
 ) =>
   request<{ ok: boolean; user: ShopUserRow }>(`/api/shop/users/${id}`, {
@@ -232,7 +236,7 @@ interface TwoFactorRequiredResponse {
 
 export type LoginResult = ShopSessionPayload | TwoFactorRequiredResponse;
 
-/** آدرس بک‌اند (Render و غیره) — در Vercel حتماً در Build تنظیم کنید: VITE_API_BASE_URL=https://xxx.onrender.com */
+/** آدرس بک‌اند API — در Vercel (فرانت) VITE_API_BASE_URL = URL همان سرویس API (Render/Vercel)، بدون / آخر */
 const ENV_API_BASE = String(import.meta.env.VITE_API_BASE_URL || '').trim().replace(/\/+$/, '');
 const API_BASE = ENV_API_BASE;
 const DEV_FALLBACK_BASE = '';
@@ -243,7 +247,7 @@ if (import.meta.env.PROD && typeof window !== 'undefined' && !ENV_API_BASE) {
     /* preview لوکال */
   } else {
     console.warn(
-      '[dokanyar] VITE_API_BASE_URL خالی است — در Vercel → Settings → Environment Variables مقدار URL بک‌اند Render را بگذارید و دوباره Deploy کنید.',
+      `[dokanyar] VITE_API_BASE_URL خالی است — در Vercel (فرانت ${PRODUCTION_FRONTEND_ORIGIN}) → Environment Variables آدرس بک‌اند API را بگذارید و دوباره Deploy کنید.`,
     );
   }
 }
@@ -465,10 +469,10 @@ const request = async <T>(
       if (looksLikeNetwork) {
         if (!API_BASE) {
           netHint =
-            'سرور در دسترس نیست. روی Vercel در Settings → Environment Variables مقدار VITE_API_BASE_URL را بگذارید (مثلاً https://dokanyar-6.onrender.com بدون / آخر) و دوباره Deploy کنید.';
+            `سرور در دسترس نیست. در Vercel فرانت (${PRODUCTION_FRONTEND_ORIGIN}) در Environment Variables مقدار VITE_API_BASE_URL را بگذارید (URL بک‌اند، بدون / آخر) و دوباره Deploy کنید.`;
         } else {
           netHint =
-            `سرور در دسترس نیست (Failed to fetch). آدرس API: ${API_BASE} — در Render مقدار ALLOWED_ORIGINS را دقیقاً آدرس همین سایت بگذارید؛ چند ثانیه بعد از باز شدن بک‌اند دوباره امتحان کنید. تست سلامت: ${API_BASE}/api/health`;
+            `سرور در دسترس نیست (Failed to fetch). آدرس API: ${API_BASE} — در بک‌اند مقدار ALLOWED_ORIGINS را دقیقاً ${PRODUCTION_FRONTEND_ORIGIN} بگذارید (بدون / آخر). تست سلامت: ${API_BASE}/api/health`;
         }
       }
       const err = new Error(looksLikeNetwork ? netHint : msg) as Error & { cause?: unknown };

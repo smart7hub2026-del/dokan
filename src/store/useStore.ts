@@ -2,14 +2,25 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import {
   Product, Book, Customer, Invoice, Debt, Supplier, PersonalReminder,
-  Notification, Category, User, InvoiceItem, ProductExpiry, SerialNumber
+  Notification, Category, User, InvoiceItem, ProductExpiry, SerialNumber,
 } from '../data/mockData';
 import { customerPhoneKey } from '../utils/customerPhone';
-import { sumStockInWarehouseBin } from '../utils/warehouseBins';
+import {
+  applyBinWarehouseTransfer,
+  sumStockInWarehouseBin,
+  ensureBinMapForProduct,
+  sumBinQuantities,
+  getBinQty,
+} from '../utils/warehouseBins';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
 const nextId = (arr: { id: number }[]) =>
   arr.length > 0 ? Math.max(...arr.map(a => a.id)) + 1 : 1;
+
+function isShopStaffNeedingApproval(user: User | null | undefined): boolean {
+  const r = String(user?.role || '');
+  return r === 'seller' || r === 'stock_keeper' || r === 'accountant';
+}
 
 type StockRow = { id: number; stock_shop: number; stock_warehouse: number };
 
@@ -44,6 +55,87 @@ function applyInvoiceLinesToStockRows<T extends StockRow>(
     }
     return next;
   });
+}
+
+/** کالاهای عادی: کسر/بازگردانی گدام per سطل با warehouse_stock_by_id */
+function applyInvoiceLinesToProducts(
+  products: Product[],
+  lines: InvoiceItem[],
+  mode: 'restore' | 'deduct',
+  warehouses: { id: number }[]
+): Product[] {
+  if (!warehouses.length) {
+    return applyInvoiceLinesToStockRows(products, lines, mode) as Product[];
+  }
+  return products.map((row) => {
+    let next: Product = { ...row };
+    for (const line of lines) {
+      if (line.product_id !== row.id) continue;
+      const q = Math.max(0, Math.floor(Number(line.quantity) || 0));
+      if (q <= 0) continue;
+      const src = line.stock_source ?? 'shop';
+      if (src === 'shop') {
+        if (mode === 'restore') {
+          next = { ...next, stock_shop: Number(next.stock_shop || 0) + q };
+        } else {
+          next = { ...next, stock_shop: Math.max(0, Number(next.stock_shop || 0) - q) };
+        }
+      } else {
+        const binId = line.warehouse_bin_id ?? warehouses[0]?.id ?? 1;
+        const map = ensureBinMapForProduct(next, warehouses);
+        const k = String(binId);
+        const cur = Math.max(0, Number(map[k]) || 0);
+        if (mode === 'restore') {
+          map[k] = cur + q;
+        } else {
+          map[k] = Math.max(0, cur - q);
+        }
+        next = {
+          ...next,
+          warehouse_stock_by_id: map,
+          stock_warehouse: sumBinQuantities(map),
+        };
+      }
+    }
+    return next;
+  });
+}
+
+function checkInvoiceLinesStockProducts(
+  products: Product[],
+  lines: InvoiceItem[],
+  warehouses: { id: number }[]
+): { ok: true } | { ok: false; message: string } {
+  for (const line of lines) {
+    const q = Math.max(0, Math.floor(Number(line.quantity) || 0));
+    if (q <= 0) continue;
+    const row = products.find((r) => r.id === line.product_id);
+    if (!row) {
+      return { ok: false, message: `قلم «${line.product_name}» در انبار یافت نشد` };
+    }
+    const src = line.stock_source ?? 'shop';
+    if (src === 'shop') {
+      const avail = Number(row.stock_shop || 0);
+      if (q > avail) {
+        return {
+          ok: false,
+          message: `موجودی «${line.product_name}» از دکان کافی نیست (حداکثر ${avail})`,
+        };
+      }
+    } else {
+      const binId = line.warehouse_bin_id ?? warehouses[0]?.id ?? 1;
+      const avail = warehouses.length ? getBinQty(row, binId, warehouses) : Number(row.stock_warehouse || 0);
+      if (q > avail) {
+        const label =
+          line.warehouse_bin_label || `گدام ${binId}`;
+        return {
+          ok: false,
+          message: `موجودی «${line.product_name}» در «${label}» کافی نیست (حداکثر ${avail})`,
+        };
+      }
+    }
+  }
+  return { ok: true };
 }
 
 function checkInvoiceLinesStock<T extends StockRow>(
@@ -123,7 +215,13 @@ export interface StaffMember {
 export interface WarehouseBin {
   id: number;
   name: string;
+  address?: string;
+  manager_name?: string;
 }
+
+export type AddWarehouseInput =
+  | string
+  | { name: string; address?: string; manager_name?: string };
 
 export interface Expense {
   id: number;
@@ -142,6 +240,22 @@ export interface CashEntry {
   amount: number;
   description: string;
   date: string;
+  created_by?: string;
+}
+
+/** معاملات نقدی ثبت‌شده برای تأمین‌کننده یا مشتری (صرفاً یادداشت عملیاتی؛ بدون اتوماسیون مانده). */
+export interface PartyCashEntry {
+  id: number;
+  party_kind: 'supplier' | 'customer';
+  party_id: number;
+  party_name_snapshot: string;
+  /** ورود نقد به صندوق (مثلاً دریافت از مشتری) */
+  flow: 'cash_in' | 'cash_out';
+  amount: number;
+  reason: string;
+  invoice_ref: string;
+  entry_date: string;
+  created_at: string;
   created_by?: string;
 }
 
@@ -170,6 +284,15 @@ export interface PurchaseListTaskData {
   picked: boolean[];
 }
 
+/** آیتم‌های حذف‌شده توسط مدیر — قابل بازیابی */
+export interface TrashEntry {
+  id: number;
+  kind: 'product' | 'supplier' | 'customer';
+  snapshot: Record<string, unknown>;
+  deleted_at: string;
+  deleted_by_name?: string;
+}
+
 export interface PendingApproval {
   id: number;
   type:
@@ -182,7 +305,10 @@ export interface PendingApproval {
     | 'warehouse_transfer'
     | 'staff_expense'
     | 'staff_cash'
-    | 'staff_return';
+    | 'staff_return'
+    | 'entity_delete'
+    | 'entity_create'
+    | 'entity_update';
   title: string;
   description: string;
   data: Record<string, unknown>;
@@ -233,7 +359,7 @@ export interface ShopSettings {
   tenant_id?: number;
   /**
    * ورود با نقش‌های کارکنان در صفحهٔ ورود (مدیر و ابرادمین همیشه مجازند).
-   * پیش‌فرض: همه true؛ با false همان نقش در check-shop و login رد می‌شود.
+   * پیش‌فرض: فروشنده/انباردار/حسابدار false تا مدیر از کاربران فروشگاه نام و رمز تعیین کند.
    */
   role_login_enabled?: {
     seller: boolean;
@@ -284,11 +410,12 @@ interface AppStore {
 
   // Products
   products: Product[];
-  addProduct: (p: Omit<Product, 'id' | 'created_at'>) => Product;
+  /** مدیر: فوراً ثبت؛ سایر نقش‌ها: درخواست تأیید (برمی‌گرداند null) */
+  addProduct: (p: Omit<Product, 'id' | 'created_at'>) => Product | null;
   updateProduct: (p: Product) => void;
   deleteProduct: (id: number) => void;
-  deductStock: (productId: number, qty: number, source?: 'shop' | 'warehouse') => void;
-  restoreStock: (productId: number, qty: number, source?: 'shop' | 'warehouse') => void;
+  deductStock: (productId: number, qty: number, source?: 'shop' | 'warehouse', warehouseBinId?: number) => void;
+  restoreStock: (productId: number, qty: number, source?: 'shop' | 'warehouse', warehouseBinId?: number) => void;
 
   /** فقط کتابفروشی — همگام با سرور books */
   books: Book[];
@@ -318,7 +445,8 @@ interface AppStore {
 
   // Customers
   customers: Customer[];
-  addCustomer: (c: Omit<Customer, 'id' | 'created_at' | 'customer_code' | 'archived_at'>) => Customer | null;
+  /** null = شماره تکراری؛ undefined = ارسال برای تأیید مدیر */
+  addCustomer: (c: Omit<Customer, 'id' | 'created_at' | 'customer_code' | 'archived_at'>) => Customer | null | undefined;
   updateCustomer: (c: Customer) => void;
   deleteCustomer: (id: number) => void;
   mergeCustomers: (keepId: number, removeId: number) => boolean;
@@ -339,12 +467,12 @@ interface AppStore {
   // Debts
   debts: Debt[];
   addDebt: (d: Omit<Debt, 'id' | 'created_at'>) => void;
-  payDebt: (id: number, amount: number) => void;
+  payDebt: (id: number, amount: number, note?: string) => void;
   updateDebt: (d: Debt) => void;
 
   // Suppliers
   suppliers: Supplier[];
-  addSupplier: (s: Omit<Supplier, 'id' | 'created_at' | 'supplier_code'>) => Supplier;
+  addSupplier: (s: Omit<Supplier, 'id' | 'created_at' | 'supplier_code'>) => Supplier | null;
   updateSupplier: (s: Supplier) => void;
   deleteSupplier: (id: number) => void;
   updateSupplierBalance: (id: number, delta: number) => void;
@@ -364,6 +492,9 @@ interface AppStore {
   // Cash
   cashEntries: CashEntry[];
   addCashEntry: (e: Omit<CashEntry, 'id'>) => void;
+
+  partyCashLedger: PartyCashEntry[];
+  addPartyCashEntry: (e: Omit<PartyCashEntry, 'id' | 'created_at'>) => void;
 
   // Product returns (accounting)
   productReturns: ProductReturn[];
@@ -417,7 +548,7 @@ interface AppStore {
 
   /** چند انبار نام‌گذاری‌شده (موجودی کل همان stock_warehouse است؛ برای سازمان‌دهی و آینده) */
   warehouses: WarehouseBin[];
-  addWarehouse: (name: string) => void;
+  addWarehouse: (input: AddWarehouseInput) => void;
   removeWarehouse: (id: number) => void;
   /** جمع موجودی فعال در یک سطل انبار (برای جلوگیری از حذف نادرست) */
   getWarehouseBinStockTotal: (binId: number) => number;
@@ -434,6 +565,10 @@ interface AppStore {
 
   /** پاک‌سازی داده‌های عملیاتی محلی (persist): حسابداری، مشتری، تأمین‌کننده، بدهی، فاکتور و ... */
   resetLocalBusinessData: () => void;
+
+  trash: TrashEntry[];
+  restoreTrashEntry: (trashId: number) => void;
+  purgeTrashEntry: (trashId: number) => void;
 }
 
 // ─── Initial data ───────────────────────────────────────────────────────────
@@ -463,9 +598,9 @@ export const emptyShopSettings: ShopSettings = {
   print_invoice_with_product_images: false,
   date_calendar: 'jalali',
   role_login_enabled: {
-    seller: true,
-    stock_keeper: true,
-    accountant: true,
+    seller: false,
+    stock_keeper: false,
+    accountant: false,
   },
 };
 
@@ -491,10 +626,12 @@ function emptyBusinessSlice(): Partial<AppStore> {
     staff: defaultStaff,
     expenses: defaultExpenses,
     cashEntries: defaultCashEntries,
+    partyCashLedger: [],
     productReturns: [],
     reminders: [],
     notifications: [],
     pendingApprovals: [],
+    trash: [],
     users: [],
     shopSettings: { ...emptyShopSettings },
     currencyRates: { USD: 75, EUR: 82, IRT: 0.02 },
@@ -541,11 +678,20 @@ export const useStore = create<AppStore>()(
       shopSuspended: false,
 
       warehouses: [{ id: 1, name: 'انبار اصلی' }],
-      addWarehouse: (name) => {
+      addWarehouse: (input) => {
         const list = get().warehouses;
         const id = nextId(list.length ? list : [{ id: 0 }]);
-        const label = String(name || '').trim() || `انبار ${id}`;
-        set({ warehouses: [...list, { id, name: label }] });
+        let name: string;
+        let address: string | undefined;
+        let manager_name: string | undefined;
+        if (typeof input === 'string') {
+          name = String(input || '').trim() || `انبار ${id}`;
+        } else {
+          name = String(input.name || '').trim() || `انبار ${id}`;
+          address = input.address?.trim() || undefined;
+          manager_name = input.manager_name?.trim() || undefined;
+        }
+        set({ warehouses: [...list, { id, name, address, manager_name }] });
       },
       removeWarehouse: (id) => {
         if (id === 1) return;
@@ -626,19 +772,40 @@ export const useStore = create<AppStore>()(
         const syncFields = [
           'products', 'books', 'categories', 'expiryRecords', 'serialNumbers', 'customers',
           'invoices', 'purchaseInvoices', 'debts', 'suppliers', 'staff', 'expenses',
-          'cashEntries', 'productReturns', 'reminders', 'notifications', 'pendingApprovals', 'users',
-          'shopSettings', 'currencyRates', 'procurementManualLines',
+          'cashEntries', 'partyCashLedger', 'productReturns', 'reminders', 'notifications', 'pendingApprovals', 'users',
+          'shopSettings', 'currencyRates', 'procurementManualLines', 'trash',
         ] as const;
 
         const next: Partial<AppStore> = {};
+        const prev = get();
         syncFields.forEach((field) => {
           if (field === 'shopSettings' && payload.shopSettings !== undefined && typeof payload.shopSettings === 'object') {
-            (next as Record<string, unknown>).shopSettings = {
-              ...emptyShopSettings,
-              ...(payload.shopSettings as ShopSettings),
-            };
+            const p = payload.shopSettings as ShopSettings;
+            const merged: ShopSettings = { ...emptyShopSettings, ...p };
+            if (p.role_login_enabled === undefined) {
+              merged.role_login_enabled = {
+                seller: false,
+                stock_keeper: false,
+                accountant: false,
+              };
+            }
+            (next as Record<string, unknown>).shopSettings = merged;
           } else if (field === 'procurementManualLines' && Array.isArray(payload.procurementManualLines)) {
             (next as Record<string, unknown>).procurementManualLines = payload.procurementManualLines;
+          } else if (field === 'partyCashLedger' && Array.isArray(payload.partyCashLedger)) {
+            (next as Record<string, unknown>).partyCashLedger = payload.partyCashLedger;
+          } else if (field === 'trash' && Array.isArray(payload.trash)) {
+            (next as Record<string, unknown>).trash = payload.trash;
+          } else if (field === 'products' && Array.isArray(payload.products)) {
+            const serverP = payload.products as Product[];
+            const serverIds = new Set(serverP.map((p) => Number(p.id)));
+            const onlyLocal = prev.products.filter((p) => !serverIds.has(Number(p.id)));
+            (next as Record<string, unknown>).products = [...serverP, ...onlyLocal];
+          } else if (field === 'books' && Array.isArray(payload.books)) {
+            const serverB = payload.books as Book[];
+            const serverIds = new Set(serverB.map((b) => Number(b.id)));
+            const onlyLocal = prev.books.filter((b) => !serverIds.has(Number(b.id)));
+            (next as Record<string, unknown>).books = [...serverB, ...onlyLocal];
           } else if (payload[field] !== undefined) {
             (next as Record<string, unknown>)[field] = payload[field];
           }
@@ -663,6 +830,7 @@ export const useStore = create<AppStore>()(
           staff: state.staff,
           expenses: state.expenses,
           cashEntries: state.cashEntries,
+          partyCashLedger: state.partyCashLedger,
           productReturns: state.productReturns,
           reminders: state.reminders,
           notifications: state.notifications,
@@ -679,6 +847,24 @@ export const useStore = create<AppStore>()(
       products: [],
 
       addProduct: (p) => {
+        const user = get().currentUser;
+        if (isShopStaffNeedingApproval(user)) {
+          get().addPendingApproval({
+            type: 'entity_create',
+            title: `کالای جدید: ${p.name}`,
+            description: `درخواست ثبت کالا توسط ${user?.full_name} (${user?.role})`,
+            data: { entity: 'product', proposed: JSON.parse(JSON.stringify(p)) as Omit<Product, 'id' | 'created_at'> },
+            submitted_by: user?.full_name || '',
+            submitted_by_role: user?.role || '',
+          });
+          get().reportStaffActivityToAdmins(
+            'درخواست کالای جدید',
+            `کالا «${p.name}» برای تأیید ارسال شد.`,
+            user?.id ?? 0,
+            user?.full_name || 'کاربر'
+          );
+          return null;
+        }
         const newP: Product = {
           ...p, id: nextId(get().products),
           created_at: new Date().toISOString().slice(0, 10),
@@ -687,33 +873,117 @@ export const useStore = create<AppStore>()(
         return newP;
       },
 
-      updateProduct: (p) => set(s => ({
-        products: s.products.map(x => x.id === p.id ? p : x)
-      })),
+      updateProduct: (p) => {
+        const user = get().currentUser;
+        const prev = get().products.find((x) => x.id === p.id);
+        if (!prev) return;
+        if (isShopStaffNeedingApproval(user)) {
+          get().addPendingApproval({
+            type: 'entity_update',
+            title: `ویرایش کالا: ${p.name}`,
+            description: `تغییر اطلاعات کالا توسط ${user?.full_name}`,
+            data: {
+              entity: 'product',
+              id: p.id,
+              before: JSON.parse(JSON.stringify(prev)) as Product,
+              after: JSON.parse(JSON.stringify(p)) as Product,
+            },
+            submitted_by: user?.full_name || '',
+            submitted_by_role: user?.role || '',
+          });
+          get().reportStaffActivityToAdmins(
+            'درخواست ویرایش کالا',
+            `کالا «${p.name}» — در انتظار تأیید مدیر.`,
+            user?.id ?? 0,
+            user?.full_name || 'کاربر'
+          );
+          return;
+        }
+        set((s) => ({
+          products: s.products.map((x) => (x.id === p.id ? p : x)),
+        }));
+      },
 
-      deleteProduct: (id) => set(s => ({
-        products: s.products.filter(x => x.id !== id)
-      })),
+      deleteProduct: (id) => {
+        const user = get().currentUser;
+        const row = get().products.find((x) => x.id === id);
+        if (!row) return;
+        if (isShopStaffNeedingApproval(user)) {
+          get().addPendingApproval({
+            type: 'entity_delete',
+            title: `حذف کالا: ${row.name}`,
+            description: `درخواست حذف توسط ${user?.full_name}`,
+            data: {
+              entity: 'product',
+              id,
+              snapshot: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
+            },
+            submitted_by: user?.full_name || '',
+            submitted_by_role: user?.role || '',
+          });
+          get().reportStaffActivityToAdmins(
+            'درخواست حذف کالا',
+            `کالا «${row.name}» — در انتظار تأیید مدیر.`,
+            user?.id ?? 0,
+            user?.full_name || 'کاربر'
+          );
+          return;
+        }
+        const snap = JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
+        set((s) => ({
+          products: s.products.filter((x) => x.id !== id),
+          trash: [
+            {
+              id: nextId(s.trash),
+              kind: 'product' as const,
+              snapshot: snap,
+              deleted_at: new Date().toISOString(),
+              deleted_by_name: user?.full_name,
+            },
+            ...s.trash,
+          ],
+        }));
+      },
 
-      deductStock: (productId, qty, source = 'shop') =>
+      deductStock: (productId, qty, source = 'shop', warehouseBinId?: number) =>
         set((s) => ({
           products: s.products.map((p) => {
             if (p.id !== productId) return p;
-            if (source === 'warehouse') {
-              return { ...p, stock_warehouse: Math.max(0, p.stock_warehouse - qty) };
+            if (source === 'shop') {
+              return { ...p, stock_shop: Math.max(0, p.stock_shop - qty) };
             }
-            return { ...p, stock_shop: Math.max(0, p.stock_shop - qty) };
+            const wh = s.warehouses;
+            const binId = warehouseBinId ?? wh[0]?.id ?? 1;
+            const map = ensureBinMapForProduct(p, wh);
+            const k = String(binId);
+            const cur = Math.max(0, Number(map[k]) || 0);
+            map[k] = Math.max(0, cur - qty);
+            return {
+              ...p,
+              warehouse_stock_by_id: map,
+              stock_warehouse: sumBinQuantities(map),
+            };
           }),
         })),
 
-      restoreStock: (productId, qty, source = 'shop') =>
+      restoreStock: (productId, qty, source = 'shop', warehouseBinId?: number) =>
         set((s) => ({
           products: s.products.map((p) => {
             if (p.id !== productId) return p;
-            if (source === 'warehouse') {
-              return { ...p, stock_warehouse: p.stock_warehouse + qty };
+            if (source === 'shop') {
+              return { ...p, stock_shop: p.stock_shop + qty };
             }
-            return { ...p, stock_shop: p.stock_shop + qty };
+            const wh = s.warehouses;
+            const binId = warehouseBinId ?? wh[0]?.id ?? 1;
+            const map = ensureBinMapForProduct(p, wh);
+            const k = String(binId);
+            const cur = Math.max(0, Number(map[k]) || 0);
+            map[k] = cur + qty;
+            return {
+              ...p,
+              warehouse_stock_by_id: map,
+              stock_warehouse: sumBinQuantities(map),
+            };
           }),
         })),
 
@@ -832,6 +1102,24 @@ export const useStore = create<AppStore>()(
         if (key && get().customers.some((x) => !x.archived_at && customerPhoneKey(x.phone) === key)) {
           return null;
         }
+        const user = get().currentUser;
+        if (isShopStaffNeedingApproval(user)) {
+          get().addPendingApproval({
+            type: 'entity_create',
+            title: `مشتری جدید: ${c.name}`,
+            description: `درخواست ثبت مشتری توسط ${user?.full_name}`,
+            data: { entity: 'customer', proposed: JSON.parse(JSON.stringify(c)) as Omit<Customer, 'id' | 'created_at' | 'customer_code' | 'archived_at'> },
+            submitted_by: user?.full_name || '',
+            submitted_by_role: user?.role || '',
+          });
+          get().reportStaffActivityToAdmins(
+            'درخواست مشتری جدید',
+            `مشتری «${c.name}» برای تأیید ارسال شد.`,
+            user?.id ?? 0,
+            user?.full_name || 'کاربر'
+          );
+          return undefined;
+        }
         const id = nextId(get().customers);
         const newC: Customer = {
           ...c,
@@ -844,17 +1132,81 @@ export const useStore = create<AppStore>()(
         return newC;
       },
 
-      updateCustomer: (c) => set(s => ({
-        customers: s.customers.map(x => x.id === c.id ? c : x)
-      })),
+      updateCustomer: (c) => {
+        const user = get().currentUser;
+        const prev = get().customers.find((x) => x.id === c.id);
+        if (!prev) return;
+        if (isShopStaffNeedingApproval(user)) {
+          get().addPendingApproval({
+            type: 'entity_update',
+            title: `ویرایش مشتری: ${c.name}`,
+            description: `تغییر اطلاعات توسط ${user?.full_name}`,
+            data: {
+              entity: 'customer',
+              id: c.id,
+              before: JSON.parse(JSON.stringify(prev)) as Customer,
+              after: JSON.parse(JSON.stringify(c)) as Customer,
+            },
+            submitted_by: user?.full_name || '',
+            submitted_by_role: user?.role || '',
+          });
+          get().reportStaffActivityToAdmins(
+            'درخواست ویرایش مشتری',
+            `مشتری «${c.name}» — در انتظار تأیید.`,
+            user?.id ?? 0,
+            user?.full_name || 'کاربر'
+          );
+          return;
+        }
+        set((s) => ({
+          customers: s.customers.map((x) => (x.id === c.id ? c : x)),
+        }));
+      },
 
-      deleteCustomer: (id) => set(s => ({
-        customers: s.customers.map((x) =>
-          x.id === id
-            ? { ...x, archived_at: new Date().toISOString(), status: 'inactive' as const }
-            : x
-        ),
-      })),
+      deleteCustomer: (id) => {
+        const user = get().currentUser;
+        const row = get().customers.find((x) => x.id === id);
+        if (!row) return;
+        if (isShopStaffNeedingApproval(user)) {
+          get().addPendingApproval({
+            type: 'entity_delete',
+            title: `حذف/غیرفعال مشتری: ${row.name}`,
+            description: `درخواست توسط ${user?.full_name}`,
+            data: {
+              entity: 'customer',
+              id,
+              snapshot: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
+            },
+            submitted_by: user?.full_name || '',
+            submitted_by_role: user?.role || '',
+          });
+          get().reportStaffActivityToAdmins(
+            'درخواست حذف مشتری',
+            `مشتری «${row.name}» — در انتظار تأیید.`,
+            user?.id ?? 0,
+            user?.full_name || 'کاربر'
+          );
+          return;
+        }
+        const snap = JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
+        set((s) => ({
+          customers: s.customers.map((x) =>
+            x.id === id
+              ? { ...x, archived_at: new Date().toISOString(), status: 'inactive' as const }
+              : x
+          ),
+          trash: [
+            {
+              id: nextId(s.trash),
+              kind: 'customer' as const,
+              snapshot: snap,
+              deleted_at: new Date().toISOString(),
+              deleted_by_name: user?.full_name,
+            },
+            ...s.trash,
+          ],
+        }));
+      },
 
       mergeCustomers: (keepId, removeId) => {
         if (keepId === removeId) return false;
@@ -907,6 +1259,18 @@ export const useStore = create<AppStore>()(
           id,
           invoice_number: `INV-${String(id).padStart(3, '0')}`,
           stock_committed: finalizeNow,
+          ...(finalizeNow
+            ? {
+                approval_status: 'approved' as const,
+                status:
+                  inv.payment_method === 'cash' && (inv.due_amount || 0) <= 0
+                    ? ('completed' as const)
+                    : ('approved' as const),
+              }
+            : {
+                approval_status: 'pending' as const,
+                status: 'pending' as const,
+              }),
         };
 
         set(s => ({ invoices: [newInv, ...s.invoices] }));
@@ -917,7 +1281,13 @@ export const useStore = create<AppStore>()(
             if (bookstore) {
               get().deductBookStock(item.product_id, item.quantity, item.stock_source ?? 'shop');
             } else {
-              get().deductStock(item.product_id, item.quantity, item.stock_source ?? 'shop');
+              const src = item.stock_source ?? 'shop';
+              get().deductStock(
+                item.product_id,
+                item.quantity,
+                src,
+                src === 'warehouse' ? item.warehouse_bin_id : undefined
+              );
             }
           });
           if (newInv.payment_method === 'credit' && newInv.due_amount > 0) {
@@ -953,16 +1323,6 @@ export const useStore = create<AppStore>()(
             user.id,
             user.full_name
           );
-        } else if (user) {
-          get().addNotification({
-            user_id: user.id,
-            type: 'pending',
-            title: 'فاکتور جدید',
-            message: `فاکتور ${newInv.invoice_number} به مبلغ ${newInv.total.toLocaleString()} افغانی ثبت شد`,
-            link: '/invoices',
-            is_read: false,
-            is_heard: false,
-          });
         }
 
         return newInv;
@@ -990,10 +1350,10 @@ export const useStore = create<AppStore>()(
             if (!check.ok) return check;
             nextBooks = applyInvoiceLinesToStockRows(nextBooks, inv.items, 'deduct');
           } else {
-            nextProducts = applyInvoiceLinesToStockRows(s.products, prev.items, 'restore');
-            const check = checkInvoiceLinesStock(nextProducts, inv.items);
+            nextProducts = applyInvoiceLinesToProducts(s.products, prev.items, 'restore', s.warehouses);
+            const check = checkInvoiceLinesStockProducts(nextProducts, inv.items, s.warehouses);
             if (!check.ok) return check;
-            nextProducts = applyInvoiceLinesToStockRows(nextProducts, inv.items, 'deduct');
+            nextProducts = applyInvoiceLinesToProducts(nextProducts, inv.items, 'deduct', s.warehouses);
           }
         }
 
@@ -1055,28 +1415,50 @@ export const useStore = create<AppStore>()(
         debts: [{ ...d, id: nextId(s.debts), created_at: new Date().toISOString().slice(0, 10) }, ...s.debts]
       })),
 
-      payDebt: (id, amount) => set(s => {
-        let customerId: number | null = null;
-        const nextDebts = s.debts.map(d => {
-          if (d.id !== id) return d;
-          customerId = d.customer_id;
-          const newPaid = d.paid_amount + amount;
-          const newRemaining = Math.max(0, d.amount - newPaid);
-          return {
-            ...d,
-            paid_amount: newPaid,
-            remaining_amount: newRemaining,
-            status: (newRemaining <= 0 ? 'paid' : 'partial') as Debt['status'],
-          };
+      payDebt: (id, amount, note) => {
+        const user = get().currentUser;
+        const debt = get().debts.find((d) => d.id === id);
+        if (!debt || amount <= 0) return;
+        if (isShopStaffNeedingApproval(user)) {
+          get().addPendingApproval({
+            type: 'debt_payment',
+            title: 'دریافت از قرضدار',
+            description: `${debt.customer_name} — ${amount.toLocaleString()} ؋${note ? ` — ${note}` : ''}`,
+            data: { debt_id: id, amount, note: note || '' } as Record<string, unknown>,
+            submitted_by: user?.full_name || '',
+            submitted_by_role: user?.role || '',
+          });
+          get().reportStaffActivityToAdmins(
+            'درخواست ثبت دریافت قرض',
+            `${user?.full_name}: ${debt.customer_name} — ${amount.toLocaleString()} ؋`,
+            user?.id ?? 0,
+            user?.full_name || 'کاربر'
+          );
+          return;
+        }
+        set((s) => {
+          let customerId: number | null = null;
+          const nextDebts = s.debts.map((d) => {
+            if (d.id !== id) return d;
+            customerId = d.customer_id;
+            const newPaid = d.paid_amount + amount;
+            const newRemaining = Math.max(0, d.amount - newPaid);
+            return {
+              ...d,
+              paid_amount: newPaid,
+              remaining_amount: newRemaining,
+              status: (newRemaining <= 0 ? 'paid' : 'partial') as Debt['status'],
+            };
+          });
+          const nextCustomers =
+            customerId != null
+              ? s.customers.map((c) =>
+                  c.id === customerId ? { ...c, balance: c.balance + amount } : c
+                )
+              : s.customers;
+          return { debts: nextDebts, customers: nextCustomers };
         });
-        const nextCustomers =
-          customerId != null
-            ? s.customers.map(c =>
-                c.id === customerId ? { ...c, balance: c.balance + amount } : c
-              )
-            : s.customers;
-        return { debts: nextDebts, customers: nextCustomers };
-      }),
+      },
 
       updateDebt: (d) => set(s => ({
         debts: s.debts.map(x => x.id === d.id ? d : x)
@@ -1086,6 +1468,24 @@ export const useStore = create<AppStore>()(
       suppliers: [],
 
       addSupplier: (s_) => {
+        const user = get().currentUser;
+        if (isShopStaffNeedingApproval(user)) {
+          get().addPendingApproval({
+            type: 'entity_create',
+            title: `تأمین‌کننده جدید: ${s_.name}`,
+            description: `درخواست ثبت توسط ${user?.full_name}`,
+            data: { entity: 'supplier', proposed: JSON.parse(JSON.stringify(s_)) as Omit<Supplier, 'id' | 'created_at' | 'supplier_code'> },
+            submitted_by: user?.full_name || '',
+            submitted_by_role: user?.role || '',
+          });
+          get().reportStaffActivityToAdmins(
+            'درخواست تأمین‌کننده',
+            `«${s_.name}» برای تأیید ارسال شد.`,
+            user?.id ?? 0,
+            user?.full_name || 'کاربر'
+          );
+          return null;
+        }
         const id = nextId(get().suppliers);
         const newS: Supplier = {
           ...s_,
@@ -1097,13 +1497,77 @@ export const useStore = create<AppStore>()(
         return newS;
       },
 
-      updateSupplier: (s_) => set(s => ({
-        suppliers: s.suppliers.map(x => x.id === s_.id ? s_ : x)
-      })),
+      updateSupplier: (s_) => {
+        const user = get().currentUser;
+        const prev = get().suppliers.find((x) => x.id === s_.id);
+        if (!prev) return;
+        if (isShopStaffNeedingApproval(user)) {
+          get().addPendingApproval({
+            type: 'entity_update',
+            title: `ویرایش تأمین‌کننده: ${s_.name}`,
+            description: `توسط ${user?.full_name}`,
+            data: {
+              entity: 'supplier',
+              id: s_.id,
+              before: JSON.parse(JSON.stringify(prev)) as Supplier,
+              after: JSON.parse(JSON.stringify(s_)) as Supplier,
+            },
+            submitted_by: user?.full_name || '',
+            submitted_by_role: user?.role || '',
+          });
+          get().reportStaffActivityToAdmins(
+            'ویرایش تأمین‌کننده',
+            `«${s_.name}» — در انتظار تأیید.`,
+            user?.id ?? 0,
+            user?.full_name || 'کاربر'
+          );
+          return;
+        }
+        set((s) => ({
+          suppliers: s.suppliers.map((x) => (x.id === s_.id ? s_ : x)),
+        }));
+      },
 
-      deleteSupplier: (id) => set(s => ({
-        suppliers: s.suppliers.filter(x => x.id !== id)
-      })),
+      deleteSupplier: (id) => {
+        const user = get().currentUser;
+        const row = get().suppliers.find((x) => x.id === id);
+        if (!row) return;
+        if (isShopStaffNeedingApproval(user)) {
+          get().addPendingApproval({
+            type: 'entity_delete',
+            title: `حذف تأمین‌کننده: ${row.name}`,
+            description: `درخواست توسط ${user?.full_name}`,
+            data: {
+              entity: 'supplier',
+              id,
+              snapshot: JSON.parse(JSON.stringify(row)) as Record<string, unknown>,
+            },
+            submitted_by: user?.full_name || '',
+            submitted_by_role: user?.role || '',
+          });
+          get().reportStaffActivityToAdmins(
+            'حذف تأمین‌کننده',
+            `«${row.name}» — در انتظار تأیید.`,
+            user?.id ?? 0,
+            user?.full_name || 'کاربر'
+          );
+          return;
+        }
+        const snap = JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
+        set((s) => ({
+          suppliers: s.suppliers.filter((x) => x.id !== id),
+          trash: [
+            {
+              id: nextId(s.trash),
+              kind: 'supplier' as const,
+              snapshot: snap,
+              deleted_at: new Date().toISOString(),
+              deleted_by_name: user?.full_name,
+            },
+            ...s.trash,
+          ],
+        }));
+      },
 
       updateSupplierBalance: (id, delta) => set(s => ({
         suppliers: s.suppliers.map(sup =>
@@ -1158,6 +1622,20 @@ export const useStore = create<AppStore>()(
       addCashEntry: (e) => set(s => ({
         cashEntries: [{ ...e, id: nextId(s.cashEntries) }, ...s.cashEntries]
       })),
+
+      partyCashLedger: [],
+
+      addPartyCashEntry: (e) =>
+        set((s) => ({
+          partyCashLedger: [
+            {
+              ...e,
+              id: nextId(s.partyCashLedger),
+              created_at: new Date().toISOString(),
+            },
+            ...s.partyCashLedger,
+          ],
+        })),
 
       productReturns: [],
 
@@ -1223,6 +1701,41 @@ export const useStore = create<AppStore>()(
 
       // Pending Approvals
       pendingApprovals: [],
+
+      trash: [],
+
+      restoreTrashEntry: (trashId) =>
+        set((s) => {
+          const row = s.trash.find((t) => t.id === trashId);
+          if (!row) return s;
+          const nextTrash = s.trash.filter((t) => t.id !== trashId);
+          if (row.kind === 'product') {
+            const p = row.snapshot as unknown as Product;
+            if (s.products.some((x) => x.id === p.id)) return { ...s, trash: nextTrash };
+            return { ...s, products: [p, ...s.products], trash: nextTrash };
+          }
+          if (row.kind === 'supplier') {
+            const sup = row.snapshot as unknown as Supplier;
+            if (s.suppliers.some((x) => x.id === sup.id)) return { ...s, trash: nextTrash };
+            return { ...s, suppliers: [sup, ...s.suppliers], trash: nextTrash };
+          }
+          const c = row.snapshot as unknown as Customer;
+          const restored: Customer = {
+            ...c,
+            archived_at: undefined,
+            status: 'active',
+          };
+          const has = s.customers.some((x) => x.id === restored.id);
+          const nextCustomers = has
+            ? s.customers.map((x) => (x.id === restored.id ? restored : x))
+            : [restored, ...s.customers];
+          return { ...s, customers: nextCustomers, trash: nextTrash };
+        }),
+
+      purgeTrashEntry: (trashId) =>
+        set((s) => ({
+          trash: s.trash.filter((t) => t.id !== trashId),
+        })),
 
       addPendingApproval: (p) => set(s => ({
         pendingApprovals: [
@@ -1330,9 +1843,112 @@ export const useStore = create<AppStore>()(
           let nextBooks = s.books;
           let nextDebts = s.debts;
           let nextCustomers = s.customers;
+          let nextSuppliers = s.suppliers;
           let nextExpenses = s.expenses;
           let nextCash = s.cashEntries;
           let nextReturns = s.productReturns;
+          let nextTrash = s.trash;
+          let nextPurchaseInvoices = s.purchaseInvoices;
+
+          if (item.type === 'entity_delete' || item.type === 'entity_create' || item.type === 'entity_update') {
+            const d = item.data as Record<string, unknown>;
+            const entity = String(d.entity || '');
+            const markApproved = () =>
+              s.pendingApprovals.map((p) =>
+                p.id === id
+                  ? { ...p, status: 'approved' as const, reviewed_by: reviewerName, reviewed_at: new Date().toISOString() }
+                  : p
+              );
+
+            if (item.type === 'entity_delete') {
+              const eid = Number(d.id);
+              const snap = d.snapshot as Record<string, unknown>;
+              const te: TrashEntry = {
+                id: nextId(s.trash),
+                kind: entity === 'product' ? 'product' : entity === 'supplier' ? 'supplier' : 'customer',
+                snapshot: snap,
+                deleted_at: new Date().toISOString(),
+                deleted_by_name: reviewerName,
+              };
+              nextTrash = [te, ...s.trash];
+              if (entity === 'product') {
+                nextProducts = s.products.filter((x) => x.id !== eid);
+              } else if (entity === 'supplier') {
+                nextSuppliers = s.suppliers.filter((x) => x.id !== eid);
+              } else if (entity === 'customer') {
+                nextCustomers = s.customers.map((x) =>
+                  x.id === eid
+                    ? { ...x, archived_at: new Date().toISOString(), status: 'inactive' as const }
+                    : x
+                );
+              }
+              return { ...s, products: nextProducts, suppliers: nextSuppliers, customers: nextCustomers, trash: nextTrash, pendingApprovals: markApproved() };
+            }
+
+            if (item.type === 'entity_create') {
+              if (entity === 'product') {
+                const proposed = d.proposed as Omit<Product, 'id' | 'created_at'>;
+                const newP: Product = {
+                  ...proposed,
+                  id: nextId(s.products),
+                  created_at: new Date().toISOString().slice(0, 10),
+                };
+                nextProducts = [newP, ...s.products];
+              } else if (entity === 'customer') {
+                const proposed = d.proposed as Omit<Customer, 'id' | 'created_at' | 'customer_code' | 'archived_at'>;
+                const key = customerPhoneKey(proposed.phone);
+                if (key && s.customers.some((x) => !x.archived_at && customerPhoneKey(x.phone) === key)) {
+                  return s;
+                }
+                const cid = nextId(s.customers);
+                const newC: Customer = {
+                  ...proposed,
+                  marketing_consent: proposed.marketing_consent !== false,
+                  id: cid,
+                  customer_code: `C${String(cid).padStart(3, '0')}`,
+                  created_at: new Date().toISOString().slice(0, 10),
+                };
+                nextCustomers = [newC, ...s.customers];
+              } else if (entity === 'supplier') {
+                const proposed = d.proposed as Omit<Supplier, 'id' | 'created_at' | 'supplier_code'>;
+                const sid = nextId(s.suppliers);
+                const newS: Supplier = {
+                  ...proposed,
+                  id: sid,
+                  supplier_code: `SUP${String(sid).padStart(3, '0')}`,
+                  created_at: new Date().toISOString().slice(0, 10),
+                };
+                nextSuppliers = [newS, ...s.suppliers];
+              }
+              return {
+                ...s,
+                products: nextProducts,
+                customers: nextCustomers,
+                suppliers: nextSuppliers,
+                pendingApprovals: markApproved(),
+              };
+            }
+
+            if (item.type === 'entity_update') {
+              if (entity === 'product') {
+                const after = d.after as Product;
+                nextProducts = s.products.map((x) => (x.id === after.id ? after : x));
+              } else if (entity === 'customer') {
+                const after = d.after as Customer;
+                nextCustomers = s.customers.map((x) => (x.id === after.id ? after : x));
+              } else if (entity === 'supplier') {
+                const after = d.after as Supplier;
+                nextSuppliers = s.suppliers.map((x) => (x.id === after.id ? after : x));
+              }
+              return {
+                ...s,
+                products: nextProducts,
+                customers: nextCustomers,
+                suppliers: nextSuppliers,
+                pendingApprovals: markApproved(),
+              };
+            }
+          }
 
           if (item.type === 'sale') {
             const invoiceId = (item.data as { invoice_id?: number }).invoice_id;
@@ -1344,7 +1960,10 @@ export const useStore = create<AppStore>()(
                   ? {
                       ...i,
                       approval_status: 'approved' as const,
-                      status: 'approved' as const,
+                      status:
+                        inv.payment_method === 'cash' && (inv.due_amount || 0) <= 0
+                          ? ('completed' as const)
+                          : ('approved' as const),
                       stock_committed: true,
                     }
                   : i
@@ -1352,7 +1971,7 @@ export const useStore = create<AppStore>()(
               if (bookstoreSale) {
                 nextBooks = applyInvoiceLinesToStockRows(s.books, inv.items, 'deduct');
               } else {
-                nextProducts = applyInvoiceLinesToStockRows(s.products, inv.items, 'deduct');
+                nextProducts = applyInvoiceLinesToProducts(s.products, inv.items, 'deduct', s.warehouses);
               }
               if (inv.payment_method === 'credit' && inv.due_amount > 0) {
                 const debtId = nextId(s.debts);
@@ -1389,29 +2008,84 @@ export const useStore = create<AppStore>()(
               product_id: number;
               quantity: number;
               direction?: 'to_shop' | 'to_warehouse';
+              warehouse_bin_id?: number;
             };
             const dir = d.direction ?? 'to_shop';
             const pid = d.product_id;
             const q = d.quantity;
-            const applyStock = <T extends { id: number; stock_shop: number; stock_warehouse: number }>(row: T): T => {
-              if (row.id !== pid) return row;
-              if (dir === 'to_shop') {
-                if (q > row.stock_warehouse) return row;
+            const bookstoreWt = s.shopSettings.business_type === 'bookstore';
+            if (bookstoreWt) {
+              const applyStock = <T extends { id: number; stock_shop: number; stock_warehouse: number }>(row: T): T => {
+                if (row.id !== pid) return row;
+                if (dir === 'to_shop') {
+                  if (q > row.stock_warehouse) return row;
+                  return {
+                    ...row,
+                    stock_warehouse: row.stock_warehouse - q,
+                    stock_shop: row.stock_shop + q,
+                  };
+                }
+                if (q > row.stock_shop) return row;
                 return {
                   ...row,
-                  stock_warehouse: row.stock_warehouse - q,
-                  stock_shop: row.stock_shop + q,
+                  stock_shop: row.stock_shop - q,
+                  stock_warehouse: row.stock_warehouse + q,
                 };
-              }
-              if (q > row.stock_shop) return row;
-              return {
-                ...row,
-                stock_shop: row.stock_shop - q,
-                stock_warehouse: row.stock_warehouse + q,
               };
+              nextProducts = s.products.map(applyStock);
+              nextBooks = s.books.map(applyStock);
+            } else {
+              const binId = d.warehouse_bin_id ?? s.warehouses[0]?.id ?? 1;
+              nextProducts = s.products.map((p) => {
+                if (p.id !== pid) return p;
+                const moved = applyBinWarehouseTransfer(p, s.warehouses, binId, q, dir);
+                return moved ?? p;
+              });
+            }
+          }
+
+          if (item.type === 'purchase') {
+            const payload = item.data as unknown as Omit<PurchaseInvoice, 'id' | 'invoice_number' | 'created_at'>;
+            const pid = nextId(s.purchaseInvoices.length > 0 ? s.purchaseInvoices : [{ id: 0 }]);
+            const newP: PurchaseInvoice = {
+              ...payload,
+              id: pid,
+              invoice_number: `PUR-${String(pid).padStart(3, '0')}`,
+              created_at: new Date().toISOString(),
             };
-            nextProducts = s.products.map(applyStock);
-            nextBooks = s.books.map(applyStock);
+            nextPurchaseInvoices = [newP, ...s.purchaseInvoices];
+            for (const line of newP.items) {
+              nextProducts = nextProducts.map((p) =>
+                p.id !== line.product_id ? p : { ...p, stock_shop: p.stock_shop + line.quantity }
+              );
+            }
+            if (newP.due_amount > 0) {
+              nextSuppliers = nextSuppliers.map((sup) =>
+                sup.id === newP.supplier_id ? { ...sup, balance: sup.balance - newP.due_amount } : sup
+              );
+            }
+          }
+
+          if (item.type === 'debt_payment') {
+            const { debt_id: did, amount: payAmt } = item.data as { debt_id: number; amount: number };
+            let customerId: number | null = null;
+            nextDebts = s.debts.map((d) => {
+              if (d.id !== did) return d;
+              customerId = d.customer_id;
+              const newPaid = d.paid_amount + payAmt;
+              const newRemaining = Math.max(0, d.amount - newPaid);
+              return {
+                ...d,
+                paid_amount: newPaid,
+                remaining_amount: newRemaining,
+                status: (newRemaining <= 0 ? 'paid' : 'partial') as Debt['status'],
+              };
+            });
+            if (customerId != null) {
+              nextCustomers = s.customers.map((c) =>
+                c.id === customerId ? { ...c, balance: c.balance + payAmt } : c
+              );
+            }
           }
 
           if (item.type === 'staff_expense') {
@@ -1455,9 +2129,11 @@ export const useStore = create<AppStore>()(
             books: nextBooks,
             debts: nextDebts,
             customers: nextCustomers,
+            suppliers: nextSuppliers,
             expenses: nextExpenses,
             cashEntries: nextCash,
             productReturns: nextReturns,
+            purchaseInvoices: nextPurchaseInvoices,
             pendingApprovals: s.pendingApprovals.map(p =>
               p.id === id
                 ? { ...p, status: 'approved', reviewed_by: reviewerName, reviewed_at: new Date().toISOString() }
@@ -1589,10 +2265,12 @@ export const useStore = create<AppStore>()(
           suppliers: [],
           expenses: [],
           cashEntries: [],
+          partyCashLedger: [],
           productReturns: [],
           reminders: [],
           notifications: [],
           pendingApprovals: [],
+          trash: [],
           procurementManualLines: [],
           warehouses: [{ id: 1, name: 'انبار اصلی' }],
         }),
@@ -1613,6 +2291,7 @@ export const useStore = create<AppStore>()(
         staff: state.staff,
         expenses: state.expenses,
         cashEntries: state.cashEntries,
+        partyCashLedger: state.partyCashLedger,
         productReturns: state.productReturns,
         reminders: state.reminders,
         notifications: state.notifications,
@@ -1622,6 +2301,7 @@ export const useStore = create<AppStore>()(
         currencyRates: state.currencyRates,
         procurementManualLines: state.procurementManualLines,
         warehouses: state.warehouses,
+        trash: state.trash,
         // Keep auth/session in memory to reduce XSS persistence risk.
       }),
       merge: mergePersistedWithoutAuth,

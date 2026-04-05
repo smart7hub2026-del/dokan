@@ -4,6 +4,7 @@ import {
   ShoppingCart, Users, Package, CreditCard, TrendingUp,
   AlertTriangle, PlusCircle, ArrowUpRight, ArrowDownRight, DollarSign,
   Briefcase, FileText, BarChart3, ClipboardList, Euro, ChevronDown, ChevronUp,
+  Pencil,
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts';
 import { User, type Product } from '../data/mockData';
@@ -11,6 +12,7 @@ import { useStore } from '../store/useStore';
 import { useApp } from '../context/AppContext';
 import { bookToProductForSale } from '../utils/bookInventory';
 import { formatDateByCalendar, formatWeekdayByCalendar, type CalendarMode } from '../utils/dateFormat';
+import { invoiceCountsTowardFinancialReports } from '../utils/invoiceReports';
 
 interface Props { currentUser: User; }
 
@@ -72,10 +74,13 @@ const CustomTooltip = ({ active, payload, label, formatValue }: any) => {
 };
 
 export default function ShopDashboard({ currentUser }: Props) {
-  const { t, currencies, isDark } = useApp();
+  const { t, currencies, isDark, updateExchangeRate } = useApp();
   const navigate = useNavigate();
   const [viewCurrency, setViewCurrency] = useState<'AFN' | 'USD' | 'EUR'>('AFN');
   const [purchaseDetailOpen, setPurchaseDetailOpen] = useState(false);
+  const [rateModalOpen, setRateModalOpen] = useState(false);
+  const [rateDraftUsd, setRateDraftUsd] = useState('');
+  const [rateDraftEur, setRateDraftEur] = useState('');
   const products = useStore(s => s.products);
   const books = useStore(s => s.books);
   const shopSettings = useStore(s => s.shopSettings);
@@ -83,12 +88,18 @@ export default function ShopDashboard({ currentUser }: Props) {
   const invoices = useStore(s => s.invoices);
   const debts = useStore(s => s.debts);
   const expenses = useStore(s => s.expenses);
+  const currencyRates = useStore((s) => s.currencyRates);
+
+  const reportInvoices = useMemo(
+    () => invoices.filter(invoiceCountsTowardFinancialReports),
+    [invoices]
+  );
 
   const todayStr = new Date().toISOString().slice(0, 10);
 
   const todaySales = useMemo(
-    () => invoices.filter(i => i.invoice_date === todayStr).reduce((s, i) => s + i.total, 0),
-    [invoices, todayStr]
+    () => reportInvoices.filter(i => i.invoice_date === todayStr).reduce((s, i) => s + i.total, 0),
+    [reportInvoices, todayStr]
   );
 
   const isBookstore = shopSettings.business_type === 'bookstore';
@@ -126,7 +137,7 @@ export default function ShopDashboard({ currentUser }: Props) {
     const now = new Date();
     const y = now.getFullYear();
     const m = now.getMonth();
-    const monthInv = invoices
+    const monthInv = reportInvoices
       .filter(i => {
         const d = new Date(i.invoice_date);
         return !Number.isNaN(d.getTime()) && d.getFullYear() === y && d.getMonth() === m;
@@ -139,7 +150,7 @@ export default function ShopDashboard({ currentUser }: Props) {
       })
       .reduce((s, e) => s + e.amount, 0);
     return monthInv - monthExp;
-  }, [invoices, expenses]);
+  }, [reportInvoices, expenses]);
 
   const salesChartData = useMemo(() => {
     const out: { name: string; sales: number; cost: number }[] = [];
@@ -147,18 +158,18 @@ export default function ShopDashboard({ currentUser }: Props) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const ds = d.toISOString().slice(0, 10);
-      const sales = invoices.filter(inv => inv.invoice_date === ds).reduce((s, x) => s + x.total, 0);
+      const sales = reportInvoices.filter(inv => inv.invoice_date === ds).reduce((s, x) => s + x.total, 0);
       const cost = expenses.filter(ex => ex.date === ds).reduce((s, x) => s + x.amount, 0);
       out.push({ name: formatWeekdayByCalendar(d, calendarMode), sales, cost });
     }
     return out;
-  }, [invoices, expenses, calendarMode]);
+  }, [reportInvoices, expenses, calendarMode]);
 
   const topSellingData = useMemo(() => {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
     const qtyByProduct = new Map<number, number>();
-    for (const inv of invoices) {
+    for (const inv of reportInvoices) {
       if (new Date(inv.invoice_date) < cutoff) continue;
       for (const it of inv.items) {
         qtyByProduct.set(it.product_id, (qtyByProduct.get(it.product_id) || 0) + it.quantity);
@@ -186,7 +197,7 @@ export default function ShopDashboard({ currentUser }: Props) {
     return rows.length > 0
       ? rows
       : [{ name: 'هنوز فروشی ثبت نشده', value: 0, color: '#64748b' }];
-  }, [invoices, products, books, isBookstore]);
+  }, [reportInvoices, products, books, isBookstore]);
 
   const recentInvoices = useMemo(() => {
     return [...invoices]
@@ -224,7 +235,7 @@ export default function ShopDashboard({ currentUser }: Props) {
     const rows = catalog
       .map((p) => {
         const qty = Number(p.stock_shop || 0) + Number(p.stock_warehouse || 0);
-        const cur = (p.currency_code ?? 'AFN') as 'AFN' | 'USD' | 'EUR';
+        const cur = (p.purchase_price_currency ?? p.currency_code ?? 'AFN') as 'AFN' | 'USD' | 'EUR';
         const purchase = Number(p.purchase_price || 0);
         const lineValue = qty * purchase;
         return {
@@ -250,8 +261,122 @@ export default function ShopDashboard({ currentUser }: Props) {
     return `${v.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${code === 'USD' ? '$' : '€'}`;
   };
 
+  const usdRate = Number(currencyRates.USD) || 0;
+  const eurRate = Number(currencyRates.EUR) || 0;
+
+  const openRateModal = () => {
+    setRateDraftUsd(usdRate > 0 ? String(usdRate) : '');
+    setRateDraftEur(eurRate > 0 ? String(eurRate) : '');
+    setRateModalOpen(true);
+  };
+
+  const applyRateDraft = () => {
+    const u = Number(rateDraftUsd);
+    const e = Number(rateDraftEur);
+    if (Number.isFinite(u) && u > 0) updateExchangeRate('USD', u);
+    if (Number.isFinite(e) && e > 0) updateExchangeRate('EUR', e);
+    setRateModalOpen(false);
+  };
+
   return (
     <div className="space-y-8 fade-in pb-10">
+      {usdRate > 0 && (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-sm font-bold ${
+            isDark
+              ? 'border-sky-500/30 bg-sky-500/10 text-sky-100'
+              : 'border-sky-200 bg-sky-50 text-sky-900'
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-3 min-w-0">
+            <DollarSign size={20} className={`shrink-0 ${isDark ? 'text-sky-300' : 'text-sky-600'}`} />
+            <span className="min-w-0 leading-snug">
+              نرخ مرجع (تنظیمات ارز): هر{' '}
+              <span className="font-bold text-white">۱ دلار</span> حدود{' '}
+              <span className="font-mono tabular-nums">{Math.round(usdRate).toLocaleString('fa-IR')}</span>
+              {' ؋'}
+              {eurRate > 0 && (
+                <>
+                  {' · هر '}
+                  <span className="font-bold text-white">۱ یورو</span> حدود{' '}
+                  <span className="font-mono tabular-nums">{Math.round(eurRate).toLocaleString('fa-IR')}</span>
+                  {' ؋'}
+                </>
+              )}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={openRateModal}
+            className={`shrink-0 inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition-colors ${
+              isDark
+                ? 'bg-sky-500/20 text-sky-200 hover:bg-sky-500/30 border border-sky-500/35'
+                : 'bg-white text-sky-800 hover:bg-sky-100 border border-sky-300/80 shadow-sm'
+            }`}
+            title="ویرایش نرخ ارز"
+          >
+            <Pencil size={14} />
+            نرخ
+          </button>
+        </div>
+      )}
+      {rateModalOpen && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setRateModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-slate-900 p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-white font-bold text-base mb-1 flex items-center gap-2">
+              <DollarSign size={18} className="text-sky-400" />
+              نرخ مرجع (نسبت به افغانی)
+            </h3>
+            <p className="text-slate-500 text-[11px] mb-4 leading-relaxed">
+              هر واحد ارز چند افغانی است؛ مثل تنظیمات زبان و ارز. پس از ذخیره، داشبورد و تبدیل قیمت‌ها به‌روز می‌شوند.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-slate-400 text-xs block mb-1">۱ دلار = چند ؋</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={rateDraftUsd}
+                  onChange={(e) => setRateDraftUsd(e.target.value)}
+                  className="w-full bg-slate-800/80 border border-slate-600 rounded-xl px-3 py-2.5 text-white text-sm font-mono"
+                  dir="ltr"
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 text-xs block mb-1">۱ یورو = چند ؋</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={rateDraftEur}
+                  onChange={(e) => setRateDraftEur(e.target.value)}
+                  className="w-full bg-slate-800/80 border border-slate-600 rounded-xl px-3 py-2.5 text-white text-sm font-mono"
+                  dir="ltr"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button
+                type="button"
+                onClick={() => setRateModalOpen(false)}
+                className="flex-1 glass text-slate-300 py-2.5 rounded-xl text-sm"
+              >
+                انصراف
+              </button>
+              <button type="button" onClick={applyRateDraft} className="flex-1 btn-primary text-white py-2.5 rounded-xl text-sm font-bold">
+                ذخیره
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className={`text-3xl font-black tracking-tight ${isDark ? 'text-white' : 'light-title'}`}>{t('welcome_message')}، {currentUser.full_name}</h1>

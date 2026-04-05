@@ -142,6 +142,7 @@ export default function GlobalSearchModal({ onClose }: { onClose: () => void }) 
             { title: t('product_sales_ranking'), page: 'product-sales-ranking', icon: '📈' },
             { title: t('reorder_list_title'), page: 'reorder-list', icon: '📋' },
             { title: t('shop_journal'), page: 'journal', icon: '📰' },
+            { title: t('cash_transactions'), page: 'transactions', icon: '💵' },
           ].filter((p) => p.title.toLowerCase().includes(qq) || p.page.includes(qq));
     pages.forEach((p) => results.push({ ...p, type: 'page', subtitle: '' }));
   }

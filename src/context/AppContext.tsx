@@ -137,13 +137,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const currentCurrencyData = currencies.find(c => c.code === currency);
   const currencySymbol = currentCurrencyData?.symbol || '؋';
 
+  /** نرخ در mockCurrencies: هر واحد ارز خارجی = چند افغانی (مثلاً ۱ USD = 65 AFN) */
   const convertPrice = (amount: number, from: CurrencyCode = 'AFN'): number => {
     if (from === currency) return amount;
     const fromCurr = currencies.find(c => c.code === from);
     const toCurr = currencies.find(c => c.code === currency);
     if (!fromCurr || !toCurr) return amount;
-    const inAFN = amount / fromCurr.exchange_rate;
-    return inAFN * toCurr.exchange_rate;
+    const inAFN = amount * fromCurr.exchange_rate;
+    return inAFN / toCurr.exchange_rate;
   };
 
   const formatPrice = (amount: number, from: CurrencyCode = 'AFN'): string => {

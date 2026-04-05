@@ -4,6 +4,7 @@ import { Supplier } from '../data/mockData';
 import { useApp } from '../context/AppContext';
 import { useStore } from '../store/useStore';
 import FormModal from './ui/FormModal';
+import { useToast } from './Toast';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
 
 type PrintSize = 'A4' | 'A5' | '80mm' | '58mm';
@@ -169,7 +170,9 @@ function SupplierDetailModal({ supplier, onClose }: { supplier: Supplier; onClos
 
 export default function SuppliersPage() {
   const { isDark } = useApp();
+  const { success: toastSuccess } = useToast();
   const suppliers = useStore(s => s.suppliers);
+  const currentUser = useStore(s => s.currentUser);
   const addSupplier = useStore(s => s.addSupplier);
   const updateSupplier = useStore(s => s.updateSupplier);
   const deleteSupplier = useStore(s => s.deleteSupplier);
@@ -221,6 +224,7 @@ export default function SuppliersPage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const staff = currentUser && ['seller', 'stock_keeper', 'accountant'].includes(currentUser.role);
     if (editItem) {
       updateSupplier({
         ...editItem,
@@ -233,8 +237,9 @@ export default function SuppliersPage() {
         product_types: form.product_types,
         notes: form.notes || undefined,
       });
+      toastSuccess(staff ? 'تأیید مدیر' : 'ذخیره', staff ? 'درخواست ویرایش برای مدیر ارسال شد.' : 'تأمین‌کننده بروز شد.');
     } else {
-      addSupplier({
+      const created = addSupplier({
         company_name: form.company_name,
         contact_name: form.contact_name,
         phone: form.phone,
@@ -247,6 +252,12 @@ export default function SuppliersPage() {
         total_purchases: 0,
         status: 'active',
       });
+      if (!created) {
+        toastSuccess('تأیید مدیر', 'درخواست ثبت تأمین‌کننده برای مدیر ارسال شد.');
+        setShowModal(false);
+        return;
+      }
+      toastSuccess('ثبت شد', 'تأمین‌کننده اضافه شد.');
     }
     setShowModal(false);
   };

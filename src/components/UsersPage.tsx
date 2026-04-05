@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Search, Edit2, Shield, User, Eye, EyeOff, KeyRound, UserCheck, RefreshCw, Mic, MicOff } from 'lucide-react';
+import { Search, Edit2, Shield, User, Eye, EyeOff, KeyRound, UserCheck, RefreshCw, Mic, MicOff, Mail } from 'lucide-react';
 import { useToast } from './Toast';
 import { useApp } from '../context/AppContext';
 import Modal from './Modal';
@@ -38,9 +38,9 @@ type StaffLoginRole = 'seller' | 'stock_keeper' | 'accountant';
 function mergeRoleLoginEnabled(ss: ShopSettings) {
   const r = ss.role_login_enabled;
   return {
-    seller: r?.seller !== false,
-    stock_keeper: r?.stock_keeper !== false,
-    accountant: r?.accountant !== false,
+    seller: r?.seller === true,
+    stock_keeper: r?.stock_keeper === true,
+    accountant: r?.accountant === true,
   };
 }
 
@@ -68,6 +68,9 @@ export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
     full_name: '',
     username: '',
     status: 'active' as 'active' | 'inactive' | 'pending',
+    email: '',
+    preferred_language: '',
+    preferred_currency: '',
   });
 
   const refresh = useCallback(async () => {
@@ -105,6 +108,9 @@ export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
       full_name: u.full_name,
       username: u.username,
       status: u.status,
+      email: u.email || '',
+      preferred_language: u.preferred_language || '',
+      preferred_currency: u.preferred_currency || '',
     });
     setShowEdit(true);
   };
@@ -115,7 +121,14 @@ export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
     try {
       await apiUpdateShopUser(
         editRow.id,
-        { full_name: form.full_name.trim(), username: form.username.trim(), status: form.status },
+        {
+          full_name: form.full_name.trim(),
+          username: form.username.trim(),
+          status: form.status,
+          email: form.email.trim() || undefined,
+          preferred_language: form.preferred_language.trim() || undefined,
+          preferred_currency: form.preferred_currency.trim() || undefined,
+        },
         authToken
       );
       success('ذخیره شد', 'کاربر بروزرسانی شد');
@@ -187,6 +200,15 @@ export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
         </div>
       </div>
 
+      <div className={`rounded-2xl p-4 border ${isDark ? 'glass border-white/10' : 'bg-white border-slate-200 shadow-sm'}`}>
+        <h3 className={`text-sm font-bold flex items-center gap-2 ${textColor}`}>
+          <Mail size={16} className="text-indigo-400" /> راهنما
+        </h3>
+        <p className={`text-xs mt-2 leading-relaxed ${subText}`}>
+          از «ویرایش» نام، نام کاربری، ایمیل و زبان/ارز ترجیحی هر کاربر را ثبت کنید. از دکمهٔ «رمز» همان ردیف، رمز ورود نقش را طبق سیاست قوی تنظیم کنید (برای کاربران معلق پس از ثبت رمز، وضعیت فعال می‌شود).
+        </p>
+      </div>
+
       <div className="glass rounded-2xl p-5 space-y-3">
         <div>
           <h3 className="text-white font-semibold flex items-center gap-2">
@@ -235,6 +257,70 @@ export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
                       }`}
                     />
                   </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="glass rounded-2xl p-5 space-y-3">
+        <h3 className={`${textColor} font-semibold flex items-center gap-2`}>
+          <KeyRound size={16} className="text-amber-400" /> نام کاربری و رمز نقش‌های کارکنان
+        </h3>
+        <p className={`${subText} text-xs mt-1 leading-relaxed`}>
+          فروشنده، انباردار و حسابدار هر کدام یک حساب جدا دارند. نام کاربری را در جدول پایین با «ویرایش» عوض کنید؛ رمز را با دکمهٔ «رمز» همان سطر بگذارید. تا وقتی ورود آن نقش در بلوک بالا روشن نباشد، در صفحهٔ ورود دیده نمی‌شود.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {(['seller', 'stock_keeper', 'accountant'] as const).map((role) => {
+            const u = users.find((x) => x.role === role);
+            const on = mergeRoleLoginEnabled(shopSettings)[role];
+            return (
+              <div
+                key={role}
+                className={`rounded-xl border px-3 py-3 space-y-2 ${
+                  isDark ? 'border-white/10 bg-slate-800/40' : 'border-slate-200 bg-slate-50'
+                }`}
+              >
+                <p className={`text-sm font-bold ${textColor}`}>{roleLabels[role]}</p>
+                {u ? (
+                  <>
+                    <div>
+                      <p className={`text-[10px] uppercase tracking-wide ${subText}`}>نام کاربری</p>
+                      <p className={`font-mono text-xs ${textColor} break-all`} dir="ltr">
+                        {u.username}
+                      </p>
+                    </div>
+                    <p className={`text-[11px] ${subText}`}>
+                      وضعیت:{' '}
+                      <span className={u.status === 'active' ? 'text-emerald-400' : u.status === 'pending' ? 'text-amber-400' : 'text-rose-400'}>
+                        {u.status === 'active' ? 'فعال' : u.status === 'pending' ? 'معلق' : 'غیرفعال'}
+                      </span>
+                      {' · '}
+                      ورود نقش: <span className={on ? 'text-emerald-400' : 'text-slate-500'}>{on ? 'روشن' : 'خاموش'}</span>
+                    </p>
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(u)}
+                        className="text-[11px] px-2 py-1.5 rounded-lg glass text-slate-300 hover:text-blue-400"
+                      >
+                        ویرایش نام کاربری
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPwdRow(u);
+                          setPwd('');
+                        }}
+                        className="text-[11px] px-2 py-1.5 rounded-lg glass text-amber-300 hover:text-amber-200 flex items-center gap-1"
+                      >
+                        <KeyRound size={12} /> تنظیم رمز
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p className={`text-xs ${subText}`}>کاربری با این نقش از سرور برنگشته؛ پس از ایجاد کاربر در پنل، اینجا پر می‌شود.</p>
                 )}
               </div>
             );
@@ -458,6 +544,48 @@ export default function UsersPage({ embedded }: { embedded?: boolean } = {}) {
               <option value="inactive">غیرفعال</option>
               <option value="pending">معلق</option>
             </select>
+          </div>
+          <div>
+            <label className="text-slate-400 text-xs mb-1 block flex items-center gap-1">
+              <Mail size={11} /> ایمیل (اختیاری)
+            </label>
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+              className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500"
+              placeholder="user@example.com"
+              dir="ltr"
+            />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-slate-400 text-xs mb-1 block">زبان ترجیحی</label>
+              <select
+                value={form.preferred_language || ''}
+                onChange={(e) => setForm({ ...form, preferred_language: e.target.value })}
+                className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500"
+              >
+                <option value="">—</option>
+                <option value="farsi">فارسی</option>
+                <option value="pashto">پشتو</option>
+                <option value="english">English</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-slate-400 text-xs mb-1 block">ارز ترجیحی</label>
+              <select
+                value={form.preferred_currency || ''}
+                onChange={(e) => setForm({ ...form, preferred_currency: e.target.value })}
+                className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2.5 text-white text-sm focus:border-indigo-500"
+              >
+                <option value="">—</option>
+                <option value="AFN">AFN</option>
+                <option value="USD">USD</option>
+                <option value="EUR">EUR</option>
+                <option value="IRT">IRT</option>
+              </select>
+            </div>
           </div>
         </form>
       </Modal>

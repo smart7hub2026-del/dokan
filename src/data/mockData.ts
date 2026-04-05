@@ -99,6 +99,8 @@ export interface Product {
   unit_id?: number;
   unit_name?: string;
   purchase_price: number;
+  /** واحد قیمت خرید (پیش‌فرض افغانی) */
+  purchase_price_currency?: CurrencyCode;
   sale_price: number;
   stock_shop: number;
   stock_warehouse: number;
@@ -199,6 +201,9 @@ export interface InvoiceItem {
   image_url?: string;
   /** کسر موجودی از مغازه یا انبار مرکزی */
   stock_source?: 'shop' | 'warehouse';
+  /** وقتی فروش از گدام است: کدام سطل انبار (چند انبار) */
+  warehouse_bin_id?: number;
+  warehouse_bin_label?: string;
 }
 
 export interface Invoice {
@@ -447,10 +452,10 @@ export const translations: Translations = {
     customers_crm_directory_heading: 'لیست و پرونده مشتریان',
     crm_super_shop_hint: 'کد فروشگاه هدف (ابرادمین)',
     crm_tab_deals: 'معاملات', crm_tab_tasks: 'وظایف', crm_tab_contacts: 'تماس‌ها', crm_tab_rfm: 'ارزش مشتری',
-    crm_apply: 'اعمال', crm_refresh: 'تازه‌سازی', crm_access_denied: 'فقط مدیر دکان یا ابرادمین به CRM دسترسی دارد.',
+    crm_apply: 'اعمال', crm_refresh: 'تازه‌سازی',     crm_access_denied: 'فقط مدیر دکان یا ابرادمین به CRM دسترسی دارد.',
     crm_complete: 'انجام', crm_reopen: 'باز کردن',
     language_currency: 'زبان و ارز',
-    sales_pos: 'فروش / POS', invoices: 'فاکتورها', suppliers: 'تامین‌کنندگان', accounting: 'حسابداری',
+    sales_pos: 'فروش / POS', invoices: 'فاکتورها', suppliers: 'تامین‌کنندگان', cash_transactions: 'معاملات', accounting: 'حسابداری',
     staff_payroll: 'پرسنل و حقوق', inventory_management: 'مدیریت موجودی', purchase_invoices: 'فاکتورها (خرید)',
     inventory_reports: 'گزارش موجودی', shop_management: 'مدیریت فروشگاه', role_super_admin: 'ابرادمین',
     role_admin: 'مدیر دکان', role_seller: 'فروشنده', role_stock_keeper: 'انباردار', role_accountant: 'حسابدار',
@@ -653,7 +658,7 @@ export const translations: Translations = {
     crm_apply: 'پلی کړئ', crm_refresh: 'تازه', crm_access_denied: 'یوازې دوکان مدیر یا سوپر اډمین.',
     crm_complete: 'بشپړ', crm_reopen: 'بیرته پرانیستل',
     language_currency: 'ژبه او اسعار',
-    sales_pos: 'پلور / POS', invoices: 'بلونه', suppliers: 'عرضه کوونکي', accounting: 'حسابداري',
+    sales_pos: 'پلور / POS', invoices: 'بلونه', suppliers: 'عرضه کوونکي', cash_transactions: 'معاملات', accounting: 'حسابداري',
     staff_payroll: 'کارکوونکي او معاش', inventory_management: 'د موجودي مدیریت', purchase_invoices: 'د پیرود بلونه',
     inventory_reports: 'د موجودي راپورونه', shop_management: 'د دوکان مدیریت', role_super_admin: 'سوپر اډمین',
     role_admin: 'دوکان مدیر', role_seller: 'پلورونکی', role_stock_keeper: 'ګدام دار', role_accountant: 'حسابدار',
@@ -856,7 +861,7 @@ export const translations: Translations = {
     crm_apply: 'اعمال', crm_refresh: 'تازه‌سازی', crm_access_denied: 'فقط مدیر فروشگاه یا ابرادمین.',
     crm_complete: 'انجام', crm_reopen: 'باز کردن',
     language_currency: 'زبان و ارز',
-    sales_pos: 'فروش / POS', invoices: 'فاکتورها', suppliers: 'تامین‌کنندگان', accounting: 'حسابداری',
+    sales_pos: 'فروش / POS', invoices: 'فاکتورها', suppliers: 'تامین‌کنندگان', cash_transactions: 'معاملات', accounting: 'حسابداری',
     staff_payroll: 'پرسنل و حقوق', inventory_management: 'مدیریت موجودی', purchase_invoices: 'فاکتورهای خرید',
     inventory_reports: 'گزارش موجودی', shop_management: 'مدیریت فروشگاه', role_super_admin: 'ابرادمین',
     role_admin: 'مدیر فروشگاه', role_seller: 'فروشنده', role_stock_keeper: 'انباردار', role_accountant: 'حسابدار',
@@ -1047,7 +1052,7 @@ export const translations: Translations = {
     crm_apply: 'Apply', crm_refresh: 'Refresh', crm_access_denied: 'Only shop admin or super admin can open CRM.',
     crm_complete: 'Complete', crm_reopen: 'Reopen',
     language_currency: 'Language & Currency',
-    sales_pos: 'Sales / POS', invoices: 'Invoices', suppliers: 'Suppliers', accounting: 'Accounting',
+    sales_pos: 'Sales / POS', invoices: 'Invoices', suppliers: 'Suppliers', cash_transactions: 'Cash deals', accounting: 'Accounting',
     staff_payroll: 'Staff & Payroll', inventory_management: 'Inventory Management', purchase_invoices: 'Purchase Invoices',
     inventory_reports: 'Inventory Reports', shop_management: 'Shop Management', role_super_admin: 'Super Admin',
     role_admin: 'Shop Admin', role_seller: 'Seller', role_stock_keeper: 'Stock Keeper', role_accountant: 'Accountant',

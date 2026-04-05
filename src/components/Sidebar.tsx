@@ -3,7 +3,7 @@ import {
   Megaphone, FileText, Building2, LogOut,
   BarChart3, Package, Bell, DollarSign,
   UserCheck, CreditCard, ChevronLeft, Shield, BookOpen, Truck,
-  Tags, ClipboardList, Warehouse, Newspaper, } from 'lucide-react';
+  Tags, ClipboardList, Warehouse, Newspaper, Banknote, } from 'lucide-react';
 
 import { useApp } from '../context/AppContext';
 import { useStore } from '../store/useStore';
@@ -45,6 +45,7 @@ const adminLinks = [
   { id: 'warehouse', icon: Warehouse, labelKey: 'warehouse_page' },
   { id: 'customers', icon: Users, labelKey: 'customers_crm_hub_title' },
   { id: 'suppliers', icon: Truck, labelKey: 'suppliers' },
+  { id: 'transactions', icon: Banknote, labelKey: 'cash_transactions' },
   { id: 'debts', icon: CreditCard, labelKey: 'debts' },
   { id: 'accounting', icon: DollarSign, labelKey: 'accounting' },
   { id: 'staff', icon: UserCheck, labelKey: 'staff_payroll' },
@@ -76,6 +77,7 @@ const accountantLinks = [
   { id: 'invoices', icon: FileText, labelKey: 'invoices' },
   { id: 'customers', icon: Users, labelKey: 'customers' },
   { id: 'suppliers', icon: Truck, labelKey: 'suppliers' },
+  { id: 'transactions', icon: Banknote, labelKey: 'cash_transactions' },
   { id: 'staff', icon: UserCheck, labelKey: 'staff_payroll' },
   { id: 'reports', icon: BarChart3, labelKey: 'reports' },
   { id: 'journal', icon: Newspaper, labelKey: 'shop_journal' },
@@ -89,6 +91,7 @@ const stockLinks = [
   { id: 'reorder-list', icon: ClipboardList, labelKey: 'reorder_list_title' },
   { id: 'journal', icon: Newspaper, labelKey: 'shop_journal' },
   { id: 'suppliers', icon: Truck, labelKey: 'suppliers' },
+  { id: 'transactions', icon: Banknote, labelKey: 'cash_transactions' },
   { id: 'invoices', icon: FileText, labelKey: 'purchase_invoices' },
   { id: 'reports', icon: FileText, labelKey: 'inventory_reports' },
   { id: 'notifications', icon: Bell, labelKey: 'notifications' },

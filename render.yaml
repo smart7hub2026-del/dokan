@@ -1,4 +1,5 @@
-# اختیاری: اگر API اصلی روی Vercel است (مثلاً https://dokan.vercel.app)، این سرویس Render لازم نیست مگر برای worker/DB.
+# فرانت production: https://dokan-iota-two.vercel.app — در Dashboard این سرویس بگذارید ALLOWED_ORIGINS=https://dokan-iota-two.vercel.app
+# اگر API اصلی فقط روی Vercel است، این Web Service Render اختیاری است.
 # Render: Web Service — DATABASE_URL را در Dashboard به PostgreSQL واقعی ست کنید
 # (مثلاً Render Postgres، Neon، Supabase). SQLite دیگر در این پروژه استفاده نمی‌شود.
 #

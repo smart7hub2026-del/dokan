@@ -7,6 +7,7 @@ import { useStore } from '../store/useStore';
 import type { Expense } from '../store/useStore';
 import { useApp } from '../context/AppContext';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
+import { invoiceCountsTowardFinancialReports } from '../utils/invoiceReports';
 
 const expenseCategories = ['اجاره', 'خدمات', 'حقوق', 'حمل‌ونقل', 'تعمیرات', 'خرید لوازم', 'تبلیغات', 'ناهار و پذیرایی', 'سایر'];
 
@@ -98,6 +99,11 @@ export default function AccountingPage() {
   const storeInvoices = useStore(s => s.invoices);
   const storeProducts = useStore(s => s.products);
 
+  const reportInvoices = useMemo(
+    () => storeInvoices.filter(invoiceCountsTowardFinancialReports),
+    [storeInvoices]
+  );
+
   const returnInvoiceMatch = useMemo(() => {
     const n = retForm.invoice_number.trim();
     if (!n) return null;
@@ -111,10 +117,10 @@ export default function AccountingPage() {
   const isShopAdmin = currentUser?.role === 'admin';
 
   // Calculations
-  const totalSales = storeInvoices.reduce((s, inv) => s + inv.total, 0);
+  const totalSales = reportInvoices.reduce((s, inv) => s + inv.total, 0);
   
   // Calculate total cost based on items sold and their purchase price
-  const totalCost = storeInvoices.reduce((s, inv) => {
+  const totalCost = reportInvoices.reduce((s, inv) => {
     return s + inv.items.reduce((itemSum, item) => {
       const product = storeProducts.find(p => p.id === item.product_id);
       const costPrice = product ? product.purchase_price : 0;
@@ -129,7 +135,7 @@ export default function AccountingPage() {
 
   const manualCashIn = cashBox.filter(c => c.type === 'in').reduce((s, c) => s + c.amount, 0);
   const manualCashOut = cashBox.filter(c => c.type === 'out').reduce((s, c) => s + c.amount, 0);
-  const autoCashInSales = storeInvoices
+  const autoCashInSales = reportInvoices
     .filter((inv) => inv.payment_method === 'cash')
     .reduce((s, inv) => s + Math.max(0, Number(inv.paid_amount || inv.total || 0)), 0);
   const autoCashOutOps = storeExpenses.reduce((s, e) => s + Number(e.amount || 0), 0);

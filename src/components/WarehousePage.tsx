@@ -52,7 +52,9 @@ export default function WarehousePage() {
     binId: number;
   } | null>(null);
   const [moveQty, setMoveQty] = useState('');
-  const [newBinName, setNewBinName] = useState('');
+  const [warehouseTab, setWarehouseTab] = useState<'all' | number>('all');
+  const [addWarehouseModalOpen, setAddWarehouseModalOpen] = useState(false);
+  const [whForm, setWhForm] = useState({ name: '', address: '', manager_name: '' });
 
   const { isListening, startListening, stopListening, supported: voiceOk } = useVoiceSearch((text) => {
     setSearch(text);
@@ -72,6 +74,8 @@ export default function WarehousePage() {
       .filter(p => !q || p.name.includes(q) || p.product_code.includes(q) || (p.barcode && p.barcode.includes(q)))
       .sort((a, b) => a.name.localeCompare(b.name, 'fa'));
   }, [catalogProducts, search]);
+
+  const activeTargetBinId = warehouseTab === 'all' ? warehouses[0]?.id ?? 1 : warehouseTab;
 
   const confirmMove = () => {
     if (!moveTarget) return;
@@ -187,14 +191,19 @@ export default function WarehousePage() {
     setMoveQty('');
   };
 
-  const handleAddWarehouse = () => {
-    const name = newBinName.trim();
+  const submitAddWarehouse = () => {
+    const name = whForm.name.trim();
     if (!name) {
       error('خطا', 'نام انبار را وارد کنید');
       return;
     }
-    addWarehouse(name);
-    setNewBinName('');
+    addWarehouse({
+      name,
+      address: whForm.address.trim() || undefined,
+      manager_name: whForm.manager_name.trim() || undefined,
+    });
+    setWhForm({ name: '', address: '', manager_name: '' });
+    setAddWarehouseModalOpen(false);
     success('انبار اضافه شد', name);
   };
 
@@ -212,6 +221,46 @@ export default function WarehousePage() {
         <p className={`${textSub} text-sm mt-1 max-w-2xl`}>{t('warehouse_subtitle')}</p>
       </div>
 
+      <div className={`flex flex-wrap gap-2 items-center ${panelClass} rounded-2xl border p-3`}>
+        <span className={`text-xs font-bold ${textSub} shrink-0`}>نمای تب:</span>
+        <button
+          type="button"
+          onClick={() => setWarehouseTab('all')}
+          className={`rounded-full px-3 py-1.5 text-xs font-bold border transition-colors ${
+            warehouseTab === 'all'
+              ? isDark
+                ? 'bg-amber-500/25 border-amber-400/50 text-amber-100'
+                : 'bg-amber-100 border-amber-300 text-amber-950'
+              : isDark
+                ? 'border-white/10 text-slate-400 hover:text-white'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          همه انبارها
+        </button>
+        {warehouses.map((w) => (
+          <button
+            key={w.id}
+            type="button"
+            onClick={() => setWarehouseTab(w.id)}
+            className={`rounded-full px-3 py-1.5 text-xs font-bold border transition-colors ${
+              warehouseTab === w.id
+                ? isDark
+                  ? 'bg-sky-500/25 border-sky-400/50 text-sky-100'
+                  : 'bg-sky-100 border-sky-300 text-sky-950'
+                : isDark
+                  ? 'border-white/10 text-slate-400 hover:text-white'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {w.name}
+          </button>
+        ))}
+        <p className={`text-[11px] w-full sm:w-auto sm:mr-auto ${textSub}`}>
+          تب فعال: انتقال «به انبار» به همین سطل پیش‌فرض می‌رود و ستون همان انبار در جدول برجسته می‌شود.
+        </p>
+      </div>
+
       <div className={`rounded-2xl border p-4 space-y-3 ${panelClass}`}>
         <div className="flex flex-col sm:flex-row sm:items-end gap-3 justify-between">
           <div>
@@ -220,32 +269,24 @@ export default function WarehousePage() {
               برای هر کالا می‌توانید موجودی جدا در انبار ۱، انبار ۲ و … داشته باشید؛ در فرم ویرایش کالا هم per انبار قابل ورود است. انتقال را از اینجا با انتخاب انبار مبدأ/مقصد انجام دهید.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <input
-              value={newBinName}
-              onChange={e => setNewBinName(e.target.value)}
-              placeholder="نام انبار جدید"
-              className={`min-w-[160px] flex-1 sm:flex-none rounded-xl border px-3 py-2 text-sm outline-none focus:border-indigo-500 ${
-                isDark ? 'bg-slate-800/50 border-slate-600 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
-              }`}
-            />
-            <button
-              type="button"
-              onClick={handleAddWarehouse}
-              className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold bg-amber-600 text-white hover:bg-amber-500"
-            >
-              <Plus size={14} /> افزودن انبار
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setAddWarehouseModalOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold bg-amber-600 text-white hover:bg-amber-500 shrink-0"
+          >
+            <Plus size={14} /> افزودن انبار (جزئیات)
+          </button>
         </div>
         <div className="flex flex-wrap gap-2">
           {warehouses.map(w => (
             <span
               key={w.id}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border ${
+              title={[w.address, w.manager_name].filter(Boolean).join(' — ') || undefined}
+              className={`inline-flex flex-col gap-0.5 rounded-xl px-3 py-1.5 text-xs font-medium border ${
                 isDark ? 'bg-slate-800/80 border-white/10 text-slate-200' : 'bg-slate-100 border-slate-200 text-slate-800'
               }`}
             >
+              <span className="inline-flex items-center gap-1.5 font-bold">
               {w.name}
               {w.id !== 1 && (
                 <button
@@ -268,6 +309,13 @@ export default function WarehousePage() {
                 >
                   <Trash2 size={12} />
                 </button>
+              )}
+              </span>
+              {(w.address || w.manager_name) && (
+                <span className={`text-[10px] font-normal leading-snug ${textSub}`}>
+                  {w.address ? <span className="block">{w.address}</span> : null}
+                  {w.manager_name ? <span className="block">مسئول: {w.manager_name}</span> : null}
+                </span>
               )}
             </span>
           ))}
@@ -338,6 +386,10 @@ export default function WarehousePage() {
                                 key={w.id}
                                 className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold tabular-nums border ${
                                   isDark ? 'bg-amber-500/15 border-amber-500/30 text-amber-200' : 'bg-amber-50 border-amber-200 text-amber-900'
+                                } ${
+                                  warehouseTab !== 'all' && warehouseTab === w.id
+                                    ? 'ring-2 ring-offset-1 ring-amber-400 ring-offset-transparent'
+                                    : ''
                                 }`}
                                 title={w.name}
                               >
@@ -381,7 +433,7 @@ export default function WarehousePage() {
                             setMoveTarget({
                               product: p,
                               direction: 'to_warehouse',
-                              binId: warehouses[0]?.id ?? 1,
+                              binId: activeTargetBinId,
                             });
                             setMoveQty(String(Math.min(1, p.stock_shop) || 1));
                           }}
@@ -429,7 +481,12 @@ export default function WarehousePage() {
                         <p className="text-amber-400 font-black tabular-nums">{p.stock_warehouse}</p>
                       ) : (
                         warehouses.map((w) => (
-                          <span key={w.id} className="text-[10px] font-bold text-amber-400 tabular-nums">
+                          <span
+                            key={w.id}
+                            className={`text-[10px] font-bold text-amber-400 tabular-nums ${
+                              warehouseTab !== 'all' && warehouseTab === w.id ? 'underline decoration-amber-400 decoration-2' : ''
+                            }`}
+                          >
                             {w.name}: {getBinQty(p, w.id, warehouses)}
                           </span>
                         ))
@@ -479,7 +536,7 @@ export default function WarehousePage() {
                       setMoveTarget({
                         product: p,
                         direction: 'to_warehouse',
-                        binId: warehouses[0]?.id ?? 1,
+                        binId: activeTargetBinId,
                       });
                       setMoveQty(String(Math.min(1, p.stock_shop) || 1));
                     }}
@@ -630,6 +687,75 @@ export default function WarehousePage() {
             )}
           </div>
         ) : null}
+      </FormModal>
+
+      <FormModal
+        open={addWarehouseModalOpen}
+        onClose={() => {
+          setAddWarehouseModalOpen(false);
+          setWhForm({ name: '', address: '', manager_name: '' });
+        }}
+        title="افزودن انبار جدید"
+        size="md"
+        footer={
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={submitAddWarehouse}
+              className="flex-1 btn-primary text-white py-2.5 rounded-xl text-sm font-bold"
+            >
+              ثبت انبار
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAddWarehouseModalOpen(false);
+                setWhForm({ name: '', address: '', manager_name: '' });
+              }}
+              className={`flex-1 rounded-xl border py-2.5 text-sm ${
+                isDark ? 'border-white/10 text-slate-400 glass' : 'border-slate-200 text-slate-600 bg-slate-50'
+              }`}
+            >
+              انصراف
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-4 text-right">
+          <div>
+            <label className={`${textSub} text-xs block mb-1`}>نام انبار *</label>
+            <input
+              value={whForm.name}
+              onChange={(e) => setWhForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="مثلاً انبار شمال"
+              className={`w-full rounded-xl border px-3 py-2.5 text-sm ${
+                isDark ? 'bg-slate-800/50 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'
+              }`}
+            />
+          </div>
+          <div>
+            <label className={`${textSub} text-xs block mb-1`}>آدرس انبار</label>
+            <input
+              value={whForm.address}
+              onChange={(e) => setWhForm((f) => ({ ...f, address: e.target.value }))}
+              placeholder="خیابان، شهر، پلاک"
+              className={`w-full rounded-xl border px-3 py-2.5 text-sm ${
+                isDark ? 'bg-slate-800/50 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'
+              }`}
+            />
+          </div>
+          <div>
+            <label className={`${textSub} text-xs block mb-1`}>مسئول / انباردار</label>
+            <input
+              value={whForm.manager_name}
+              onChange={(e) => setWhForm((f) => ({ ...f, manager_name: e.target.value }))}
+              placeholder="نام مسئول"
+              className={`w-full rounded-xl border px-3 py-2.5 text-sm ${
+                isDark ? 'bg-slate-800/50 border-slate-600 text-white' : 'bg-white border-slate-200 text-slate-900'
+              }`}
+            />
+          </div>
+        </div>
       </FormModal>
     </div>
   );

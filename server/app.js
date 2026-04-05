@@ -181,7 +181,7 @@ const ALLOWED_ORIGINS = String(process.env.ALLOWED_ORIGINS || '')
 
 if (IS_PROD && ALLOWED_ORIGINS.length === 0) {
   console.warn(
-    '[config] ALLOWED_ORIGINS is empty — browsers will get CORS errors. Set comma-separated front-end URLs (e.g. https://your-app.onrender.com).',
+    '[config] ALLOWED_ORIGINS is empty — CORS will block browsers. Set comma-separated front-end origins (e.g. https://dokan-iota-two.vercel.app).',
   );
 }
 

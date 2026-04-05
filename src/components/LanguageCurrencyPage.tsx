@@ -1,8 +1,9 @@
-import { useState } from 'react';
-import { Globe, DollarSign, Save, RefreshCw, Moon, Sun, Monitor, Check, Sparkles, Languages, ArrowLeftRight, Flame } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Globe, DollarSign, Save, RefreshCw, Moon, Sun, Monitor, Check, Sparkles, Languages, ArrowLeftRight, Flame, Calendar } from 'lucide-react';
 import { mockLanguages, CurrencyCode, LangCode } from '../data/mockData';
 import { useApp, Theme } from '../context/AppContext';
 import { useToast } from './Toast';
+import { useStore } from '../store/useStore';
 
 const LANG_BADGE: Record<string, string> = {
   farsi: 'فا',
@@ -47,6 +48,17 @@ export default function LanguageCurrencyPage() {
     setConverterFrom(converterTo);
     setConverterTo(tmp);
   };
+
+  const textTitle = isDark ? 'text-white' : 'text-slate-900';
+  const textMuted = isDark ? 'text-slate-400' : 'text-slate-600';
+  const textSubtle = isDark ? 'text-slate-500' : 'text-slate-500';
+  const sectionCard = useMemo(
+    () =>
+      `rounded-3xl border p-6 sm:p-8 ${
+        isDark ? 'border-white/10 bg-slate-900/40 backdrop-blur-sm' : 'border-slate-200 bg-white shadow-sm'
+      }`,
+    [isDark]
+  );
 
   const themeOptions: { value: Theme; label: string; icon: React.ElementType; desc: string; swatch: string }[] = [
     { value: 'light', label: 'روشن', icon: Sun, desc: 'پس‌زمینه روشن؛ مناسب فضای اداری و نور روز', swatch: 'from-sky-300 to-indigo-300' },
@@ -98,6 +110,51 @@ export default function LanguageCurrencyPage() {
           </div>
         </div>
       </div>
+
+      {/* Calendar — همان تنظیم فروشگاه که در گزارش‌ها و فاکتور اعمال می‌شود */}
+      <section className={sectionCard}>
+        <div className="flex items-start gap-4 mb-6">
+          <div
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border ${
+              isDark
+                ? 'bg-gradient-to-br from-violet-500/25 to-fuchsia-600/15 border-violet-400/20'
+                : 'bg-violet-50 border-violet-200'
+            }`}
+          >
+            <Calendar size={22} className={isDark ? 'text-violet-300' : 'text-violet-700'} />
+          </div>
+          <div>
+            <h2 className={`text-lg font-semibold ${textTitle}`}>تقویم نمایش تاریخ</h2>
+            <p className={`text-sm mt-0.5 ${textMuted}`}>
+              در فاکتورها، جداول و گزارش‌ها تاریخ به شمسی یا میلادی با همین انتخاب نمایش داده می‌شود.
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {[
+            { key: 'jalali' as const, title: 'شمسی', sample: '۱۴۰۵/۰۲/۱۸ — حمل، ثور، جوزا' },
+            { key: 'gregorian' as const, title: 'میلادی', sample: '2026-05-08 — Apr, May, Jun' },
+          ].map((opt) => (
+            <button
+              key={opt.key}
+              type="button"
+              onClick={() => updateShopSettings({ date_calendar: opt.key })}
+              className={`rounded-2xl border px-4 py-3 text-right transition-all ${
+                (shopSettings.date_calendar || 'jalali') === opt.key
+                  ? isDark
+                    ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-200'
+                    : 'border-emerald-500 bg-emerald-50 text-emerald-900'
+                  : isDark
+                    ? 'border-white/10 bg-slate-800/40 text-slate-300 hover:border-white/20'
+                    : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <p className="font-bold text-sm">{opt.title}</p>
+              <p className={`text-xs mt-1 ${textMuted}`}>{opt.sample}</p>
+            </button>
+          ))}
+        </div>
+      </section>
 
       {/* Theme */}
       <section className={sectionCard}>

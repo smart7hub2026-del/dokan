@@ -22,6 +22,7 @@ export const PAGE_TO_PATH: Record<string, string> = {
   debts: '/debts',
   reminders: '/reminders',
   suppliers: '/suppliers',
+  transactions: '/transactions',
   accounting: '/accounting',
   'purchase-invoice': '/purchase-invoice',
   staff: '/staff',

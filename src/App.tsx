@@ -36,6 +36,7 @@ import AccountingPage from './components/AccountingPage';
 // Removed: SystemAnalysisPage (not needed in current panel)
 import StaffPage from './components/StaffPage';
 import InvoicesPage from './components/InvoicesPage';
+import CashTransactionsPage from './components/CashTransactionsPage';
 import ProductSalesRankingPage from './components/ProductSalesRankingPage';
 import ReorderListPage from './components/ReorderListPage';
 import GlobalSearchModal from './components/GlobalSearchModal';
@@ -573,7 +574,7 @@ function AppContent() {
             <Route path="/admin-notifications" element={<AdminNotificationsPage />} />
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/customers" element={<CustomersCrmHub />} />
-            <Route path="/crm" element={<Navigate to="/customers?view=deals" replace />} />
+            <Route path="/crm" element={<Navigate to="/transactions" replace />} />
             <Route path="/business-types" element={<BusinessTypesPage />} />
             <Route path="/support" element={<Navigate to="/settings?section=support" replace />} />
             <Route path="/settings" element={<SettingsPage currentUser={currentUser} authToken={authToken || ''} />} />
@@ -593,7 +594,8 @@ function AppContent() {
             <Route path="/offline" element={<Navigate to="/settings?section=offline" replace />} />
             <Route path="/support" element={<Navigate to="/settings?section=support" replace />} />
             <Route path="/customers" element={<CustomersCrmHub />} />
-            <Route path="/crm" element={<Navigate to="/customers?view=deals" replace />} />
+            <Route path="/crm" element={<Navigate to="/transactions" replace />} />
+            <Route path="/transactions" element={<CashTransactionsPage />} />
             <Route path="/sales" element={<SalesPage />} />
             <Route path="/product-sales-ranking" element={<ProductSalesRankingPage />} />
             <Route path="/reorder-list" element={<ReorderListPage />} />

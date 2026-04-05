@@ -40,6 +40,10 @@ npm run build
 2. با استفاده از IP محلی (مثلاً `http://192.168.1.10:5173`) در گوشی خود سایت را باز کنید.
 3. دکمه "ورود با Google" را در صفحه لاگین کلیک کنید.
 4. فرآیند احراز هویت باید به درستی و بدون خطای دستگاه انجام شود.
-"# dokanyar1" 
-"# dokan" 
-"# dokan" 
+
+### استقرار production (فرانت Vercel)
+
+- **آدرس فرانت:** [https://dokan-iota-two.vercel.app](https://dokan-iota-two.vercel.app) (بدون `/` در انتهای URL برای `ALLOWED_ORIGINS`).
+- **یک منبع در کد:** `src/config/productionSite.ts` → `PRODUCTION_FRONTEND_ORIGIN` (پیام‌های خطای API و راهنما از همین مقدار استفاده می‌کنند).
+- **Vercel (فرانت):** متغیر `VITE_API_BASE_URL` = آدرس بک‌اند API (مثلاً همان سرویس Render)، بدون `/` آخر.
+- **Render (بک‌اند):** `ALLOWED_ORIGINS=https://dokan-iota-two.vercel.app` و در صورت نیاز `CORS_ALLOW_VERCEL_APP=true` برای پیش‌نمایش‌های `*.vercel.app`.

@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Invoice, Product, Customer, Debt } from '../data/mockData';
+import { invoiceCountsTowardFinancialReports } from './invoiceReports';
 import { formatDateByCalendar, type CalendarMode } from './dateFormat';
 
 export type ReportType = 'sales' | 'inventory' | 'debts' | 'customers';
@@ -84,7 +85,9 @@ export function downloadReportExcel(params: {
     calendarMode,
   } = params;
 
-  const filteredInvoices = invoices.filter((i) => i.invoice_date >= dateFrom && i.invoice_date <= dateTo);
+  const filteredInvoices = invoices
+    .filter(invoiceCountsTowardFinancialReports)
+    .filter((i) => i.invoice_date >= dateFrom && i.invoice_date <= dateTo);
   const wb = XLSX.utils.book_new();
   const meta = [
     ['نوع گزارش', reportType],
@@ -176,7 +179,9 @@ export async function downloadReportPdf(params: ReportPdfParams): Promise<void> 
   } = params;
 
   const fmt = (afnAmount: number) => formatMoneyExcel(afnForExcel(afnAmount, viewCurrency, currencies), viewCurrency);
-  const filteredInvoices = invoices.filter((i) => i.invoice_date >= dateFrom && i.invoice_date <= dateTo);
+  const filteredInvoices = invoices
+    .filter(invoiceCountsTowardFinancialReports)
+    .filter((i) => i.invoice_date >= dateFrom && i.invoice_date <= dateTo);
 
   const title =
     reportType === 'sales'

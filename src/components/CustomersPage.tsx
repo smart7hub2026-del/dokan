@@ -13,6 +13,7 @@ import FormModal from './ui/FormModal';
 import { useToast } from './Toast';
 import { toWhatsAppDialNumber, customerPhoneKey } from '../utils/customerPhone';
 import { customerOpenDebtBalanceMismatch, openDebtRemainingTotal } from '../utils/customerDebtBalance';
+import { invoiceCountsTowardFinancialReports } from '../utils/invoiceReports';
 
 type PrintSize = 'A4' | 'A5' | '80mm' | '58mm';
 
@@ -45,18 +46,21 @@ function DeleteConfirmModal({ name, onConfirm, onClose }: { name: string; onConf
 
 function SendMessageModal({
   customer,
-  dialCode,
   formatPrice,
   onClose,
 }: {
   customer: Customer;
-  dialCode: string;
   formatPrice: (amount: number) => string;
   onClose: () => void;
 }) {
   const [method, setMethod] = useState<'whatsapp' | 'email'>('whatsapp');
   const [msg, setMsg] = useState('');
   const [sent, setSent] = useState(false);
+  const [dialCode, setDialCode] = useState(() => localStorage.getItem('dokanyar_wa_cc') || '93');
+
+  useEffect(() => {
+    localStorage.setItem('dokanyar_wa_cc', dialCode);
+  }, [dialCode]);
 
   useEffect(() => {
     setMsg(
@@ -94,6 +98,23 @@ function SendMessageModal({
           <button onClick={onClose} className="text-slate-400 hover:text-white"><X size={20} /></button>
         </div>
         <div className="p-5 space-y-4">
+          {(customer.whatsapp || customer.phone) && (
+            <div>
+              <label className="text-slate-400 text-xs mb-1 block">کد کشور برای واتساپ (بدون +)</label>
+              <select
+                value={dialCode}
+                onChange={(e) => setDialCode(e.target.value)}
+                className="w-full max-w-xs bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm"
+              >
+                <option value="93">افغانستان (+93)</option>
+                <option value="98">ایران (+98)</option>
+                <option value="92">پاکستان (+92)</option>
+                <option value="966">عربستان (+966)</option>
+                <option value="971">امارات (+971)</option>
+                <option value="">خالی — همان شماره ذخیره‌شده</option>
+              </select>
+            </div>
+          )}
           <div className="flex gap-3">
             {(customer.whatsapp || customer.phone) && (
               <button onClick={() => setMethod('whatsapp')}
@@ -134,6 +155,7 @@ function CustomerHistoryModal({ customer, invoices, debts, formatMoney, onClose 
 }) {
   const [printSize, setPrintSize] = useState<PrintSize>('A4');
   const [printPickOpen, setPrintPickOpen] = useState(false);
+
   const custInvoices = invoices.filter(i => i.customer_id === customer.id);
   const custDebts = debts.filter(d => d.customer_id === customer.id);
   const custOpenDebts = useMemo(
@@ -379,8 +401,7 @@ export default function CustomersPage({ embedInHub = false }: { embedInHub?: boo
   const [deleteItem, setDeleteItem] = useState<Customer | null>(null);
   const [listPrintOpen, setListPrintOpen] = useState(false);
   const [listPrintSize, setListPrintSize] = useState<PrintSize>('A4');
-  const [waDialCode, setWaDialCode] = useState(() => localStorage.getItem('dokanyar_wa_cc') || '93');
-  const [hideArchived, setHideArchived] = useState(true);
+  const [hideArchived] = useState(true);
   const [mergePrimary, setMergePrimary] = useState<Customer | null>(null);
   const [mergeRemoveId, setMergeRemoveId] = useState<number>(0);
   const importRef = useRef<HTMLInputElement>(null);
@@ -390,14 +411,6 @@ export default function CustomersPage({ embedInHub = false }: { embedInHub?: boo
     reminder_enabled: true, reminder_days_before: 3,
     marketing_consent: true,
   });
-
-  useEffect(() => {
-    localStorage.setItem('dokanyar_wa_cc', waDialCode);
-  }, [waDialCode]);
-
-  useEffect(() => {
-    if (filter === 'archived') setHideArchived(false);
-  }, [filter]);
 
   const { isListening, startListening, stopListening, supported } = useVoiceSearch((text) => {
     setSearch(text);
@@ -417,7 +430,9 @@ export default function CustomersPage({ embedInHub = false }: { embedInHub?: boo
     const ids = new Set<number>();
     for (const c of customers) {
       if (c.archived_at) continue;
-      const invs = invoices.filter((i) => i.customer_id === c.id);
+      const invs = invoices.filter(
+        (i) => i.customer_id === c.id && invoiceCountsTowardFinancialReports(i)
+      );
       const last = invs.reduce((m, i) => (i.invoice_date > m ? i.invoice_date : m), '');
       if (invs.length === 0 || last < ymd) ids.add(c.id);
     }
@@ -545,7 +560,8 @@ export default function CustomersPage({ embedInHub = false }: { embedInHub?: boo
         reminder_days_before: form.reminder_days_before,
         marketing_consent: form.marketing_consent,
       });
-      toastSuccess('مشتری', 'تغییرات ذخیره شد.');
+      const staff = currentUser && ['seller', 'stock_keeper', 'accountant'].includes(currentUser.role);
+      toastSuccess(staff ? 'تأیید مدیر' : 'مشتری', staff ? 'درخواست ویرایش برای مدیر ارسال شد.' : 'تغییرات ذخیره شد.');
     } else {
       const created = addCustomer({
         name: form.name,
@@ -561,8 +577,13 @@ export default function CustomersPage({ embedInHub = false }: { embedInHub?: boo
         tenant_id: tenantId,
         marketing_consent: form.marketing_consent,
       });
-      if (!created) {
+      if (created === null) {
         window.alert('شماره موبایل تکراری است.');
+        return;
+      }
+      if (created === undefined) {
+        toastSuccess('تأیید مدیر', 'درخواست ثبت مشتری برای مدیر ارسال شد.');
+        setShowModal(false);
         return;
       }
       toastSuccess('مشتری', 'ثبت شد.');
@@ -812,41 +833,6 @@ export default function CustomersPage({ embedInHub = false }: { embedInHub?: boo
           </li>
         </ul>
       </details>
-
-      <div
-        className={`${cardBg} p-4 flex flex-col sm:flex-row flex-wrap gap-4 items-start sm:items-center border ${isDark ? 'border-white/10' : 'border-slate-200'}`}
-      >
-        <div className="flex flex-col gap-1 shrink-0">
-          <span className={`${subText} text-xs`}>کد کشور واتساپ</span>
-          <select
-            value={waDialCode}
-            onChange={(e) => setWaDialCode(e.target.value)}
-            className={`${inputClass} max-w-[200px] py-2 text-xs`}
-          >
-            <option value="93">افغانستان (+93)</option>
-            <option value="98">ایران (+98)</option>
-            <option value="92">پاکستان (+92)</option>
-            <option value="966">عربستان (+966)</option>
-            <option value="971">امارات (+971)</option>
-            <option value="">خالی — فقط ارقام ذخیره‌شده</option>
-          </select>
-        </div>
-        <label className="flex items-center gap-2 text-sm cursor-pointer shrink-0">
-          <input type="checkbox" checked={hideArchived} onChange={(e) => setHideArchived(e.target.checked)} className="rounded border-slate-500" />
-          <span className={subText}>پنهان کردن آرشیو</span>
-        </label>
-        <details className={`group w-full sm:flex-1 sm:min-w-[12rem] ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
-          <summary className="cursor-pointer text-xs font-medium list-none flex items-center gap-1 [&::-webkit-details-marker]:hidden">
-            <span className={subText}>توضیح کوتاه نقش این صفحه</span>
-            <ChevronDown size={14} className="opacity-60 group-open:rotate-180 transition-transform" />
-          </summary>
-          <p className={`text-xs ${subText} mt-2 leading-relaxed max-w-2xl`}>
-            {embedInHub
-              ? 'پرونده، یادآوری، واتساپ/ایمیل و آرشیو اینجاست؛ معاملات، وظایف و RFM در تب‌های بالا.'
-              : 'پرونده و یادآوری محلی و تماس از دستگاه؛ Pipeline کامل سرور اینجا نیست. بکاپ در تب بکاپ.'}
-          </p>
-        </details>
-      </div>
 
       <div className={`${cardBg} p-4 space-y-3 border ${isDark ? 'border-white/10' : 'border-slate-200'}`}>
         <div className="relative flex items-center">
@@ -1270,7 +1256,6 @@ export default function CustomersPage({ embedInHub = false }: { embedInHub?: boo
       {msgCustomer && (
         <SendMessageModal
           customer={msgCustomer}
-          dialCode={waDialCode}
           formatPrice={formatPrice}
           onClose={() => setMsgCustomer(null)}
         />

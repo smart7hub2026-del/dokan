@@ -7,6 +7,7 @@ import { useStore, type WarehouseBin } from '../store/useStore';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
 import { BrowserMultiFormatReader } from '@zxing/library';
 import FormModal from './ui/FormModal';
+import { useToast } from './Toast';
 import { compressImageToDataUrl } from '../utils/compressImage';
 import { useNavigate } from 'react-router-dom';
 
@@ -238,11 +239,13 @@ export default function ProductsPage() {
     return `${converted} (${original})`;
   };
 
+  const { success: toastSuccess } = useToast();
   const [form, setForm] = useState({
     product_code: '', barcode: '', name: '', category_id: 1,
     purchase_price: '' as NumField, sale_price: '' as NumField, stock_shop: '' as NumField,
     min_stock: '' as NumField, has_expiry: false, has_serial: false,
     expiry_date: '', batch_number: '', image_url: '',
+    purchase_price_currency: 'AFN' as CurrencyCode,
     currency_code: 'AFN' as CurrencyCode,
     unit: 'عدد',
     karat: '' as NumField,
@@ -367,6 +370,7 @@ export default function ProductsPage() {
       purchase_price: '', sale_price: '', stock_shop: '',
       min_stock: '', has_expiry: false, has_serial: false,
       expiry_date: '', batch_number: '', image_url: '',
+      purchase_price_currency: 'AFN',
       currency_code: 'AFN',
       unit: 'عدد',
       karat: '', weight_grams: '', labor_note: '', note: '',
@@ -385,6 +389,7 @@ export default function ProductsPage() {
       min_stock: p.min_stock,
       has_expiry: p.has_expiry || false, has_serial: p.has_serial || false,
       expiry_date: '', batch_number: '', image_url: p.image_url || '',
+      purchase_price_currency: p.purchase_price_currency ?? p.currency_code ?? 'AFN',
       currency_code: p.currency_code ?? 'AFN',
       unit: (p as any).unit || 'عدد',
       karat: p.karat ?? '',
@@ -417,6 +422,9 @@ export default function ProductsPage() {
     const product_status = editItem
       ? (editItem.product_status ?? (editItem.is_active ? 'active' : 'discontinued'))
       : 'active';
+    const staffNeedsApproval =
+      currentUser &&
+      (currentUser.role === 'seller' || currentUser.role === 'stock_keeper' || currentUser.role === 'accountant');
     const goldFields = isGoldJewelry
       ? {
           karat: form.karat === '' ? undefined : Number(form.karat),
@@ -434,6 +442,7 @@ export default function ProductsPage() {
         category_id: form.category_id,
         category_name: cat?.name || '',
         purchase_price,
+        purchase_price_currency: form.purchase_price_currency,
         sale_price,
         stock_shop,
         stock_warehouse,
@@ -450,6 +459,12 @@ export default function ProductsPage() {
       const id = editItem.id;
       setRowGlowId(id);
       window.setTimeout(() => setRowGlowId((cur) => (cur === id ? null : cur)), 1000);
+      toastSuccess(
+        staffNeedsApproval ? 'تأیید مدیر' : 'ذخیره شد',
+        staffNeedsApproval ? 'درخواست ویرایش برای مدیر ارسال شد.' : 'کالا بروزرسانی شد.'
+      );
+      setCatFilter(form.category_id);
+      setCurrentPage(1);
     } else {
       const np = addProduct({
         product_code: form.product_code,
@@ -458,6 +473,7 @@ export default function ProductsPage() {
         category_id: form.category_id,
         category_name: cat?.name || '',
         purchase_price,
+        purchase_price_currency: form.purchase_price_currency,
         sale_price,
         stock_shop,
         stock_warehouse,
@@ -473,6 +489,13 @@ export default function ProductsPage() {
         updated_by: editorId,
         ...goldFields,
       });
+      if (!np) {
+        toastSuccess('تأیید مدیر', 'درخواست ثبت کالا برای مدیر ارسال شد.');
+        setShowModal(false);
+        return;
+      }
+      setCatFilter(form.category_id);
+      setCurrentPage(1);
       if (form.has_expiry && form.expiry_date) {
         addExpiry({
           product_id: np.id,
@@ -482,6 +505,7 @@ export default function ProductsPage() {
           quantity: stock_shop,
         });
       }
+      toastSuccess('ثبت شد', 'کالا اضافه شد.');
     }
     setShowModal(false);
   };
@@ -773,7 +797,7 @@ export default function ProductsPage() {
                           </td>
                         </>
                       )}
-                      <td className="py-3 px-4 text-amber-400 font-medium font-num tabular-nums">{formatPriceWithOriginal(p.purchase_price, p.currency_code ?? 'AFN')}</td>
+                      <td className="py-3 px-4 text-amber-400 font-medium font-num tabular-nums">{formatPriceWithOriginal(p.purchase_price, p.purchase_price_currency ?? p.currency_code ?? 'AFN')}</td>
                       <td className="py-3 px-4 text-emerald-400 font-medium font-num tabular-nums">{formatPriceWithOriginal(p.sale_price, p.currency_code ?? 'AFN')}</td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1">
@@ -886,7 +910,7 @@ export default function ProductsPage() {
                     <div>
                       <p className={`text-[10px] ${subText}`}>خرید</p>
                       <p className={`text-sm font-medium tabular-nums ${isDark ? 'text-amber-400' : 'text-amber-700'}`}>
-                        {formatPriceWithOriginal(p.purchase_price, p.currency_code ?? 'AFN')}
+                        {formatPriceWithOriginal(p.purchase_price, p.purchase_price_currency ?? p.currency_code ?? 'AFN')}
                       </p>
                     </div>
                     <span className={`text-[11px] px-2 py-1 rounded-full shrink-0 ${p.is_active ? 'badge-green' : 'badge-red'}`}>
@@ -1202,15 +1226,29 @@ export default function ProductsPage() {
 
               {/* Prices & Stock */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2">
-                  <label className="text-slate-400 text-xs mb-1 block">واحد پول قیمت خرید و فروش</label>
+                <div>
+                  <label className="text-slate-400 text-xs mb-1 block">واحد قیمت خرید</label>
+                  <select
+                    value={form.purchase_price_currency}
+                    onChange={(e) => setForm({ ...form, purchase_price_currency: e.target.value as CurrencyCode })}
+                    className={inputClass}
+                  >
+                    {currencies.map((c) => (
+                      <option key={`pc-${c.code}`} value={c.code}>
+                        {c.symbol} — {c.code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-slate-400 text-xs mb-1 block">واحد قیمت فروش</label>
                   <select
                     value={form.currency_code}
                     onChange={(e) => setForm({ ...form, currency_code: e.target.value as CurrencyCode })}
                     className={inputClass}
                   >
                     {currencies.map((c) => (
-                      <option key={c.code} value={c.code}>
+                      <option key={`sc-${c.code}`} value={c.code}>
                         {c.symbol} — {c.code}
                       </option>
                     ))}

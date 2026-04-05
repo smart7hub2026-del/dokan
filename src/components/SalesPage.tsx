@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Search, ShoppingCart, Trash2, X, Check, Package, User, CreditCard, Banknote, Printer, ChevronDown, ChevronUp, Mic, MicOff, Send, ScanLine, ImageIcon } from 'lucide-react';
 import { Invoice, InvoiceItem, Product, type Customer, type CurrencyCode } from '../data/mockData';
 import { useToast } from './Toast';
@@ -7,7 +7,14 @@ import { useStore, type ShopSettings } from '../store/useStore';
 import { apiCreateSaleInvoice } from '../services/api';
 import { useVoiceSearch } from '../hooks/useVoiceSearch';
 import { buildProductImagesPrintSection } from '../utils/invoicePrintProductImages';
+import {
+  buildCustomerInvoiceItemsTableHtml,
+  buildInternalInvoiceItemsTablesHtml,
+  invoicePrintAudienceForCopyIndex,
+  escapeHtmlPrint,
+} from '../utils/invoicePrintLineItems';
 import { bookToProductForSale } from '../utils/bookInventory';
+import { getBinQty } from '../utils/warehouseBins';
 import { decodeBarcodeFromImageFile } from '../utils/barcodeDecode';
 import VisualProductSearchPanel from './VisualProductSearchPanel';
 import FormModal from './ui/FormModal';
@@ -18,6 +25,9 @@ interface CartItem extends InvoiceItem {
   stock_available: number;
   image_url?: string;
   stock_source: 'shop' | 'warehouse';
+  /** برای ردیف گدام در چند انبار؛ دکان خالی */
+  warehouse_bin_id?: number;
+  warehouse_bin_label?: string;
   currency_code?: CurrencyCode;
 }
 
@@ -97,43 +107,36 @@ function printInvoice(inv: Invoice, opts: PrintInvoiceOpts) {
     opts.invoice_copy_mode === 'single'
       ? ['']
       : opts.invoice_copy_mode === 'duplicate'
-        ? ['نسخه مشتری', 'نسخه مغازه']
-        : ['نسخه مشتری', 'نسخه مغازه', 'نسخه حسابداری'];
+        ? ['نسخه مشتری', 'نسخه داخلی — مدیر / کارکنان (مغازه و گدام)']
+        : ['نسخه مشتری', 'نسخه داخلی — مغازه', 'نسخه داخلی — حسابداری'];
 
   const physicalRuns = Math.max(1, Math.min(9, Math.floor(Number(opts.print_copies) || 1)));
 
-  const oneCopyHtml = (copyLabel: string) => `
+  const oneCopyHtml = (copyLabel: string, audience: 'customer' | 'internal') => {
+    const itemsHtml =
+      audience === 'customer'
+        ? buildCustomerInvoiceItemsTableHtml(inv.items, isThermal, escapeHtmlPrint)
+        : buildInternalInvoiceItemsTablesHtml(inv.items, isThermal, escapeHtmlPrint);
+    return `
   <div class="copy-root">
-    ${copyLabel ? `<div class="copy-banner">${copyLabel}</div>` : ''}
+    ${copyLabel ? `<div class="copy-banner">${escapeHtmlPrint(copyLabel)}</div>` : ''}
     <div class="header">
       ${shopInfo.logo ? `<img src="${shopInfo.logo}" class="logo" alt="" />` : ''}
-      <div class="shop-name">${shopInfo.name}</div>
-      <div class="shop-sub">${shopInfo.address}</div>
-      <div class="shop-sub">📞 ${shopInfo.phone}</div>
-      <div class="inv-num">فاکتور شماره: ${inv.invoice_number}</div>
+      <div class="shop-name">${escapeHtmlPrint(shopInfo.name)}</div>
+      <div class="shop-sub">${escapeHtmlPrint(shopInfo.address)}</div>
+      <div class="shop-sub">📞 ${escapeHtmlPrint(shopInfo.phone)}</div>
+      <div class="inv-num">فاکتور شماره: ${escapeHtmlPrint(inv.invoice_number)}</div>
     </div>
     <div class="info-section">
-      <div><span class="info-label">مشتری: </span><span class="info-val">${inv.customer_name}</span></div>
-      <div><span class="info-label">تاریخ: </span><span class="info-val">${inv.invoice_date}</span></div>
-      <div><span class="info-label">موبایل: </span><span class="info-val">${inv.customer_phone || '—'}</span></div>
-      <div><span class="info-label">فروشنده: </span><span class="info-val">${inv.seller_name}</span></div>
+      <div><span class="info-label">مشتری: </span><span class="info-val">${escapeHtmlPrint(inv.customer_name)}</span></div>
+      <div><span class="info-label">تاریخ: </span><span class="info-val">${escapeHtmlPrint(inv.invoice_date)}</span></div>
+      <div><span class="info-label">موبایل: </span><span class="info-val">${escapeHtmlPrint(inv.customer_phone || '—')}</span></div>
+      <div><span class="info-label">فروشنده: </span><span class="info-val">${escapeHtmlPrint(inv.seller_name)}</span></div>
       <div><span class="info-label">پرداخت: </span><span class="info-val">${inv.payment_method === 'cash' ? 'نقدی' : 'نسیه'}</span></div>
-      ${inv.due_date ? `<div><span class="info-label">سررسید: </span><span class="info-val">${inv.due_date}</span></div>` : ''}
+      ${inv.due_date ? `<div><span class="info-label">سررسید: </span><span class="info-val">${escapeHtmlPrint(inv.due_date)}</span></div>` : ''}
     </div>
     <hr class="sep">
-    <table>
-      <thead><tr><th>محصول</th><th>تعداد</th><th>قیمت واحد</th><th>جمع</th></tr></thead>
-      <tbody>${inv.items
-        .map(
-          (item) => `<tr>
-        <td>${item.product_name}</td>
-        <td style="text-align:center">${item.quantity}</td>
-        <td style="text-align:left">${item.unit_price.toLocaleString()} ؋</td>
-        <td style="text-align:left">${item.total_price.toLocaleString()} ؋</td>
-      </tr>`
-        )
-        .join('')}</tbody>
-    </table>
+    ${itemsHtml}
     <hr class="sep">
     <div class="totals">
       <div class="total-row"><span>جمع کالاها:</span><span>${inv.subtotal.toLocaleString()} ؋</span></div>
@@ -142,15 +145,16 @@ function printInvoice(inv: Invoice, opts: PrintInvoiceOpts) {
       ${inv.paid_amount > 0 ? `<div class="total-row" style="color:green"><span>پرداخت شده:</span><span>${inv.paid_amount.toLocaleString()} ؋</span></div>` : ''}
       ${inv.due_amount > 0 ? `<div class="total-row" style="color:red"><span>مانده:</span><span>${inv.due_amount.toLocaleString()} ؋</span></div>` : ''}
     </div>
-    ${inv.notes ? `<div class="footer">یادداشت: ${inv.notes}</div>` : ''}
+    ${inv.notes ? `<div class="footer">یادداشت: ${escapeHtmlPrint(inv.notes)}</div>` : ''}
     ${photosBlock}
-    <div class="footer">🌸 ممنون از خرید شما — ${shopInfo.name} 🌸</div>
+    <div class="footer">🌸 ممنون از خرید شما — ${escapeHtmlPrint(shopInfo.name)} 🌸</div>
   </div>`;
+  };
 
   const blocks: string[] = [];
   for (let r = 0; r < physicalRuns; r += 1) {
-    copyLabels.forEach((label) => {
-      blocks.push(oneCopyHtml(label));
+    copyLabels.forEach((label, idx) => {
+      blocks.push(oneCopyHtml(label, invoicePrintAudienceForCopyIndex(opts.invoice_copy_mode, idx)));
     });
   }
 
@@ -230,7 +234,13 @@ function buildInvoiceShareText(inv: Invoice, mode: 'customer' | 'internal') {
     'اقلام:',
     ...inv.items.map((it) =>
       mode === 'internal'
-        ? `- ${it.product_name} | تعداد ${it.quantity} | ${it.total_price.toLocaleString()} ؋ | منبع: ${it.stock_source === 'warehouse' ? 'گدام' : 'دکان'}`
+        ? `- ${it.product_name} | تعداد ${it.quantity} | ${it.total_price.toLocaleString()} ؋ | منبع: ${
+            it.stock_source === 'warehouse'
+              ? it.warehouse_bin_label
+                ? `گدام (${it.warehouse_bin_label})`
+                : 'گدام'
+              : 'دکان'
+          }`
         : `- ${it.product_name} | تعداد ${it.quantity} | ${it.total_price.toLocaleString()} ؋`
     ),
     '',
@@ -254,6 +264,7 @@ export default function SalesPage() {
   const hydrateFromServer = useStore(s => s.hydrateFromServer);
   const storeUsers = useStore(s => s.users);
   const addNotification = useStore(s => s.addNotification);
+  const storeWarehouses = useStore((s) => s.warehouses);
 
   const [cart, setCart] = useState<CartItem[]>([]);
   const [productSearch, setProductSearch] = useState('');
@@ -281,7 +292,28 @@ export default function SalesPage() {
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   /** خطوطی که قیمت واحدشان دستی تغییر کرده تا با تعویض حالت فروش بازنویسی نشوند */
   const manualUnitPriceKeys = useRef<Set<string>>(new Set());
-  const cartLineKey = (productId: number, source: 'shop' | 'warehouse') => `${productId}:${source}`;
+  const cartLineKey = (productId: number, source: 'shop' | 'warehouse', warehouseBinId?: number) =>
+    source === 'shop' ? `${productId}:shop` : `${productId}:warehouse:${warehouseBinId ?? ''}`;
+
+  const defaultWarehouseBinForProduct = useCallback(
+    (p: Product) => {
+      if (!storeWarehouses.length) {
+        return { id: 1, label: 'گدام', avail: p.stock_warehouse };
+      }
+      if (storeSettings.business_type === 'bookstore') {
+        const w = storeWarehouses[0]!;
+        return { id: w.id, label: w.name, avail: p.stock_warehouse };
+      }
+      if (storeWarehouses.length === 1) {
+        const w = storeWarehouses[0]!;
+        return { id: w.id, label: w.name, avail: getBinQty(p, w.id, storeWarehouses) };
+      }
+      const withStock = storeWarehouses.find((w) => getBinQty(p, w.id, storeWarehouses) > 0);
+      const w = withStock ?? storeWarehouses[0]!;
+      return { id: w.id, label: w.name, avail: getBinQty(p, w.id, storeWarehouses) };
+    },
+    [storeWarehouses, storeSettings.business_type]
+  );
   /** با کلیک روی کارت محصول، ابتدا از دکان یا گدام برداشت شود (در سبد هر ردیف قابل عوض کردن است) */
   const [defaultStockSource, setDefaultStockSource] = useState<'shop' | 'warehouse'>(() => {
     if (typeof window === 'undefined') return 'shop';
@@ -392,18 +424,32 @@ export default function SalesPage() {
   useEffect(() => {
     setCart((prev) =>
       prev.map((line) => {
-        if (manualUnitPriceKeys.current.has(cartLineKey(line.product_id, line.stock_source))) return line;
+        if (
+          manualUnitPriceKeys.current.has(
+            cartLineKey(line.product_id, line.stock_source, line.warehouse_bin_id)
+          )
+        )
+          return line;
         const p = salesCatalogProducts.find((x) => x.id === line.product_id);
         if (!p) return line;
         const nextUnit = calcUnitPriceForProduct(p);
+        let stock_available = line.stock_available;
+        if (line.stock_source === 'shop') {
+          stock_available = p.stock_shop;
+        } else if (storeSettings.business_type !== 'bookstore' && line.warehouse_bin_id != null) {
+          stock_available = getBinQty(p, line.warehouse_bin_id, storeWarehouses);
+        } else {
+          stock_available = p.stock_warehouse;
+        }
         return {
           ...line,
           unit_price: nextUnit,
           total_price: nextUnit * line.quantity,
+          stock_available,
         };
       })
     );
-  }, [saleMode, salesCatalogProducts, wholesaleMarkupPercent]);
+  }, [saleMode, salesCatalogProducts, wholesaleMarkupPercent, storeSettings.business_type, storeWarehouses]);
 
   const addToCart = (product: Product) => {
     let source: 'shop' | 'warehouse';
@@ -422,103 +468,266 @@ export default function SalesPage() {
         return;
       }
     }
-    const avail = source === 'shop' ? product.stock_shop : product.stock_warehouse;
-    if (avail <= 0) { warning('اتمام موجودی', `${product.name} در دکان و گدام موجود نیست`); return; }
-    const existing = cart.find(i => i.product_id === product.id && i.stock_source === source);
-    if (existing) {
-      if (existing.quantity >= existing.stock_available) { warning('موجودی ناکافی', `حداکثر ${existing.stock_available} عدد از این محل`); return; }
-      setCart(cart.map(i =>
-        i.product_id === product.id && i.stock_source === source
-          ? {
-              ...i,
-              quantity: i.quantity + 1,
-              total_price: (i.quantity + 1) * i.unit_price,
-              image_url: i.image_url || product.image_url,
-              currency_code: i.currency_code ?? product.currency_code,
-            }
-          : i
-      ));
+    let avail: number;
+    let warehouse_bin_id: number | undefined;
+    let warehouse_bin_label: string | undefined;
+    if (source === 'shop') {
+      avail = product.stock_shop;
     } else {
-      setCart([...cart, {
-        id: Date.now(),
-        product_id: product.id,
-        product_name: product.name,
-        quantity: 1,
-        unit_price: calcUnitPriceForProduct(product),
-        total_price: calcUnitPriceForProduct(product),
-        stock_available: avail,
-        stock_source: source,
-        image_url: product.image_url,
-        currency_code: product.currency_code,
-      }]);
+      const wb = defaultWarehouseBinForProduct(product);
+      warehouse_bin_id = wb.id;
+      warehouse_bin_label = wb.label;
+      avail = wb.avail;
+    }
+    if (avail <= 0) {
+      warning('اتمام موجودی', `${product.name} در دکان و گدام موجود نیست`);
+      return;
+    }
+    const existing = cart.find(
+      (i) =>
+        i.product_id === product.id &&
+        i.stock_source === source &&
+        (source === 'shop' || i.warehouse_bin_id === warehouse_bin_id)
+    );
+    if (existing) {
+      if (existing.quantity >= existing.stock_available) {
+        warning('موجودی ناکافی', `حداکثر ${existing.stock_available} عدد از این محل`);
+        return;
+      }
+      setCart(
+        cart.map((i) =>
+          i.product_id === product.id &&
+          i.stock_source === source &&
+          (source === 'shop' || i.warehouse_bin_id === warehouse_bin_id)
+            ? {
+                ...i,
+                quantity: i.quantity + 1,
+                total_price: (i.quantity + 1) * i.unit_price,
+                image_url: i.image_url || product.image_url,
+                currency_code: i.currency_code ?? product.currency_code,
+              }
+            : i
+        )
+      );
+    } else {
+      setCart([
+        ...cart,
+        {
+          id: Date.now(),
+          product_id: product.id,
+          product_name: product.name,
+          quantity: 1,
+          unit_price: calcUnitPriceForProduct(product),
+          total_price: calcUnitPriceForProduct(product),
+          stock_available: avail,
+          stock_source: source,
+          warehouse_bin_id,
+          warehouse_bin_label,
+          image_url: product.image_url,
+          currency_code: product.currency_code,
+        },
+      ]);
     }
   };
 
-  const setCartLineSource = (productId: number, fromSource: 'shop' | 'warehouse', toSource: 'shop' | 'warehouse') => {
+  const setCartLineSource = (
+    productId: number,
+    fromSource: 'shop' | 'warehouse',
+    toSource: 'shop' | 'warehouse',
+    fromWarehouseBinId?: number
+  ) => {
     if (fromSource === toSource) return;
-    const p = storeProducts.find(x => x.id === productId);
+    const p = storeProducts.find((x) => x.id === productId);
     if (!p) return;
-    const toAvail = toSource === 'shop' ? p.stock_shop : p.stock_warehouse;
+    const line = cart.find(
+      (i) =>
+        i.product_id === productId &&
+        i.stock_source === fromSource &&
+        (fromSource === 'shop' || i.warehouse_bin_id === fromWarehouseBinId)
+    );
+    if (!line) return;
+    const qty = line.quantity;
+    let toAvail: number;
+    let toBinId: number | undefined;
+    let toBinLabel: string | undefined;
+    if (toSource === 'shop') {
+      toAvail = p.stock_shop;
+    } else {
+      const wb = defaultWarehouseBinForProduct(p);
+      toAvail = wb.avail;
+      toBinId = wb.id;
+      toBinLabel = wb.label;
+    }
     if (toAvail <= 0) {
       warning('موجودی', toSource === 'shop' ? 'در دکان موجودی نیست' : 'در گدام موجودی نیست');
       return;
     }
-    const line = cart.find(i => i.product_id === productId && i.stock_source === fromSource);
-    if (!line) return;
-    const qty = line.quantity;
-    const clash = cart.find(i => i.product_id === productId && i.stock_source === toSource);
+    const clash = cart.find(
+      (i) =>
+        i.product_id === productId &&
+        i.stock_source === toSource &&
+        (toSource === 'shop' || i.warehouse_bin_id === toBinId)
+    );
     if (clash) {
       const mergedQty = clash.quantity + qty;
-      if (mergedQty > toAvail) { warning('موجودی ناکافی', `حداکثر ${toAvail} عدد از ${toSource === 'shop' ? 'دکان' : 'گدام'}`); return; }
+      if (mergedQty > toAvail) {
+        warning('موجودی ناکافی', `حداکثر ${toAvail} عدد از ${toSource === 'shop' ? 'دکان' : 'گدام'}`);
+        return;
+      }
       setCart(
         cart
-          .filter(i => !(i.product_id === productId && i.stock_source === fromSource))
-          .map(i =>
-            i.product_id === productId && i.stock_source === toSource
+          .filter(
+            (i) =>
+              !(
+                i.product_id === productId &&
+                i.stock_source === fromSource &&
+                (fromSource === 'shop' || i.warehouse_bin_id === fromWarehouseBinId)
+              )
+          )
+          .map((i) =>
+            i.product_id === productId &&
+            i.stock_source === toSource &&
+            (toSource === 'shop' || i.warehouse_bin_id === toBinId)
               ? { ...i, quantity: mergedQty, total_price: mergedQty * i.unit_price, stock_available: toAvail }
               : i
           )
       );
       return;
     }
-    if (qty > toAvail) { warning('موجودی ناکافی', `حداکثر ${toAvail} عدد`); return; }
+    if (qty > toAvail) {
+      warning('موجودی ناکافی', `حداکثر ${toAvail} عدد`);
+      return;
+    }
     setCart(
-      cart.map(i =>
-        i.product_id === productId && i.stock_source === fromSource
-          ? { ...i, stock_source: toSource, stock_available: toAvail }
+      cart.map((i) =>
+        i.product_id === productId &&
+        i.stock_source === fromSource &&
+        (fromSource === 'shop' || i.warehouse_bin_id === fromWarehouseBinId)
+          ? {
+              ...i,
+              stock_source: toSource,
+              stock_available: toAvail,
+              warehouse_bin_id: toSource === 'warehouse' ? toBinId : undefined,
+              warehouse_bin_label: toSource === 'warehouse' ? toBinLabel : undefined,
+            }
           : i
       )
     );
   };
 
-  const setLineUnitPrice = (productId: number, source: 'shop' | 'warehouse', raw: number) => {
+  const setCartLineWarehouseBin = (productId: number, fromBinId: number, toBinId: number) => {
+    if (fromBinId === toBinId) return;
+    if (storeSettings.business_type === 'bookstore') return;
+    const p = storeProducts.find((x) => x.id === productId);
+    if (!p) return;
+    const newAvail = getBinQty(p, toBinId, storeWarehouses);
+    const wh = storeWarehouses.find((w) => w.id === toBinId);
+    const line = cart.find(
+      (i) => i.product_id === productId && i.stock_source === 'warehouse' && i.warehouse_bin_id === fromBinId
+    );
+    if (!line) return;
+    if (line.quantity > newAvail) {
+      warning('موجودی ناکافی', `حداکثر ${newAvail} عدد در «${wh?.name || 'انبار'}»`);
+      return;
+    }
+    const clash = cart.find(
+      (i) =>
+        i.product_id === productId &&
+        i.stock_source === 'warehouse' &&
+        i.warehouse_bin_id === toBinId &&
+        i.id !== line.id
+    );
+    if (clash) {
+      const mergedQty = clash.quantity + line.quantity;
+      if (mergedQty > newAvail) {
+        warning('موجودی ناکافی', `حداکثر ${newAvail} عدد`);
+        return;
+      }
+      setCart(
+        cart
+          .filter((i) => i.id !== line.id)
+          .map((i) =>
+            i.product_id === productId && i.stock_source === 'warehouse' && i.warehouse_bin_id === toBinId
+              ? { ...i, quantity: mergedQty, total_price: mergedQty * i.unit_price, stock_available: newAvail }
+              : i
+          )
+      );
+      return;
+    }
+    setCart(
+      cart.map((i) =>
+        i.product_id === productId && i.stock_source === 'warehouse' && i.warehouse_bin_id === fromBinId
+          ? {
+              ...i,
+              warehouse_bin_id: toBinId,
+              warehouse_bin_label: wh?.name,
+              stock_available: newAvail,
+            }
+          : i
+      )
+    );
+  };
+
+  const setLineUnitPrice = (productId: number, source: 'shop' | 'warehouse', raw: number, warehouseBinId?: number) => {
     const unit = Math.max(0, Math.round(Number(raw) || 0));
-    manualUnitPriceKeys.current.add(cartLineKey(productId, source));
+    manualUnitPriceKeys.current.add(cartLineKey(productId, source, warehouseBinId));
     setCart((prev) =>
       prev.map((i) =>
-        i.product_id === productId && i.stock_source === source
+        i.product_id === productId &&
+        i.stock_source === source &&
+        (source === 'shop' || i.warehouse_bin_id === warehouseBinId)
           ? { ...i, unit_price: unit, total_price: unit * i.quantity }
           : i
       )
     );
   };
 
-  const updateQty = (productId: number, source: 'shop' | 'warehouse', qty: number) => {
+  const updateQty = (productId: number, source: 'shop' | 'warehouse', qty: number, warehouseBinId?: number) => {
     if (qty <= 0) {
-      setCart(cart.filter(i => !(i.product_id === productId && i.stock_source === source)));
+      setCart(
+        cart.filter(
+          (i) =>
+            !(
+              i.product_id === productId &&
+              i.stock_source === source &&
+              (source === 'shop' || i.warehouse_bin_id === warehouseBinId)
+            )
+        )
+      );
       return;
     }
-    const item = cart.find(i => i.product_id === productId && i.stock_source === source);
-    if (item && qty > item.stock_available) { warning('موجودی ناکافی', `حداکثر ${item.stock_available} عدد`); return; }
+    const item = cart.find(
+      (i) =>
+        i.product_id === productId &&
+        i.stock_source === source &&
+        (source === 'shop' || i.warehouse_bin_id === warehouseBinId)
+    );
+    if (item && qty > item.stock_available) {
+      warning('موجودی ناکافی', `حداکثر ${item.stock_available} عدد`);
+      return;
+    }
     setCart(
-      cart.map(i =>
-        i.product_id === productId && i.stock_source === source ? { ...i, quantity: qty, total_price: qty * i.unit_price } : i
+      cart.map((i) =>
+        i.product_id === productId &&
+        i.stock_source === source &&
+        (source === 'shop' || i.warehouse_bin_id === warehouseBinId)
+          ? { ...i, quantity: qty, total_price: qty * i.unit_price }
+          : i
       )
     );
   };
 
-  const removeFromCart = (productId: number, source: 'shop' | 'warehouse') =>
-    setCart(cart.filter(i => !(i.product_id === productId && i.stock_source === source)));
+  const removeFromCart = (productId: number, source: 'shop' | 'warehouse', warehouseBinId?: number) =>
+    setCart(
+      cart.filter(
+        (i) =>
+          !(
+            i.product_id === productId &&
+            i.stock_source === source &&
+            (source === 'shop' || i.warehouse_bin_id === warehouseBinId)
+          )
+      )
+    );
 
   const subtotal = cart.reduce((s, i) => s + i.total_price, 0);
   const total = Math.max(0, subtotal - discount);
@@ -609,6 +818,9 @@ export default function SalesPage() {
         total_price: c.total_price,
         image_url: c.image_url,
         stock_source: c.stock_source,
+        ...(c.stock_source === 'warehouse' && c.warehouse_bin_id != null
+          ? { warehouse_bin_id: c.warehouse_bin_id, warehouse_bin_label: c.warehouse_bin_label }
+          : {}),
       })),
       tenant_id: storeCurrentUser?.tenant_id ?? 1,
       currency: 'AFN',
@@ -793,36 +1005,6 @@ export default function SalesPage() {
                 </button>
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-2 border-t border-white/10 pt-3">
-              <span className="text-[11px] font-bold text-slate-400 shrink-0">منبع پیش‌فرض با کلیک روی کالا:</span>
-              <div className="inline-flex rounded-lg border border-slate-600 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => persistDefaultStockSource('shop')}
-                  className={`px-2.5 py-1 text-[10px] font-bold transition-colors ${
-                    defaultStockSource === 'shop'
-                      ? 'bg-emerald-600 text-white'
-                      : 'bg-slate-800/80 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  دکان (ویترین)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => persistDefaultStockSource('warehouse')}
-                  className={`px-2.5 py-1 text-[10px] font-bold transition-colors ${
-                    defaultStockSource === 'warehouse'
-                      ? 'bg-sky-600 text-white'
-                      : 'bg-slate-800/80 text-slate-400 hover:text-white'
-                  }`}
-                >
-                  گدام (فروش مستقیم انبار)
-                </button>
-              </div>
-              <span className="text-[10px] text-slate-500 leading-snug max-w-[220px]">
-                اگر در منبع انتخاب‌شده موجودی نباشد، از منبع دیگر پر می‌شود. در سبد هر ردیف را جدا می‌توانید بین دکان و گدام عوض کنید.
-              </span>
-            </div>
           </div>
           {showVisualSearch && (
             <div className="glass rounded-2xl p-4 border border-violet-500/20">
@@ -963,8 +1145,13 @@ export default function SalesPage() {
                   const prod = storeProducts.find(x => x.id === item.product_id);
                   const canShop = (prod?.stock_shop ?? 0) > 0;
                   const canWh = (prod?.stock_warehouse ?? 0) > 0;
+                  const showBinSelect =
+                    item.stock_source === 'warehouse' &&
+                    storeSettings.business_type !== 'bookstore' &&
+                    storeWarehouses.length > 1 &&
+                    prod != null;
                   return (
-                  <div key={`${item.product_id}-${item.stock_source}`} className="flex flex-wrap items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2.5 card-hover">
+                  <div key={`${item.product_id}-${item.stock_source}-${item.warehouse_bin_id ?? 'shop'}`} className="flex flex-wrap items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-2.5 card-hover">
                     {storeSettings.show_product_image_on_sales && item.image_url ? (
                       <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-emerald-500/30 bg-slate-900/50">
                         <img src={item.image_url} alt="" className="h-full w-full object-cover" />
@@ -978,16 +1165,52 @@ export default function SalesPage() {
                           type="number"
                           min={0}
                           value={item.unit_price || ''}
-                          onChange={(e) => setLineUnitPrice(item.product_id, item.stock_source, +e.target.value)}
+                          onChange={(e) =>
+                            setLineUnitPrice(
+                              item.product_id,
+                              item.stock_source,
+                              +e.target.value,
+                              item.warehouse_bin_id
+                            )
+                          }
                           className="min-w-0 flex-1 rounded-md border border-emerald-500/25 bg-slate-950/50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-200 outline-none focus:border-emerald-400"
                         />
                       </label>
+                      {showBinSelect && item.warehouse_bin_id != null && (
+                        <label className="mt-1 flex flex-col gap-0.5 text-[10px] text-slate-400">
+                          <span>انبار (گدام)</span>
+                          <select
+                            value={item.warehouse_bin_id}
+                            onChange={(e) =>
+                              setCartLineWarehouseBin(
+                                item.product_id,
+                                item.warehouse_bin_id!,
+                                +e.target.value
+                              )
+                            }
+                            className="rounded-md border border-sky-500/30 bg-slate-950/60 px-1.5 py-1 text-[11px] font-bold text-sky-100 outline-none"
+                          >
+                            {storeWarehouses.map((w) => (
+                              <option key={w.id} value={w.id}>
+                                {w.name} ({getBinQty(prod!, w.id, storeWarehouses)})
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                       {(canShop || canWh) && (
                         <div className="mt-1 flex gap-1">
                           <button
                             type="button"
                             disabled={!canShop}
-                            onClick={() => setCartLineSource(item.product_id, item.stock_source, 'shop')}
+                            onClick={() =>
+                              setCartLineSource(
+                                item.product_id,
+                                item.stock_source,
+                                'shop',
+                                item.warehouse_bin_id
+                              )
+                            }
                             className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold border ${item.stock_source === 'shop' ? 'border-emerald-400 bg-emerald-500/30 text-white' : 'border-white/10 text-slate-400 hover:text-white'} disabled:opacity-40`}
                           >
                             دکان
@@ -995,7 +1218,14 @@ export default function SalesPage() {
                           <button
                             type="button"
                             disabled={!canWh}
-                            onClick={() => setCartLineSource(item.product_id, item.stock_source, 'warehouse')}
+                            onClick={() =>
+                              setCartLineSource(
+                                item.product_id,
+                                item.stock_source,
+                                'warehouse',
+                                item.warehouse_bin_id
+                              )
+                            }
                             className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold border ${item.stock_source === 'warehouse' ? 'border-sky-400 bg-sky-500/25 text-sky-100' : 'border-white/10 text-slate-400 hover:text-white'} disabled:opacity-40`}
                           >
                             گدام
@@ -1004,14 +1234,14 @@ export default function SalesPage() {
                       )}
                     </div>
                     <div className="flex items-center gap-1 bg-slate-900/40 rounded-lg p-1">
-                      <button type="button" onClick={() => updateQty(item.product_id, item.stock_source, item.quantity - 1)} className="w-6 h-6 rounded-md bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 flex items-center justify-center transition-colors"><ChevronDown size={12} /></button>
+                      <button type="button" onClick={() => updateQty(item.product_id, item.stock_source, item.quantity - 1, item.warehouse_bin_id)} className="w-6 h-6 rounded-md bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 flex items-center justify-center transition-colors"><ChevronDown size={12} /></button>
                       <input type="number" value={item.quantity} min="1" max={item.stock_available}
-                        onChange={e => updateQty(item.product_id, item.stock_source, +e.target.value)}
+                        onChange={e => updateQty(item.product_id, item.stock_source, +e.target.value, item.warehouse_bin_id)}
                         className="w-8 text-center bg-transparent text-emerald-400 text-xs font-bold outline-none" />
-                      <button type="button" onClick={() => updateQty(item.product_id, item.stock_source, item.quantity + 1)} className="w-6 h-6 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 flex items-center justify-center transition-colors"><ChevronUp size={12} /></button>
+                      <button type="button" onClick={() => updateQty(item.product_id, item.stock_source, item.quantity + 1, item.warehouse_bin_id)} className="w-6 h-6 rounded-md bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 flex items-center justify-center transition-colors"><ChevronUp size={12} /></button>
                     </div>
                     <p className="text-emerald-400 text-xs font-bold w-20 text-left">{formatPrice(item.total_price, item.currency_code ?? 'AFN')}</p>
-                    <button type="button" onClick={() => removeFromCart(item.product_id, item.stock_source)} className="text-rose-400/60 hover:text-rose-400 transition-colors"><Trash2 size={12} /></button>
+                    <button type="button" onClick={() => removeFromCart(item.product_id, item.stock_source, item.warehouse_bin_id)} className="text-rose-400/60 hover:text-rose-400 transition-colors"><Trash2 size={12} /></button>
                   </div>
                 );})}
               </div>
@@ -1279,6 +1509,9 @@ export default function SalesPage() {
                     </button>
                   ))}
                 </div>
+                <p className="text-slate-500 text-[10px] mt-2 leading-relaxed">
+                  دو/سه نسخه: صفحهٔ اول برای مشتری (ستون محل فروش)؛ بقیه برای مدیر/کارکنان با جداول جدا مغازه و گدام.
+                </p>
               </div>
               <div>
                 <label className="text-slate-400 text-xs mb-1 block font-bold">تکرار کل چاپ (۱–۹)</label>
